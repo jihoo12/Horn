@@ -6,6 +6,16 @@ Build `cargo build --release --locked --offline --example benchmark`, then run:
 target/release/examples/benchmark THEORY GOALS PROOF 5 > results.csv
 ```
 
+The harness works with any suitable theory, goals, and certificate. For a small
+self-contained smoke test using only this repository:
+
+```sh
+target/release/examples/benchmark examples/nat.horn examples/nat.goals examples/nat.proof 5
+```
+
+This tiny fixture verifies the harness; it is not representative of large-proof
+performance and does not reproduce the cubical results below.
+
 Every row is a fresh child process that checks the requested goals. A failed
 check fails the benchmark. Ordinary and 4 MiB streamed modes alternate order
 between repetitions. The timer includes input reads, theory parsing, checking,
@@ -15,7 +25,13 @@ KiB. On other platforms the RSS field is empty. Samples include filesystem
 cache effects; no attempt is made to flush system caches. Run competing builds
 sequentially on the same idle machine and report medians and raw samples.
 
-For representative application inputs from a kamo3 checkout:
+The recorded application workloads come from **kamo3, a private research
+repository**. Its theory, goals, and certificate snapshots are not distributed
+with Horn. External readers can inspect the raw results and input digests, but
+cannot independently reproduce those exact measurements from this repository
+alone. The digests identify the measured inputs; they do not supply them.
+
+The following script is optional and requires an authorized kamo3 checkout:
 
 ```sh
 bash scripts/benchmark-kamo3.sh /path/to/kamo3 /tmp/horn-results 5

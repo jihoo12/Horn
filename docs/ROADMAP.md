@@ -44,7 +44,7 @@ obligation; retaining a small source checker alone does not discharge it.
 
 ## Application integration
 
-Completed: kamo3 now pins Horn commit `212a641` and re-exports its API instead
+Completed: the private kamo3 consumer pins Horn commit `212a641` and re-exports its API instead
 of maintaining an embedded checker (kamo3 commit `ca123f6`). The migration
 passed 109 application tests, both checkers on 19 stored ordinary certificates,
 and the Nix build that regenerates and snapshot-compares all 19 certificates
@@ -54,4 +54,7 @@ Keep cubical rules and producers outside this repository. Check compatibility
 deliberately before upgrading consumer pins, including large proofs when the
 change warrants it. The repeatable benchmark harness is now implemented;
 additional generic stress fixtures and workload coverage remain useful before
-setting broad performance targets. General proof search is outside the checker.
+setting broad performance targets. A self-contained representative workload
+generator would let external readers reproduce performance studies without
+access to the private application inputs. General proof search is outside the
+checker.

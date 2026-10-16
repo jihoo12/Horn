@@ -1,5 +1,12 @@
 # Extraction validation — 2026-10-16
 
+Horn's standalone tests and examples are included in this repository. The
+application checks reported below were performed by the maintainer using the
+private kamo3 checkout. Those inputs and downstream source are not included
+here, so external readers cannot reproduce the application-specific checks
+from Horn alone. These results supplement the standalone tests; they are not
+prerequisites for building or testing Horn.
+
 Validated locally on x86_64 Linux with rustc 1.95.0. The implementation baseline
 is kamo3 commit `6a226630910b34ac89dc77f08a22fe956340aecf`.
 
@@ -11,7 +18,7 @@ is kamo3 commit `6a226630910b34ac89dc77f08a22fe956340aecf`.
 - `cargo test --release --locked --offline`: the same 12 tests passed.
 - Both documented natural-number CLI commands: accepted the fixed goal.
 - `bash -n scripts/check-kamo3.sh`: passed.
-- `bash scripts/check-kamo3.sh /home/jihoo/kamo3`: all 19 ordinary deep
+- `bash scripts/check-kamo3.sh /path/to/kamo3`: all 19 ordinary deep
   snapshots accepted by each checker, 77 fixed goals per checker.
 
 The compatibility run used the original theory fragments and stored snapshots;

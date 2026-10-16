@@ -63,8 +63,12 @@ cargo test --locked --offline
 cargo test --release --locked --offline
 ```
 
-To check the original cubical certificate snapshots without importing their
-theory or producers into this repository:
+All commands above run using this repository alone; no kamo3 checkout or
+credentials are required.
+
+Optional application compatibility checks require access to **kamo3, a private
+research repository**. If you already have an authorized checkout, you can
+check its original cubical snapshots without importing its theory or producers:
 
 ```sh
 bash scripts/check-kamo3.sh /path/to/kamo3
@@ -74,21 +78,24 @@ This runs both checkers on all 19 ordinary deep snapshots (77 goals per
 checker). It requires `gzip`; large proofs identified only by hashes are not
 regenerated. Their generation remains an application responsibility.
 
-See [BENCHMARKS.md](docs/BENCHMARKS.md) for repeatable release-mode measurements
-of checking time and peak memory, separate from certificate generation.
+See [BENCHMARKS.md](docs/BENCHMARKS.md) for the standalone measurement tool and
+recorded application results. The recorded cubical workloads are private, so
+those measurements cannot currently be independently reproduced from Horn alone.
 
 ## Origin and direction
 
-Extracted from [kamo3](https://github.com/jihoo12/kamo3) at commit
+Extracted from the private [kamo3](https://github.com/jihoo12/kamo3) repository at commit
 `6a226630910b34ac89dc77f08a22fe956340aecf`. The extraction preserved the core
 files byte-for-byte; subsequent parser optimization is covered by differential
 tests against that baseline. Cubical rules, certificate producers,
-Agda references, and mathematical research remain in kamo3.
+Agda references, and mathematical research remain in kamo3. Upstream links are
+provenance references for authorized readers; access is not required to use or
+review Horn's implementation, input format, trust contract, or standalone tests.
 
 [PROVENANCE.md](docs/PROVENANCE.md) records the extraction boundary.
 [VALIDATION.md](docs/VALIDATION.md) records the checks performed at extraction.
 [ROADMAP.md](docs/ROADMAP.md) describes formal verification and performance
-work. This initial extraction deliberately preserves the existing algorithm
-and file formats so future optimizations have a stable comparison point.
+work. The initial extraction preserved the algorithm and file formats as a
+comparison baseline for subsequent optimizations.
 
 Licensed under [Apache-2.0](LICENSE).
