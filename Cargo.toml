@@ -1,0 +1,11 @@
+[package]
+name = "horn"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "A small generic checker for many-sorted ground Horn derivation certificates"
+license = "Apache-2.0"
+repository = "https://github.com/jihoo12/Horn"
+publish = false
+
+[dependencies]
