@@ -38,3 +38,11 @@ remain outside this measurement.
 
 Both optimized checkers also accepted all 19 original ordinary deep snapshots,
 77 fixed goals per checker, using `scripts/check-kamo3.sh`.
+
+Downstream integration in kamo3 commit `ca123f6` pins `212a641`, removes the
+embedded implementation, and preserves the existing API through re-exports.
+All 109 application tests and all-target clippy passed. Its Nix deep-certificate
+check also passed: release tests, regeneration of all 19 ordinary certificates,
+snapshot comparison, and acceptance of all 77 fixed goals. Nix fetches the exact
+lockfile Git revision using the authenticated user environment before sandboxed
+builds, so private-repository credentials are not needed inside the builders.
