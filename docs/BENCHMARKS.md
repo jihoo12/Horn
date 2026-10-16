@@ -31,3 +31,42 @@ The benchmark executable can also be copied unchanged to another Horn revision
 and compiled there. This keeps the measurement procedure identical for before
 and after comparisons. This harness is development tooling, outside the trusted
 checker.
+
+## Borrowed-token parser — 2026-10-16
+
+Compared baseline `903fe27` with parser change `212a641`, using the same
+benchmark executable source and five repetitions per mode/input on the same
+x86_64 Linux machine (rustc 1.95.0). Baseline runs completed before optimized
+runs; other builds and checking workloads were kept out of the timing window.
+Report the median elapsed time and median process peak RSS separately:
+
+| Input | Mode | Time before → after | Peak RSS before → after |
+| --- | --- | --- | --- |
+| ua-beta (26,107,428 bytes) | Ordinary | 3.085 → 2.102 s | 1,713 → 879 MiB |
+| ua-beta | Streamed | 5.849 → 4.794 s | 460 → 294 MiB |
+| compute (39,657,410 bytes) | Ordinary | 4.639 → 3.689 s | 2,488 → 1,276 MiB |
+| compute | Streamed | 7.825 → 6.700 s | 449 → 266 MiB |
+
+Ordinary elapsed time fell 20–32% and peak RSS about 49%. Streamed elapsed
+time fell 14–18% and peak RSS 36–41%. These are measured changes for these
+inputs, not a general speed guarantee or a claim about certificate production.
+The approximately 762 MB and 4 GB application proofs were not benchmarked.
+
+The parser now lexes borrowed input slices on demand instead of allocating an
+intermediate vector of owned token strings. It still returns the same owned
+syntax tree. Rule matching, sorting, goal checks, and replay are unchanged.
+Tests compare exact parsed trees and error strings against the extraction
+parser for 66,430 short inputs and additional Unicode/comment/depth cases.
+The old parser is retained only as a test reference.
+
+Raw CSVs and environment records are in
+[benchmarks/parser-2026-10-16](benchmarks/parser-2026-10-16).
+Input hashes (the theory is the concatenation prepared by the script):
+
+```text
+da7a1011db76ba7f6ae444f822692352a8747c2b0ac9b6e946eb154282b377ce  deep.horn
+825a8c976e8e3fa722447991e12e851bf78e49036c7b4cdc27a34d27d8b550b6  ua-beta.goals
+c78ece1b597ee42ca850e0d588e0a8a220395354a0ec319222f262705bc56416  ua-beta.proof
+7179737066b9618735504efe7a441e104ff220d1de8453010369aab5a635cbe2  compute.goals
+47f1d213eec69fd6cc73a69bfe842346cc3a7082bad7d507535f92decd4851fa  compute.proof
+```

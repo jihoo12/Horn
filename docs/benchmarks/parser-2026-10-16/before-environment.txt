@@ -1,0 +1,3 @@
+rustc 1.95.0 (59807616e 2026-04-14) (built from a source tarball)
+Linux x86_64
+903fe279b711fe2794d6ee909785aa58751e6614

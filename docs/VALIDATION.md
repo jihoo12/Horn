@@ -22,3 +22,19 @@ not run. Minimum-version Rust 1.88 and hosted CI were not tested locally.
 
 These checks establish an extraction baseline; they do not constitute formal
 verification or demonstrate an optimization speedup.
+
+## Parser optimization
+
+The borrowed-token parser at `212a641` passed formatting, all-target clippy
+with warnings denied, and all 14 integration tests in debug and release.
+Two new parser tests compare exact trees and errors with the extraction parser
+for 66,430 exhaustive short inputs and additional comment, Unicode, line-ending,
+and depth-boundary cases. The reference parser exists only under `tests/support`.
+
+Five end-to-end samples per input and mode were collected for both the baseline
+and optimized parser. See [BENCHMARKS.md](BENCHMARKS.md) for the procedure,
+results, input digests, and raw samples. The larger application proofs and Agda
+remain outside this measurement.
+
+Both optimized checkers also accepted all 19 original ordinary deep snapshots,
+77 fixed goals per checker, using `scripts/check-kamo3.sh`.

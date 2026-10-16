@@ -25,11 +25,10 @@ The source project contains a Cubical Agda attribution notice. No Agda code,
 Cubical library code, cubical theory fragments, or cubical certificate producers
 are included in this extraction.
 
-The kamo3 repository remains an application/research repository. Its existing
-embedded checker is not changed by this extraction. A future migration should
-pin a reviewed Horn commit and run certificate compatibility checks before
-removing the embedded copy. Until then, do not assume kamo3 automatically uses
-new Horn changes.
+The kamo3 repository remains an application/research repository. The initial
+extraction did not change its embedded checker. Downstream migrations must pin
+a reviewed Horn commit and run certificate compatibility checks before removing
+embedded copies; new Horn commits do not automatically update pinned consumers.
 
 Upstream research context:
 
