@@ -74,6 +74,9 @@ This runs both checkers on all 19 ordinary deep snapshots (77 goals per
 checker). It requires `gzip`; large proofs identified only by hashes are not
 regenerated. Their generation remains an application responsibility.
 
+See [BENCHMARKS.md](docs/BENCHMARKS.md) for repeatable release-mode measurements
+of checking time and peak memory, separate from certificate generation.
+
 ## Origin and direction
 
 Extracted from [kamo3](https://github.com/jihoo12/kamo3) at commit
