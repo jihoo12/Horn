@@ -6,13 +6,14 @@ Commit: `6a226630910b34ac89dc77f08a22fe956340aecf`
 
 Date of extraction: 2026-10-16.
 
-Copied byte-for-byte: `src/kernel.rs`, `src/sexp.rs`, `src/replay.rs`,
+At the extraction commit `dfdbde5`, copied byte-for-byte:
+`src/kernel.rs`, `src/sexp.rs`, `src/replay.rs`,
 and `src/lib.rs`. The two CLI files and `tests/replay.rs` were copied with
 the crate name and scratch-file prefix changed from `kamo3` to `horn`.
 Generic kernel/parser and CLI tests and the natural-number example were added
 for independent use. The LICENSE already present in Horn is retained.
 
-SHA-256 of the unchanged core files:
+SHA-256 of the core files at extraction (later changes need not match):
 
 ```text
 5a6a9a0aed8396dbc3b8c1ddbe73e13907ed5475afa59cd618719a4d4760e7eb  src/kernel.rs

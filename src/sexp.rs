@@ -51,49 +51,61 @@ impl fmt::Display for Sexp {
 }
 
 pub fn parse(input: &str) -> Result<Vec<Sexp>> {
-    let mut tokens = Vec::new();
-    for line in input.lines() {
-        let line = line.split(';').next().unwrap_or("");
-        let mut word = String::new();
-        for c in line.chars() {
-            if c.is_whitespace() || c == '(' || c == ')' {
-                if !word.is_empty() {
-                    tokens.push(std::mem::take(&mut word));
+    #[derive(Clone, Copy)]
+    enum Token<'a> {
+        Open,
+        Close,
+        Atom(&'a str),
+    }
+    struct Lexer<'a> {
+        rest: &'a str,
+    }
+    impl<'a> Iterator for Lexer<'a> {
+        type Item = Token<'a>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            loop {
+                let c = self.rest.chars().next()?;
+                if c.is_whitespace() {
+                    self.rest = &self.rest[c.len_utf8()..];
+                } else if c == ';' {
+                    self.rest = self.rest.split_once('\n').map_or("", |(_, tail)| tail);
+                } else if c == '(' || c == ')' {
+                    self.rest = &self.rest[1..];
+                    return Some(if c == '(' { Token::Open } else { Token::Close });
+                } else {
+                    let end = self
+                        .rest
+                        .find(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | ';'))
+                        .unwrap_or(self.rest.len());
+                    let word = &self.rest[..end];
+                    self.rest = &self.rest[end..];
+                    return Some(Token::Atom(word));
                 }
-                if c == '(' || c == ')' {
-                    tokens.push(c.to_string());
-                }
-            } else {
-                word.push(c);
             }
         }
-        if !word.is_empty() {
-            tokens.push(word);
-        }
     }
-    fn one(tokens: &[String], pos: &mut usize, depth: usize) -> Result<Sexp> {
+    fn one<'a>(tokens: &mut std::iter::Peekable<Lexer<'a>>, depth: usize) -> Result<Sexp> {
         if depth > 256 {
             return Err("S-expression nesting exceeds 256".into());
         }
-        let token = tokens.get(*pos).ok_or("unexpected end of input")?;
-        *pos += 1;
-        match token.as_str() {
-            "(" => {
+        match tokens.next().ok_or("unexpected end of input")? {
+            Token::Open => {
                 let mut xs = Vec::new();
-                while tokens.get(*pos).map(String::as_str) != Some(")") {
-                    xs.push(one(tokens, pos, depth + 1)?);
+                while !matches!(tokens.peek(), Some(Token::Close)) {
+                    xs.push(one(tokens, depth + 1)?);
                 }
-                *pos += 1;
+                tokens.next();
                 Ok(Sexp::List(xs))
             }
-            ")" => Err("unexpected closing parenthesis".into()),
-            _ => Ok(atom(token)),
+            Token::Close => Err("unexpected closing parenthesis".into()),
+            Token::Atom(word) => Ok(atom(word)),
         }
     }
-    let mut pos = 0;
+    let mut tokens = Lexer { rest: input }.peekable();
     let mut out = Vec::new();
-    while pos < tokens.len() {
-        out.push(one(&tokens, &mut pos, 0)?);
+    while tokens.peek().is_some() {
+        out.push(one(&mut tokens, 0)?);
     }
     Ok(out)
 }

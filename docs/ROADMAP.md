@@ -16,7 +16,8 @@ adversarial certificates when changing the checker.
 
 Initial candidates, in approximate investigation order:
 
-1. Avoid per-token string allocation and duplication in the parser.
+1. Implemented: avoid per-token string allocation and duplication in the parser;
+   retain the extraction parser as a test-only differential reference.
 2. Avoid deep copies when binding schema variables and retaining judgments.
 3. Remove parse/serialize/reparse cycles in replay while preserving admission
    invariants and the exact caller-selected theory and goals.

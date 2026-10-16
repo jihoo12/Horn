@@ -80,8 +80,9 @@ of checking time and peak memory, separate from certificate generation.
 ## Origin and direction
 
 Extracted from [kamo3](https://github.com/jihoo12/kamo3) at commit
-`6a226630910b34ac89dc77f08a22fe956340aecf`. The three core implementation
-files are copied without changes. Cubical rules, certificate producers,
+`6a226630910b34ac89dc77f08a22fe956340aecf`. The extraction preserved the core
+files byte-for-byte; subsequent parser optimization is covered by differential
+tests against that baseline. Cubical rules, certificate producers,
 Agda references, and mathematical research remain in kamo3.
 
 [PROVENANCE.md](docs/PROVENANCE.md) records the extraction boundary.
