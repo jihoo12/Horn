@@ -8,6 +8,26 @@ The checker implements generic sorting and schema matching. Predicate names
 have no built-in meaning. It does not search for proofs or implement a native
 type theory, substitution engine, equality solver, or univalence primitive.
 
+## What 0.2 changes
+
+- **Hash-consed, streaming kernel.** Each distinct ground term is stored once
+  and compared by index, and proofs are read incrementally. Memory follows the
+  number of distinct subterms, not the file size. The separate chunked replay
+  layer is no longer needed or trusted.
+- **Compact certificates.** A step can omit its conclusion: the checker
+  builds it from the rule, using bindings from premises and explicit
+  `(?var TERM)` bindings. Shared terms can be named with `(def ?n TERM)`. The
+  untrusted `horn-compress` tool rewrites ordinary certificates into this form.
+- **Machine-checked soundness.** [agda/Soundness.agda](agda/Soundness.agda)
+  proves in Agda, with no libraries or postulates, that a model of the
+  checking algorithm accepts only certificates whose goals are derivable.
+
+On kamo3's largest certificate (4.07 GB, 1.13 million steps), checking went
+from 967 s and 746 MiB to 74 s and 64 MiB. After compression the certificate
+is 54.6 MB (75× smaller) and checks in 0.79 s. Ordinary certificates kept their
+former verdicts in differential testing and on every application certificate
+checked. See [BENCHMARKS.md](docs/BENCHMARKS.md).
+
 ## Run
 
 Requires Rust 1.88 or newer. There are no external crate dependencies.
@@ -21,10 +41,18 @@ cargo run --release --locked --offline --bin stream-kernel -- \
 ```
 
 Both commands print `ACCEPT` on success; failures print `REJECT` and exit
-nonzero. The ordinary CLI reads the whole proof into memory. The streaming
-CLI uses 4 MiB chunks and a private temporary file. Chunked replay reduces
-memory use but adds work and additional trusted code. Oversized input forms
-may be rejected by the streaming path even when the ordinary path accepts.
+nonzero. Both read the proof incrementally; `stream-kernel` is kept as a
+compatibility name. To produce and check a compact certificate:
+
+```sh
+cargo run --release --locked --offline --bin horn-compress -- \
+  examples/nat.horn examples/nat.proof /tmp/nat.compact.proof
+cargo run --release --locked --offline --bin kernel -- \
+  examples/nat.horn examples/nat.goals /tmp/nat.compact.proof
+```
+
+[examples/nat.compact.proof](examples/nat.compact.proof) shows the result:
+`(step 1 plus-two (0))` with no stated judgment.
 
 ## Library
 
@@ -61,6 +89,7 @@ cargo fmt --all -- --check
 cargo clippy --locked --offline --all-targets -- -D warnings
 cargo test --locked --offline
 cargo test --release --locked --offline
+nix flake check   # Rust build and tests, plus the Agda soundness proof
 ```
 
 All commands above run using this repository alone; no kamo3 checkout or
@@ -74,8 +103,8 @@ check its original cubical snapshots without importing its theory or producers:
 bash scripts/check-kamo3.sh /path/to/kamo3
 ```
 
-This runs both checkers on all 19 ordinary deep snapshots (77 goals per
-checker). It requires `gzip`; large proofs identified only by hashes are not
+This checks all 19 ordinary deep snapshots (77 goals), then compresses each
+and checks the compact version. It requires `gzip`; large proofs identified only by hashes are not
 regenerated. Their generation remains an application responsibility.
 
 See [BENCHMARKS.md](docs/BENCHMARKS.md) for the standalone measurement tool and

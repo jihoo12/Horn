@@ -86,3 +86,53 @@ c78ece1b597ee42ca850e0d588e0a8a220395354a0ec319222f262705bc56416  ua-beta.proof
 7179737066b9618735504efe7a441e104ff220d1de8453010369aab5a635cbe2  compute.goals
 47f1d213eec69fd6cc73a69bfe842346cc3a7082bad7d507535f92decd4851fa  compute.proof
 ```
+
+## Hash-consed streaming kernel — 2026-10-17
+
+Same machine, compiler, harness source and inputs (identical SHA-256 digests
+to the parser study above). Five samples per mode; medians. "Streamed" now
+means `replay::check`, which calls the incremental kernel; "ordinary" still
+reads the whole proof into one string first, so its RSS includes that text.
+
+| Input | Mode | `212a641` → 0.2 time | Peak RSS |
+| --- | --- | --- | --- |
+| ua-beta (26,107,428 bytes) | Ordinary | 2.102 → 0.513 s | 879 → 30.3 MiB |
+| ua-beta | Streamed | 4.794 → 0.498 s | 294 → 5.5 MiB |
+| compute (39,657,410 bytes) | Ordinary | 3.689 → 0.772 s | 1,276 → 44.9 MiB |
+| compute | Streamed | 6.700 → 0.739 s | 266 → 7.3 MiB |
+
+Raw CSVs: [benchmarks/kernel-2026-10-17](benchmarks/kernel-2026-10-17).
+
+### Large application certificates
+
+The two largest kamo3 certificates were regenerated with kamo3's own producers
+at its pinned revision; both matched the SHA-256 digests kamo3 records
+(`cdce07b9…` and `6f189902…`). Single runs measured with GNU time, wall clock
+and maximum RSS, one job at a time. "Old" is the `stream-kernel` binary built
+from `212a641`; "new" is the 0.2 `kernel` reading the same file incrementally.
+
+| Certificate | Old stream-kernel | New, as stored | Compact size | New, compact |
+| --- | --- | --- | --- | --- |
+| ua-unglue (4,067,276,087 bytes, 1,128,752 steps) | 967.0 s, 746 MiB | 74.3 s, 64 MiB | 54,591,519 bytes | 0.79 s, 66 MiB |
+| constant-equiv (761,517,734 bytes, 530,397 steps) | 183.1 s, 660 MiB | 13.9 s, 34 MiB | 24,273,371 bytes | 0.32 s, 34 MiB |
+
+`ua-unglue` contains 1,174,890 distinct terms and judgments; `constant-equiv`
+538,502. Compressing took 225.8 s / 472 MiB and 40.8 s / 225 MiB with the
+unoptimized `horn-compress`; that cost belongs to production, not checking.
+
+### Compression of the stored snapshots
+
+`horn-compress` output for all 19 stored snapshots was accepted for every goal
+(`scripts/check-kamo3.sh`). Largest cases:
+
+| Snapshot | Ordinary bytes | Compact bytes | Ratio | Unused steps dropped |
+| --- | --- | --- | --- | --- |
+| ua-unglue-center | 186,225,018 | 4,504,943 | 41× | 0 |
+| equiv-ext | 119,438,460 | 2,643,166 | 45× | 0 |
+| glue-fiber | 70,792,538 | 3,111,017 | 23× | 4,025 |
+| compute | 39,657,410 | 3,076,975 | 13× | 4,453 |
+| ua-beta | 26,107,428 | 1,589,886 | 16× | 1,424 |
+
+Several application certificates contain steps that no result uses; the
+kernel still checks them in the ordinary form, and the compressor drops them.
+These are measurements of these inputs on one machine, not general guarantees.

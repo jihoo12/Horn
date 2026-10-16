@@ -14,3 +14,9 @@ jobs:
       - run: cargo clippy --locked --offline --all-targets -- -D warnings
       - run: cargo test --locked --offline
       - run: cargo test --release --locked --offline
+  agda:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - run: nix build --print-build-logs .#checks.x86_64-linux.agda

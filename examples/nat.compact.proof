@@ -1,0 +1,5 @@
+; Compact form of nat.proof: each conclusion is inferred from its rule.
+(step 0 zero ())
+(step 1 plus-two (0))
+(step 2 plus-two (1))
+(result four-is-even 2)

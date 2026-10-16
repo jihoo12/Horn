@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Application compatibility checks; no cubical code is imported into Horn.
+# Each snapshot is checked as stored, then compressed and checked again.
 set -euo pipefail
 source_dir="$(cd "${1:?usage: bash scripts/check-kamo3.sh /path/to/kamo3}" && pwd)"
 cd "$(dirname "$0")/.."
@@ -19,5 +20,7 @@ for name in deep equiv glue identity ua ua-graph transport ua-beta homotopy tran
   fi
   printf '%s\n' "Checking $name"
   "$bin_dir/kernel" "$work/deep.horn" "$source_dir/examples/$name.goals" "$work/current.proof"
-  "$bin_dir/stream-kernel" "$work/deep.horn" "$source_dir/examples/$name.goals" "$work/current.proof"
+  "$bin_dir/horn-compress" "$work/deep.horn" "$work/current.proof" "$work/compact.proof"
+  "$bin_dir/kernel" "$work/deep.horn" "$source_dir/examples/$name.goals" "$work/compact.proof"
+  printf '%s -> %s bytes\n' "$(stat -c %s "$work/current.proof")" "$(stat -c %s "$work/compact.proof")"
 done

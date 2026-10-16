@@ -33,14 +33,12 @@ fn streamed(
     result
 }
 #[test]
-fn all_chunk_partitions_replay_the_same_fixed_goal() {
+fn every_chunk_limit_checks_the_same_fixed_goal() {
     let normal = Theory::parse(THEORY).unwrap().check(GOAL, PROOF).unwrap();
-    for limit in [40, 64, 128, 4096] {
+    for limit in [1, 40, 64, 128, 4096] {
         let (steps, goals, chunks) = streamed(THEORY, GOAL, PROOF, limit).unwrap();
-        assert_eq!((steps, goals), (normal.steps, normal.goals));
-        assert!(chunks >= 1);
+        assert_eq!((steps, goals, chunks), (normal.steps, normal.goals, 1));
     }
-    assert!(streamed(THEORY, GOAL, PROOF, 40).unwrap().2 > 1);
 }
 #[test]
 fn bad_dependencies_rules_sorts_and_ground_instances_are_rejected() {

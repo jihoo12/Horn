@@ -1,4 +1,6 @@
+use crate::lex::{Kind, Lexer, Token};
 use std::fmt;
+use std::io::BufRead;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Sexp {
@@ -50,62 +52,32 @@ impl fmt::Display for Sexp {
     }
 }
 
-pub fn parse(input: &str) -> Result<Vec<Sexp>> {
-    #[derive(Clone, Copy)]
-    enum Token<'a> {
-        Open,
-        Close,
-        Atom(&'a str),
-    }
-    struct Lexer<'a> {
-        rest: &'a str,
-    }
-    impl<'a> Iterator for Lexer<'a> {
-        type Item = Token<'a>;
+pub const MAX_DEPTH: usize = 256;
 
-        fn next(&mut self) -> Option<Self::Item> {
-            loop {
-                let c = self.rest.chars().next()?;
-                if c.is_whitespace() {
-                    self.rest = &self.rest[c.len_utf8()..];
-                } else if c == ';' {
-                    self.rest = self.rest.split_once('\n').map_or("", |(_, tail)| tail);
-                } else if c == '(' || c == ')' {
-                    self.rest = &self.rest[1..];
-                    return Some(if c == '(' { Token::Open } else { Token::Close });
-                } else {
-                    let end = self
-                        .rest
-                        .find(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | ';'))
-                        .unwrap_or(self.rest.len());
-                    let word = &self.rest[..end];
-                    self.rest = &self.rest[end..];
-                    return Some(Token::Atom(word));
-                }
-            }
-        }
-    }
-    fn one<'a>(tokens: &mut std::iter::Peekable<Lexer<'a>>, depth: usize) -> Result<Sexp> {
-        if depth > 256 {
-            return Err("S-expression nesting exceeds 256".into());
-        }
-        match tokens.next().ok_or("unexpected end of input")? {
-            Token::Open => {
-                let mut xs = Vec::new();
-                while !matches!(tokens.peek(), Some(Token::Close)) {
-                    xs.push(one(tokens, depth + 1)?);
-                }
-                tokens.next();
-                Ok(Sexp::List(xs))
-            }
-            Token::Close => Err("unexpected closing parenthesis".into()),
-            Token::Atom(word) => Ok(atom(word)),
-        }
-    }
-    let mut tokens = Lexer { rest: input }.peekable();
+pub fn parse(input: &str) -> Result<Vec<Sexp>> {
+    let mut lexer = Lexer::new(input.as_bytes());
     let mut out = Vec::new();
-    while tokens.peek().is_some() {
-        out.push(one(&mut tokens, 0)?);
+    while lexer.peek()?.is_some() {
+        out.push(read(&mut lexer, 0)?);
     }
     Ok(out)
+}
+
+/// Read one S-expression whose nesting depth is `depth`.
+pub fn read<R: BufRead>(lexer: &mut Lexer<R>, depth: usize) -> Result<Sexp> {
+    if depth > MAX_DEPTH {
+        return Err("S-expression nesting exceeds 256".into());
+    }
+    match lexer.token()?.ok_or("unexpected end of input")? {
+        Token::Open => {
+            let mut xs = Vec::new();
+            while lexer.peek()? != Some(Kind::Close) {
+                xs.push(read(lexer, depth + 1)?);
+            }
+            lexer.token()?;
+            Ok(Sexp::List(xs))
+        }
+        Token::Close => Err("unexpected closing parenthesis".into()),
+        Token::Atom(word) => Ok(atom(word)),
+    }
 }

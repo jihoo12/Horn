@@ -14,6 +14,16 @@ fn both_clis_accept_the_example_and_reject_wrong_goals_and_usage() {
                 .output()
                 .unwrap()
         };
+        let compact = Command::new(binary)
+            .current_dir(root)
+            .args([
+                "examples/nat.horn",
+                "examples/nat.goals",
+                "examples/nat.compact.proof",
+            ])
+            .output()
+            .unwrap();
+        assert!(compact.stdout.starts_with(b"ACCEPT"));
         let accepted = run("examples/nat.goals");
         assert!(
             accepted.status.success(),
@@ -28,4 +38,27 @@ fn both_clis_accept_the_example_and_reject_wrong_goals_and_usage() {
         assert!(!usage.status.success());
         assert!(String::from_utf8_lossy(&usage.stderr).contains("usage:"));
     }
+}
+
+#[test]
+fn compressed_certificate_is_accepted() {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let out = std::env::temp_dir().join(format!("horn-cli-compress-{}", std::process::id()));
+    let compress = Command::new(env!("CARGO_BIN_EXE_horn-compress"))
+        .current_dir(root)
+        .args(["examples/nat.horn", "examples/nat.proof"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(compress.status.success());
+    let check = Command::new(env!("CARGO_BIN_EXE_kernel"))
+        .current_dir(root)
+        .args(["examples/nat.horn", "examples/nat.goals"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    let text = std::fs::read_to_string(&out).unwrap();
+    std::fs::remove_file(&out).unwrap();
+    assert!(check.stdout.starts_with(b"ACCEPT"), "{text}");
+    assert!(!text.contains("(even"), "{text}");
 }

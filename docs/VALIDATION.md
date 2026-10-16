@@ -53,3 +53,27 @@ check also passed: release tests, regeneration of all 19 ordinary certificates,
 snapshot comparison, and acceptance of all 77 fixed goals. Nix fetches the exact
 lockfile Git revision using the authenticated user environment before sandboxed
 builds, so private-repository credentials are not needed inside the builders.
+
+## Hash-consed kernel, compact certificates and Agda proof — 2026-10-17
+
+- `cargo fmt --check`, all-target clippy with warnings denied, and all
+  integration tests in debug and release passed.
+- Differential tests against the extraction-time kernel (kept under
+  `tests/support`): 60,000 random certificates, half token-mutated, in a mix
+  of ordinary and compact forms; compact forms are expanded by an independent
+  tree-based reference before the legacy kernel checks them. Verdicts agreed in
+  every case, ordinary certificates kept their former verdict, and every
+  accepted ordinary certificate stayed accepted after `compress`. A further
+  80,000 mutated theories received the same parse verdict from both kernels.
+- The exhaustive parser comparison (66,430 inputs) passed with the new shared
+  streaming lexer underneath `sexp::parse`.
+- `scripts/check-kamo3.sh`: all 19 stored snapshots accepted (77 goals), and
+  all 19 compressed versions accepted.
+- The 4 GB `ua-unglue` and 762 MB `constant-equiv` certificates were
+  regenerated, matched kamo3's recorded digests, and were accepted as stored
+  and after compression; the old `stream-kernel` accepted both as well.
+- `nix flake check`: the sandboxed Rust build with tests and the Agda proof
+  passed. Changing the Agda file to claim acceptance of a wrong certificate
+  fails with `nothing != just tt`, as expected.
+
+Minimum-version Rust 1.88 and hosted CI were not tested locally.

@@ -63,11 +63,44 @@ already exist, and the judgment must equal the requested goal structurally.
 Unknown, repeated, missing, and mismatched results are errors. A result may
 appear before later proof steps, but those later steps must still be valid.
 
+## Compact certificates
+
+Two further forms let a certificate omit what the checker can reconstruct.
+They are conservative: every ordinary certificate keeps its verdict, and the
+set of derivable goals is unchanged.
+
+```text
+(step INDEX RULE (EARLIER_INDICES...) ITEM...)
+(def ?NAME GROUND_TERM)
+```
+
+Each `ITEM` after the premise references is either the stated conclusion
+judgment (at most one) or a binding `(?VAR GROUND_TERM)` for a variable of the
+rule. Bindings must be distinct and well sorted, and premises, bindings and a
+stated conclusion must all agree on one assignment. Without a stated
+conclusion, the checker builds it by instantiating the rule's conclusion, so
+every conclusion variable must be bound by a premise or an explicit binding.
+`(step 1 plus-two (0))` is therefore a complete step for `examples/nat.horn`.
+
+`def` names a ground term of any sort. Later ground terms in the same
+certificate may write `?NAME` for it; it means exactly the named term. Names
+start with `?`, have at least one more character, and cannot be redefined.
+Goals cannot use abbreviations. Since ground terms could not previously
+contain `?` atoms, no former certificate changes meaning.
+
+`horn-compress THEORY PROOF OUTPUT` rewrites an ordinary certificate into this
+form. It drops steps that no result depends on, replaces a step that repeats
+an earlier judgment by that step, writes only the bindings premises cannot
+determine, and abbreviates repeated compound subterms. It is untrusted: check
+its output with `kernel` like any other certificate.
+
 ## Streaming API
 
-`replay::check(theory, goals, input, scratch, chunk_bytes)` accepts the same
-logical format. The scratch file must be seekable, readable, and writable;
-its existing contents are truncated. Callers should supply a private file.
-The chunk limit must be positive. It also bounds the buffered source for one
-form, including comments and newlines, so it affects accepted input sizes.
-This byte limit is not a bound on process RSS, total work, or scratch disk use.
+`Theory::check_reader(goals, input)` reads the certificate incrementally from
+any `BufRead`. Memory is proportional to the number of steps and the number of
+distinct subterms, independent of the certificate's size in bytes.
+
+`replay::check(theory, goals, input, scratch, chunk_bytes)` is retained for
+compatibility. It requires a positive chunk limit, truncates the scratch file,
+and then calls `check_reader`; the limit no longer bounds form size, and the
+returned chunk count is always one.
