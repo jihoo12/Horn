@@ -72,14 +72,20 @@ cannot change a verdict.
 - Selected theories and goals: caller-controlled mathematical specification.
 - Rust compiler, libraries, operating system, hardware, and execution environment.
 
-Certificate producers do not need to be trusted for logical acceptance; this
-includes `src/compress.rs` and `horn-compress`. An incorrect or inconsistent
+Certificate producers do not need to be trusted for logical acceptance. This
+includes `src/compress.rs` and `horn-compress`. It also includes oracle
+certificates: `src/oracle.rs`, `horn-oracle`, and the decoding thread of
+`oracle-kernel`. That thread only writes a compact certificate into a pipe,
+and the kernel reads and checks the certificate as it would a file (see
+[ORACLE.md](ORACLE.md)). An incorrect or inconsistent
 supplied theory can still derive its consequences; the checker does not
 validate its intended semantics or consistency.
 
 ## Limits
 
-Tests and the Agda model do not prove the Rust implementation correct. Memory
+Tests and the Agda model do not prove the Rust implementation correct.
+Decoding an oracle takes time and memory proportional to the derivation it
+expands to, which can be far larger than the oracle itself. Memory
 is proportional to the number of steps and distinct subterms, which is small
 for the certificates measured but not bounded by a constant. Parsing limits
 do not provide complete resource isolation.

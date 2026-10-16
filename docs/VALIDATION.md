@@ -77,3 +77,26 @@ builds, so private-repository credentials are not needed inside the builders.
   fails with `nothing != just tt`, as expected.
 
 Minimum-version Rust 1.88 and hosted CI were not tested locally.
+
+## Oracle certificates — 2026-10-17
+
+- `tests/oracle.rs`:
+  - 3,000 random certificates, built by forward chaining over a theory with
+    nondeterministic rules and conclusion variables that premises leave open,
+    were each encoded, decoded and accepted by the kernel for the same goals.
+    Their `horn-compress` outputs were encoded and accepted the same way.
+  - A further 3,000 oracles were truncated, bit-flipped or extended. Every
+    one either decoded or failed with an error, without a panic. Decoded
+    results were left for the kernel to judge.
+  - A theory whose single rule recurses forever without reading any oracle
+    bits stops at the nesting limit with an error.
+- `tests/cli.rs`: `horn-oracle encode`, `oracle-kernel`, `horn-oracle decode`
+  followed by `kernel`, and rejection for a different goal.
+- `scripts/check-kamo3.sh` now also encodes each of the 19 stored ordinary
+  snapshots as an oracle and checks it. That makes 57 acceptances: as stored,
+  compressed, and as an oracle. Each oracle has the same size as the one
+  encoded from the compact form.
+- All 21 kamo3 certificates (the 19 snapshots, plus `ua-unglue` and
+  `constant-equiv`) were encoded from their compact forms and accepted by
+  `oracle-kernel`. `ua-unglue` was also encoded directly from the 4 GB
+  ordinary certificate, and that oracle was accepted too.

@@ -30,10 +30,17 @@ Remaining candidates:
 
 1. Interning dominates on ordinary certificates (about 55 MB/s). A faster
    table or fewer random memory accesses per node would help large ordinary
-   inputs; compact certificates are already small enough not to need it.
-2. Producers can emit compact certificates directly instead of running
-   `horn-compress` afterwards, which would also remove generation-time cost.
-3. Evaluate compiled rule matching only after measuring a workload where
+   inputs. Compact and oracle certificates are already small enough not to
+   need it.
+2. Producers could emit oracle certificates directly. A producer that already
+   searches top-down would only record its choices. This would remove both the
+   multi-gigabyte intermediate file and the encoding pass.
+3. Oracle decoding (3.5 s, 399 MiB on ua-unglue) is now slower than checking
+   the compact form. Unifying against indexed candidates instead of trying
+   every rule, and releasing tables early, are the obvious next steps.
+4. Specify oracle version 1 independently of `src/oracle.rs` so that a second
+   implementation could decode it.
+5. Evaluate compiled rule matching only after measuring a workload where
    matching, rather than reading, dominates.
 
 Compiling rules cannot eliminate the obligation to validate every admitted

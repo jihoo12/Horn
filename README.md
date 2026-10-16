@@ -8,6 +8,22 @@ The checker implements generic sorting and schema matching. Predicate names
 have no built-in meaning. It does not search for proofs or implement a native
 type theory, substitution engine, equality solver, or univalence primitive.
 
+## What 0.3 adds: oracle certificates
+
+A certificate can now be just the decisions the checker cannot make by
+itself. The checker rebuilds the derivation top-down from the goals by
+unification, reusing what it has already derived. The certificate names a
+rule or an earlier judgment only where more than one fits, and supplies a
+term only where unification leaves one open. An adaptive range coder stores
+these decisions; a predictable one costs a fraction of a bit.
+
+kamo3's largest certificate, 4.07 GB, becomes a **63,890-byte** oracle, about
+the size of its 59,673-byte goals file. That is 63,000 times smaller than the
+original and 850 times smaller than its compact form. It is checked in 3.5 s.
+Every kamo3 certificate round-trips and is accepted. Decoding is untrusted: it
+produces a compact certificate that the unchanged kernel checks, so neither
+the trusted code nor the Agda proof changes. See [ORACLE.md](docs/ORACLE.md).
+
 ## What 0.2 changes
 
 - **Hash-consed, streaming kernel.** Each distinct ground term is stored once
@@ -53,6 +69,19 @@ cargo run --release --locked --offline --bin kernel -- \
 
 [examples/nat.compact.proof](examples/nat.compact.proof) shows the result:
 `(step 1 plus-two (0))` with no stated judgment.
+
+To encode an oracle certificate, then check it:
+
+```sh
+cargo run --release --locked --offline --bin horn-oracle -- encode \
+  examples/nat.horn examples/nat.goals examples/nat.proof /tmp/nat.oracle
+cargo run --release --locked --offline --bin oracle-kernel -- \
+  examples/nat.horn examples/nat.goals /tmp/nat.oracle
+```
+
+`oracle-kernel` decodes in one thread and streams the result into the kernel
+in another. To inspect the certificate an oracle stands for, write it out
+with `horn-oracle decode THEORY GOALS ORACLE PROOF`.
 
 ## Library
 
@@ -103,8 +132,9 @@ check its original cubical snapshots without importing its theory or producers:
 bash scripts/check-kamo3.sh /path/to/kamo3
 ```
 
-This checks all 19 ordinary deep snapshots (77 goals), then compresses each
-and checks the compact version. It requires `gzip`; large proofs identified only by hashes are not
+This checks all 19 ordinary deep snapshots (77 goals). It then compresses
+each one and checks the compact version, and encodes each one as an oracle and
+checks that. It requires `gzip`; large proofs identified only by hashes are not
 regenerated. Their generation remains an application responsibility.
 
 See [BENCHMARKS.md](docs/BENCHMARKS.md) for the standalone measurement tool and

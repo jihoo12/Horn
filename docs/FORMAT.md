@@ -94,6 +94,17 @@ an earlier judgment by that step, writes only the bindings premises cannot
 determine, and abbreviates repeated compound subterms. It is untrusted: check
 its output with `kernel` like any other certificate.
 
+## Oracle certificates
+
+`horn-oracle encode THEORY GOALS PROOF ORACLE` writes a binary oracle for an
+ordinary or compact certificate. `oracle-kernel THEORY GOALS ORACLE` checks
+it. An oracle starts with the line `horn-oracle 1`, followed by range-coded
+decisions. Its meaning is defined by the reconstruction procedure in
+`src/oracle.rs`, described in [ORACLE.md](ORACLE.md). It is valid only with
+the theory and goals, in the same order, that it was encoded against.
+Decoding yields a compact certificate. The kernel input language itself is
+unchanged.
+
 ## Streaming API
 
 `Theory::check_reader(goals, input)` reads the certificate incrementally from

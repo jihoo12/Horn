@@ -136,3 +136,37 @@ unoptimized `horn-compress`; that cost belongs to production, not checking.
 Several application certificates contain steps that no result uses; the
 kernel still checks them in the ordinary form, and the compressor drops them.
 These are measurements of these inputs on one machine, not general guarantees.
+
+## Oracle certificates — 2026-10-17
+
+Each kamo3 certificate was encoded from its compact form with `horn-oracle`,
+then checked with `oracle-kernel`. The table gives single runs with GNU time
+(wall clock; maximum RSS of `oracle-kernel`), on the same machine as above.
+Every certificate was accepted for all its goals. Raw table:
+[benchmarks/oracle-2026-10-17/kamo3.csv](benchmarks/oracle-2026-10-17/kamo3.csv).
+
+| Certificate | Ordinary bytes | Compact bytes | Oracle bytes | Encode | Check | Check RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| ua-unglue | 4,067,276,087 | 54,591,519 | 63,890 | 3.43 s | 3.46 s | 399 MiB |
+| constant-equiv | 761,517,734 | 24,273,371 | 42,308 | 1.99 s | 1.96 s | 201 MiB |
+| ua-unglue-center | 186,225,018 | 4,504,943 | 8,056 | 0.26 s | 0.27 s | 33 MiB |
+| equiv-ext | 119,438,460 | 2,643,166 | 4,023 | 0.19 s | 0.18 s | 22 MiB |
+| glue-fiber | 70,792,538 | 3,111,017 | 3,752 | 0.19 s | 0.19 s | 23 MiB |
+| compute | 39,657,410 | 3,076,975 | 6,698 | 0.22 s | 0.22 s | 24 MiB |
+| ua-beta | 26,107,428 | 1,589,886 | 3,123 | 0.10 s | 0.09 s | 17 MiB |
+
+The 14 smaller snapshots range from 136 to 3,789 oracle bytes. For
+comparison, `xz -9` on the compact `ua-unglue` gives 7,193,784 bytes, and on
+the compact `compute` 450,300 bytes.
+
+Where the bytes go in `ua-unglue`: reconstruction makes 3,507,640 binary
+decisions and supplies 24,427 witness terms, coded together in 63,876 bytes
+after the 14-byte header. The deepest subgoal nesting is 322. Encoding
+directly from the 4 GB ordinary certificate yields the identical oracle. That
+takes 198.4 s and 418 MiB, mostly spent reading the input.
+
+Before building this, a prototype measured the alternative of abstracting
+repeated sub-derivations into lemmas. With term data erased, the compact
+certificates have only 1.3 to 2.2 steps per distinct derivation shape. Even
+inlining every single-use step would leave at least a third of the steps. That
+is less than `xz` achieves, so the lemma approach was dropped.

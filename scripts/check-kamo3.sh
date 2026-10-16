@@ -22,5 +22,7 @@ for name in deep equiv glue identity ua ua-graph transport ua-beta homotopy tran
   "$bin_dir/kernel" "$work/deep.horn" "$source_dir/examples/$name.goals" "$work/current.proof"
   "$bin_dir/horn-compress" "$work/deep.horn" "$work/current.proof" "$work/compact.proof"
   "$bin_dir/kernel" "$work/deep.horn" "$source_dir/examples/$name.goals" "$work/compact.proof"
-  printf '%s -> %s bytes\n' "$(stat -c %s "$work/current.proof")" "$(stat -c %s "$work/compact.proof")"
+  "$bin_dir/horn-oracle" encode "$work/deep.horn" "$source_dir/examples/$name.goals" "$work/current.proof" "$work/current.oracle"
+  "$bin_dir/oracle-kernel" "$work/deep.horn" "$source_dir/examples/$name.goals" "$work/current.oracle"
+  printf '%s -> %s compact -> %s oracle bytes\n' "$(stat -c %s "$work/current.proof")" "$(stat -c %s "$work/compact.proof")" "$(stat -c %s "$work/current.oracle")"
 done

@@ -62,3 +62,61 @@ fn compressed_certificate_is_accepted() {
     assert!(check.stdout.starts_with(b"ACCEPT"), "{text}");
     assert!(!text.contains("(even"), "{text}");
 }
+
+#[test]
+fn oracle_certificate_is_accepted_and_rejected_for_other_goals() {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let dir = std::env::temp_dir();
+    let oracle = dir.join(format!("horn-cli-oracle-{}", std::process::id()));
+    let decoded = dir.join(format!("horn-cli-decoded-{}", std::process::id()));
+    let encode = Command::new(env!("CARGO_BIN_EXE_horn-oracle"))
+        .current_dir(root)
+        .args([
+            "encode",
+            "examples/nat.horn",
+            "examples/nat.goals",
+            "examples/nat.proof",
+        ])
+        .arg(&oracle)
+        .output()
+        .unwrap();
+    assert!(
+        encode.status.success(),
+        "{}",
+        String::from_utf8_lossy(&encode.stderr)
+    );
+    let check = |goals: &str| {
+        Command::new(env!("CARGO_BIN_EXE_oracle-kernel"))
+            .current_dir(root)
+            .args(["examples/nat.horn", goals])
+            .arg(&oracle)
+            .output()
+            .unwrap()
+    };
+    assert!(
+        check("examples/nat.goals")
+            .stdout
+            .starts_with(b"ACCEPT (oracle)")
+    );
+    let other = dir.join(format!("horn-cli-goals-{}", std::process::id()));
+    std::fs::write(&other, "(goal four-is-even (even (s (s (s z)))))").unwrap();
+    let rejected = check(other.to_str().unwrap());
+    assert!(rejected.stderr.starts_with(b"REJECT"));
+    let decode = Command::new(env!("CARGO_BIN_EXE_horn-oracle"))
+        .current_dir(root)
+        .args(["decode", "examples/nat.horn", "examples/nat.goals"])
+        .args([&oracle, &decoded])
+        .output()
+        .unwrap();
+    assert!(decode.status.success());
+    let kernel = Command::new(env!("CARGO_BIN_EXE_kernel"))
+        .current_dir(root)
+        .args(["examples/nat.horn", "examples/nat.goals"])
+        .arg(&decoded)
+        .output()
+        .unwrap();
+    for f in [&oracle, &decoded, &other] {
+        std::fs::remove_file(f).unwrap();
+    }
+    assert!(kernel.stdout.starts_with(b"ACCEPT"));
+}
