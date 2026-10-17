@@ -1,8 +1,8 @@
 # Schematic certificates and proof generalization (research)
 
 Status: research prototype on branch `research/schematic`. Nothing here is
-part of the trusted kernel. `src/kernel.rs`, the parser, and the Agda proof
-are unchanged; every ground instance mentioned below was accepted by the
+part of the trusted kernel. `src/kernel.rs`, the parser, and
+`agda/Soundness.agda` are unchanged; every ground instance mentioned below was accepted by the
 unchanged `kernel`.
 
 ## Question
@@ -178,12 +178,44 @@ minutes, mostly reading the ordinary certificate. Unfolding it at `L := 1`
 took 9.9 s and the ground kernel checked the result in 1.2 s.
 
 
+## Mechanized soundness
+
+[agda/Schematic.agda](../agda/Schematic.agda) proves the inference forms
+sound, with `--safe --without-K --no-libraries` like `Soundness.agda`.
+Unlike that model it is sorted: eigenvariables have sorts, and derivations
+use only well-sorted ground instances of the rules, so a sort without ground
+terms is represented faithfully.
+
+- `Valid H J`: for every well-sorted ground substitution of the variables
+  of H and J, if every hypothesis instance is derivable then so is the
+  instance of J.
+- `H ⊢ J` has one constructor per accepted form: `hyp`, `inst` (instances of
+  hypothesis-free facts by well-sorted substitutions), `step` (a rule with
+  well-sorted bindings, premises from earlier facts, and the premise variable
+  condition), and `induct` (one case per constructor of X's sort, with
+  distinct fresh case variables of the constructor's argument sorts, X
+  occurring in J, and only induction hypotheses as hypotheses).
+- `sound : H ⊢ J → Valid H J`, and so `soundness`: every well-sorted ground
+  instance of a hypothesis-free accepted judgment is derivable.
+
+The induction case is proved by structural induction on the well-sortedness
+derivation of the ground term substituted for X. Two checked examples
+accompany the proof. One builds `max L L L` by induction and obtains
+`max 2 2 2` from `soundness`. The other shows the premise variable condition
+is necessary: in a theory with an empty sort, `p X` is accepted, the step
+`p X ⊢ q` fails the condition, and `q` is provably not derivable.
+
+What is modelled is what each accepted step establishes, not the Rust code.
+The rule step takes its bindings as given (the Rust code finds them by
+matching), hypotheses are judgments rather than step indices, and parsing,
+names and hash-consing are outside the model.
+
 ## What this does and does not establish
 
-- The schematic checker is a prototype. Its soundness argument is above;
-  it is not mechanized, and the Agda model covers only ground certificates.
-  Instances at concrete levels are checked by the unchanged kernel and do not
-  depend on it.
+- The schematic checker is a prototype outside the trusted kernel. Its
+  inference forms are proved sound in Agda (next section), but the Rust code
+  is not connected to that model. Instances at concrete levels are checked
+  by the unchanged kernel and do not depend on either.
 - A goal over `L` is a schema: it states every ground instance. It is not an
   internal universe-polymorphic term of the object theory.
 - One eigenvariable per goal. Goals whose levels must vary independently
@@ -194,8 +226,10 @@ took 9.9 s and the ground kernel checked the result in 1.2 s.
 
 ## Next steps
 
-1. Mechanize the schematic invariant in Agda next to `Soundness.agda`, then
-   decide whether the kernel adopts schematic checking.
+1. Model the schematic checking algorithm itself (matching, hypothesis sets
+   by step index) and connect it to `Schematic.agda`, as `Soundness.agda`
+   does for ground certificates; then decide whether the kernel adopts
+   schematic checking.
 2. Let kamo3 producers build at a symbolic level directly, instead of
    generalizing a level-0 proof afterwards.
 3. Several eigenvariables, with lemmas such as `max i j k → max j i k`

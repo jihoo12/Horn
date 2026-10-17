@@ -30,6 +30,7 @@
           cp -R ${self}/agda agda
           chmod -R u+w agda
           agda --safe --no-libraries -i agda agda/Soundness.agda
+          agda --safe --no-libraries -i agda agda/Schematic.agda
           touch "$out"
         '';
       });
