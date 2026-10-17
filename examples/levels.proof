@@ -1,0 +1,6 @@
+(step 0 type.u () (type (u z) (s z)))
+(step 1 max.z () (max z z z))
+(step 2 max.ss (1) (max (s z) (s z) (s z)))
+(step 3 type.arrow (0 0 2) (type (arrow (u z) (u z)) (s z)))
+(step 4 type.arrow (0 3 2) (type (arrow (u z) (arrow (u z) (u z))) (s z)))
+(result arrow-of-universes 4)

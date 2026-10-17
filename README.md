@@ -24,6 +24,16 @@ Every kamo3 certificate round-trips and is accepted. Decoding is untrusted: it
 produces a compact certificate that the unchanged kernel checks, so neither
 the trusted code nor the Agda proof changes. See [ORACLE.md](docs/ORACLE.md).
 
+## Research: statements over every universe level
+
+A prototype outside the trusted kernel checks *schematic* certificates:
+judgments with eigenvariables, hypotheses, and structural induction over the
+term algebra. `horn-generalize` turns an existing ground proof into one, and
+any ground instance unfolds into an ordinary certificate for the unchanged
+kernel. kamo3's univalence proof at U₀ holds for every level `L`, with a
+few inductions on `max`; so do 49 other ordinary goals and all three large
+certificates, including the 4 GB ua-unglue one. See [SCHEMATIC.md](docs/SCHEMATIC.md).
+
 ## What 0.2 changes
 
 - **Hash-consed, streaming kernel.** Each distinct ground term is stored once

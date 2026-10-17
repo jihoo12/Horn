@@ -65,37 +65,37 @@ fn mix(parts: &[u64]) -> u64 {
     h.0
 }
 
-enum Pat {
+pub(crate) enum Pat {
     Var(usize),
     App(u32, Vec<Pat>),
 }
 
-struct Rule {
-    name: String,
-    vars: Vec<(String, u32)>,
-    premises: Vec<Pat>,
-    conclusion: Pat,
+pub(crate) struct Rule {
+    pub(crate) name: String,
+    pub(crate) vars: Vec<(String, u32)>,
+    pub(crate) premises: Vec<Pat>,
+    pub(crate) conclusion: Pat,
     /// Conclusion variables that premises do not determine; a compact step
     /// must bind them.
-    free: Vec<usize>,
+    pub(crate) free: Vec<usize>,
 }
 
 /// The theory as the reconstruction sees it; malformed theories are left
 /// for the kernel to reject.
-struct Spec {
-    sorts: HashMap<String, u32>,
-    ctors: HashMap<String, u32>,
-    preds: HashMap<String, u32>,
-    names: Vec<String>,
-    inputs: Vec<Vec<u32>>,
-    by_sort: Vec<Vec<u32>>,
-    rules: Vec<Rule>,
-    rule_ix: HashMap<String, u32>,
-    by_pred: Vec<Vec<u32>>,
+pub(crate) struct Spec {
+    pub(crate) sorts: HashMap<String, u32>,
+    pub(crate) ctors: HashMap<String, u32>,
+    pub(crate) preds: HashMap<String, u32>,
+    pub(crate) names: Vec<String>,
+    pub(crate) inputs: Vec<Vec<u32>>,
+    pub(crate) by_sort: Vec<Vec<u32>>,
+    pub(crate) rules: Vec<Rule>,
+    pub(crate) rule_ix: HashMap<String, u32>,
+    pub(crate) by_pred: Vec<Vec<u32>>,
 }
 
 impl Spec {
-    fn parse(source: &str) -> Result<Self> {
+    pub(crate) fn parse(source: &str) -> Result<Self> {
         let mut spec = Spec {
             sorts: HashMap::new(),
             ctors: HashMap::new(),
@@ -216,7 +216,7 @@ impl Spec {
             .ok_or_else(|| format!("unknown predicate {p}"))
     }
 
-    fn rule(&self, name: &str) -> Result<u32> {
+    pub(crate) fn rule(&self, name: &str) -> Result<u32> {
         self.rule_ix
             .get(name)
             .copied()
@@ -232,7 +232,7 @@ fn used(p: &Pat, f: &mut impl FnMut(usize)) {
 }
 
 /// Hash-consed ground nodes `[head, args...]`, as in the kernel.
-struct Store {
+pub(crate) struct Store {
     data: Vec<u32>,
     starts: Vec<usize>,
     table: Vec<u32>,
@@ -240,7 +240,7 @@ struct Store {
 }
 
 impl Store {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             data: Vec::new(),
             starts: vec![0],
@@ -249,11 +249,11 @@ impl Store {
         }
     }
 
-    fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.starts.len() - 1
     }
 
-    fn node(&self, id: u32) -> &[u32] {
+    pub(crate) fn node(&self, id: u32) -> &[u32] {
         let i = id as usize;
         &self.data[self.starts[i]..self.starts[i + 1]]
     }
@@ -264,7 +264,7 @@ impl Store {
         (h.0 >> (64 - self.bits)) as usize
     }
 
-    fn intern(&mut self, key: &[u32]) -> u32 {
+    pub(crate) fn intern(&mut self, key: &[u32]) -> u32 {
         if 2 * self.len() >= self.table.len() {
             self.bits += 1;
             self.table = vec![NONE; 1 << self.bits];
@@ -326,7 +326,7 @@ impl Store {
         Ok(self.intern(&key))
     }
 
-    fn matches(&self, p: &Pat, id: u32, env: &mut [u32]) -> bool {
+    pub(crate) fn matches(&self, p: &Pat, id: u32, env: &mut [u32]) -> bool {
         match p {
             Pat::Var(v) if env[*v] == NONE => {
                 env[*v] = id;
@@ -345,7 +345,7 @@ impl Store {
         }
     }
 
-    fn build(&mut self, p: &Pat, env: &[u32]) -> Result<u32> {
+    pub(crate) fn build(&mut self, p: &Pat, env: &[u32]) -> Result<u32> {
         match p {
             Pat::Var(v) if env[*v] == NONE => Err("unbound conclusion variable".into()),
             Pat::Var(v) => Ok(env[*v]),
@@ -454,11 +454,11 @@ enum Coder<'a> {
 }
 
 /// The known derivation the encoder reads decisions from.
-struct Truth {
-    rule: Vec<u32>,
-    refs: Vec<Vec<u32>>,
-    judgment: Vec<u32>,
-    results: HashMap<String, u32>,
+pub(crate) struct Truth {
+    pub(crate) rule: Vec<u32>,
+    pub(crate) refs: Vec<Vec<u32>>,
+    pub(crate) judgment: Vec<u32>,
+    pub(crate) results: HashMap<String, u32>,
 }
 
 /// A term during reconstruction: ground (hash-consed), a logic variable, or
@@ -1043,7 +1043,11 @@ impl<'s, 'w> Engine<'s, 'w> {
     }
 }
 
-fn read_goals(spec: &Spec, store: &mut Store, source: &str) -> Result<Vec<(String, u32)>> {
+pub(crate) fn read_goals(
+    spec: &Spec,
+    store: &mut Store,
+    source: &str,
+) -> Result<Vec<(String, u32)>> {
     let mut goals = Vec::new();
     for form in parse(source)? {
         let xs = form.list()?;
@@ -1060,7 +1064,7 @@ fn read_goals(spec: &Spec, store: &mut Store, source: &str) -> Result<Vec<(Strin
 
 /// Read an ordinary or compact certificate and work out every step's
 /// judgment. The certificate is not validated beyond what that needs.
-fn read_truth(spec: &Spec, store: &mut Store, proof: impl BufRead) -> Result<Truth> {
+pub(crate) fn read_truth(spec: &Spec, store: &mut Store, proof: impl BufRead) -> Result<Truth> {
     let mut truth = Truth {
         rule: Vec::new(),
         refs: Vec::new(),
@@ -1145,7 +1149,7 @@ fn read_truth(spec: &Spec, store: &mut Store, proof: impl BufRead) -> Result<Tru
 }
 
 /// Run `f` on a thread whose stack fits deep reconstructions.
-fn deep<R: Send>(f: impl FnOnce() -> Result<R> + Send) -> Result<R> {
+pub(crate) fn deep<R: Send>(f: impl FnOnce() -> Result<R> + Send) -> Result<R> {
     std::thread::scope(|s| {
         std::thread::Builder::new()
             .stack_size(STACK_BYTES)

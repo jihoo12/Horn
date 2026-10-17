@@ -1,0 +1,16 @@
+; Universe levels with a least upper bound computed on numerals.
+(sort N)
+(ctor z () N)
+(ctor s (N) N)
+(pred max (N N N))
+(rule max.z () (max z ?n ?n))
+(rule max.sz () (max (s ?n) z (s ?n)))
+(rule max.ss ((max ?m ?n ?k)) (max (s ?m) (s ?n) (s ?k)))
+
+; Types and the level each one lives at.
+(sort T)
+(ctor u (N) T)
+(ctor arrow (T T) T)
+(pred type (T N))
+(rule type.u () (type (u ?l) (s ?l)))
+(rule type.arrow ((type ?a ?i) (type ?b ?j) (max ?i ?j ?k)) (type (arrow ?a ?b) ?k))

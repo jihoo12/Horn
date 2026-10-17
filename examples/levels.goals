@@ -1,0 +1,1 @@
+(goal arrow-of-universes (type (arrow (u z) (arrow (u z) (u z))) (s z)))
