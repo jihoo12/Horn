@@ -4,7 +4,7 @@ use crate::cubical::engine::face_frontend::Face;
 use crate::cubical::engine::frontend::number;
 use crate::cubical::engine::path_frontend::{Op, cons, u, v};
 use crate::cubical::engine::restricted_frontend::RestrictedProducer;
-use crate::sexp::{Result, atom, call};
+use crate::cubical::engine::term::{Result, atom, call};
 
 pub fn glue_demo() -> Result<RestrictedProducer> {
     let mut p = RestrictedProducer::default();

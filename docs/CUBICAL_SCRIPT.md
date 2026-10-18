@@ -28,8 +28,7 @@ along-ua = bfalse : bool
 ACCEPT (cubical script): 6 goals, 237149 proof steps, 54574 oracle bytes
 ```
 
-This takes about two minutes and 1.6 GB, most of it for checking the
-isoToIsEquiv lemma. `--emit NEW_DIR` writes `theory.horn`, `goals` and
+This takes about 8 seconds and 0.25 GB. `--emit NEW_DIR` writes `theory.horn`, `goals` and
 `proof.oracle` for independent checking with `oracle-kernel`.
 
 ## Forms

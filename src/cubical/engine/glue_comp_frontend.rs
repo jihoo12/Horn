@@ -12,7 +12,7 @@
 use crate::cubical::engine::face_frontend::Face;
 use crate::cubical::engine::path_frontend::{cons, u, v};
 use crate::cubical::engine::restricted_frontend::RestrictedProducer;
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 /// e : Equiv T A, T, A, with b0 at the Glue type `face` gives at i0.
 fn context(p: &mut RestrictedProducer, face: &Face) -> Result<Sexp> {

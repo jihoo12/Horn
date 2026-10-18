@@ -1,7 +1,7 @@
 //! Untrusted definitional macros; all results are certified.
 use super::RestrictedProducer;
 use crate::cubical::engine::path_frontend::{Op, path, v};
-use crate::sexp::{Result, Sexp, call};
+use crate::cubical::engine::term::{Result, Sexp, call};
 
 impl RestrictedProducer {
     pub fn contr_type(&mut self, x: &Sexp) -> Result<(Sexp, usize)> {

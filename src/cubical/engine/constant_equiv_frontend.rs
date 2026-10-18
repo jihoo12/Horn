@@ -6,7 +6,7 @@ use crate::cubical::engine::equiv_ext_frontend::{equiv_ext_line, equiv_ext_type}
 use crate::cubical::engine::identity_frontend::identity_core;
 use crate::cubical::engine::path_frontend::{Op, path, u, v};
 use crate::cubical::engine::restricted_frontend::RestrictedProducer;
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 // Context A:U_l. constant_line expects an extra x, so lower its ordinary index.
 pub fn constant_equiv_endpoints(p: &mut RestrictedProducer, l: usize) -> Result<(Sexp, Sexp)> {

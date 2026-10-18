@@ -2,7 +2,7 @@
 use super::{RestrictedProducer, shape};
 use crate::cubical::engine::face_frontend::Face;
 use crate::cubical::engine::path_frontend::{Op, dim};
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 impl RestrictedProducer {
     pub fn filling(&mut self, a: &Sexp, phi: &Face, t: &Sexp, b: &Sexp) -> Result<(Sexp, usize)> {
@@ -42,7 +42,7 @@ impl RestrictedProducer {
     }
     pub fn canonical_program(&mut self, level: &Sexp) -> Result<(Sexp, usize)> {
         let source = include_str!("../../../theories/cubical/canonical-map.horn");
-        let forms = crate::sexp::parse(source)?;
+        let forms = crate::cubical::engine::term::parse(source)?;
         let rule=forms.iter().find(|f|matches!(f,Sexp::List(xs) if xs.len()==4 && xs[0]==atom("rule") && xs[1]==atom("def.canonical-map"))).ok_or("missing canonical program definition")?;
         let Sexp::List(rule) = rule else {
             unreachable!()
@@ -52,7 +52,7 @@ impl RestrictedProducer {
         };
         fn instance(t: &Sexp, level: &Sexp) -> Sexp {
             match t {
-                Sexp::Atom(a) if a == "?l" => level.clone(),
+                Sexp::Atom(a) if &**a == "?l" => level.clone(),
                 Sexp::List(xs) => Sexp::List(xs.iter().map(|x| instance(x, level)).collect()),
                 _ => t.clone(),
             }

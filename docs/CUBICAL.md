@@ -103,9 +103,14 @@ engine is untrusted: only the kernel's acceptance counts.
 
 | Example | Time | Peak memory |
 | --- | ---: | ---: |
-| `ua-transport` | 5 s | 0.1 GB |
-| `canonicity` | 185 s | 2.3 GB |
-| `univalence` | 60 s | 1.1 GB |
+| `ua-transport` | 0.4 s | 0.03 GB |
+| `univalence` | 4.7 s | 0.24 GB |
+| `canonicity` | 7.9 s | 0.23 GB |
+
+The engine hash-conses its terms (`engine::term`), so equality, hashing and
+memo lookups are constant time, and it writes a compact certificate whose
+`def` forms share every repeated subterm. Before these two changes the same
+runs took 5 s, 60 s and 185 s.
 
 ## Provenance and reproduction
 

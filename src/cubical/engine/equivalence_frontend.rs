@@ -3,7 +3,7 @@
 use crate::cubical::engine::face_frontend::Face;
 use crate::cubical::engine::path_frontend::{cons, u, v};
 use crate::cubical::engine::restricted_frontend::RestrictedProducer;
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 #[derive(Default)]
 pub struct EquivalenceProducer {

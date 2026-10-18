@@ -1,6 +1,6 @@
 //! Untrusted producer for the semantic lemma calculus. Not a cubical elaborator.
 use crate::cubical::engine::frontend::Producer;
-use crate::sexp::{Sexp, atom, call};
+use crate::cubical::engine::term::{Sexp, atom, call};
 
 pub fn univalence_demo() -> Producer {
     let mut p = Producer::default();
@@ -129,9 +129,9 @@ pub fn agda_replay(p: &Producer) -> Result<String, String> {
                     "coe-map",
                     "forget-map",
                 ]
-                .contains(&a.as_str()) =>
+                .contains(&&**a) =>
             {
-                Ok(a.clone())
+                Ok(a.to_string())
             }
             Sexp::List(xs) if !xs.is_empty() => {
                 let head = xs[0].atom()?;

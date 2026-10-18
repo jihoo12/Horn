@@ -1,6 +1,17 @@
 //! Cubical scripts: results are reported only from a kernel-checked oracle.
-//! The ua example (two minutes) runs via `horn cubical eval`; these are small.
 use horn::{cubical, oracle};
+
+#[test]
+fn transport_along_ua_of_not_evaluates_to_a_boolean() {
+    let script = cubical::script::run(include_str!("../examples/cubical/script/bool.hcs")).unwrap();
+    let shown: Vec<_> = script
+        .evaluations
+        .iter()
+        .map(|e| format!("{} = {} : {}", e.name, e.value, e.ty))
+        .collect();
+    assert_eq!(shown, ["not-true = bfalse : bool", "along-ua = bfalse : bool"]);
+    assert_eq!(script.certified.checked.goals, 6);
+}
 
 const NOT: &str = "
 (def not (pi b bool bool) (lam b bool (bif c bool bfalse btrue b)))

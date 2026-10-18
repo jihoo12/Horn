@@ -3,7 +3,7 @@
 use super::{RestrictedProducer, shape};
 use crate::cubical::engine::face_frontend::Face;
 use crate::cubical::engine::path_frontend::Op;
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 impl RestrictedProducer {
     fn eliminator_redex(t: &Sexp) -> Result<bool> {

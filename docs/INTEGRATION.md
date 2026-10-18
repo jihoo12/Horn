@@ -92,7 +92,7 @@ ground/schematic checkers and Agda models are unchanged.
    separate, explicit contract.
 3. Done for the bundled examples: `horn cubical generate` streams the
    engine's derivation into the oracle encoder, so no multi-gigabyte proof
-   is materialized (univalence: 60 s, 1.1 GB peak). The producer itself still
+   is materialized (univalence: 4.7 s, 0.24 GB peak). The producer itself still
    keeps every step in memory.
 4. Export implicational certificates to the Agda model, support multiple
    universe variables and dependent computation, and connect the executable

@@ -23,7 +23,7 @@ use super::engine::path_frontend::{dim, papp, path, u, v};
 use super::engine::restricted_frontend::RestrictedProducer;
 use super::engine::ua_frontend::{ua_term, ua_type};
 use super::generate::{Regenerated, certify};
-use crate::sexp::{Result, Sexp, atom, call, parse};
+use super::engine::term::{Result, Sexp, atom, call, parse};
 use std::collections::HashMap;
 
 const FUEL: usize = 100_000;
@@ -126,7 +126,7 @@ impl Elaborator {
 
     fn interval(&self, s: &Sexp, names: &Names) -> Result<Sexp> {
         match s {
-            Sexp::Atom(a) if a == "i0" || a == "i1" => Ok(s.clone()),
+            Sexp::Atom(a) if &**a == "i0" || &**a == "i1" => Ok(s.clone()),
             Sexp::Atom(a) => index(&names.dimensions, a)
                 .map(dim)
                 .ok_or_else(|| format!("unknown dimension {a}")),
@@ -144,13 +144,13 @@ impl Elaborator {
     fn term(&mut self, s: &Sexp, names: &Names) -> Result<Sexp> {
         let xs = match s {
             Sexp::Atom(a) => {
-                return if ["bool", "btrue", "bfalse", "nat", "zero"].contains(&a.as_str()) {
+                return if ["bool", "btrue", "bfalse", "nat", "zero"].contains(&&**a) {
                     Ok(s.clone())
-                } else if let Some(i) = index(&names.ordinary, a) {
+                } else if let Some(i) = index(&names.ordinary, &**a) {
                     Ok(v(i))
-                } else if let Some(t) = self.defs.get(a) {
+                } else if let Some(t) = self.defs.get(&**a) {
                     Ok(t.clone())
-                } else if let Some(t) = self.prelude.get(a.as_str()) {
+                } else if let Some(t) = self.prelude.get(&**a) {
                     Ok(t.clone())
                 } else {
                     Err(format!("unknown name {a}"))
@@ -234,13 +234,13 @@ impl Elaborator {
 fn show(s: &Sexp) -> String {
     fn unary(s: &Sexp) -> Option<usize> {
         match s {
-            Sexp::Atom(a) if a == "z" => Some(0),
+            Sexp::Atom(a) if &**a == "z" => Some(0),
             Sexp::List(xs) if xs.len() == 2 && xs[0] == atom("s") => unary(&xs[1]).map(|n| n + 1),
             _ => None,
         }
     }
     match s {
-        Sexp::Atom(a) => a.clone(),
+        Sexp::Atom(a) => a.to_string(),
         Sexp::List(xs) => {
             let parts: Vec<_> = xs
                 .iter()
@@ -256,8 +256,10 @@ fn show(s: &Sexp) -> String {
 }
 
 pub fn run(source: &str) -> Result<Script> {
-    let forms = parse(source)?;
+    let source = source.to_owned();
+    // Terms are interned per thread, so parsing happens on the worker.
     let (certified, evaluations) = certify(move || {
+        let forms = parse(&source)?;
         let mut e = Elaborator::new()?;
         let nil = atom("nil");
         let top = Face::True;

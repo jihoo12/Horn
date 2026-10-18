@@ -4,7 +4,7 @@ use crate::cubical::engine::path_frontend::{Op, path, u, v};
 use crate::cubical::engine::restricted_frontend::RestrictedProducer;
 use crate::cubical::engine::transport_equiv_frontend::{transport_function, transport_homotopy, transported_equiv};
 use crate::cubical::engine::transport_frontend::transport_at;
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 pub fn apply(f: Sexp, args: impl IntoIterator<Item = Sexp>) -> Sexp {
     args.into_iter().fold(f, |t, a| call("app", [t, a]))

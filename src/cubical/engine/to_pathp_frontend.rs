@@ -3,7 +3,7 @@ use crate::cubical::engine::face_frontend::Face;
 use crate::cubical::engine::path_frontend::{cons, dim, papp, path, u, v};
 use crate::cubical::engine::restricted_frontend::{RestrictedProducer, system};
 use crate::cubical::engine::transport_frontend::transport_at;
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 pub fn to_pathp_line() -> Sexp {
     // h,d,c,Q,B,A. Outer j, inner composition direction k.

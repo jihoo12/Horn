@@ -2,7 +2,7 @@
 use crate::cubical::engine::face_frontend::Face;
 use crate::cubical::engine::path_frontend::{cons, dim, papp, u, v};
 use crate::cubical::engine::restricted_frontend::RestrictedProducer;
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 // In context A:U_l, the same ordinary core term works at every universe level.
 // The contraction of (x,p) in fiber(id,y) is
@@ -30,10 +30,10 @@ pub fn identity_equivalence() -> Sexp {
 // ordinary variables or dimensions and is checked at each requested Equiv A A.
 #[allow(dead_code)] // Used by ua-demo; the standalone identity demo checks the whole lambda.
 pub fn identity_core() -> Sexp {
-    let Sexp::List(mut xs) = identity_equivalence() else {
+    let Sexp::List(xs) = identity_equivalence() else {
         unreachable!()
     };
-    xs.remove(1)
+    xs[1].clone()
 }
 
 pub fn identity_demo() -> Result<RestrictedProducer> {

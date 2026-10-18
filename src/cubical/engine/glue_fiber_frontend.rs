@@ -3,7 +3,7 @@
 use crate::cubical::engine::face_frontend::Face;
 use crate::cubical::engine::path_frontend::{Op, cons, dim, papp, u, v};
 use crate::cubical::engine::restricted_frontend::{RestrictedProducer, system};
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 fn lift(p: &mut RestrictedProducer, t: &Sexp) -> Result<Sexp> {
     Ok(p.f.path.transform(t, &Op::DShift(0))?.0)

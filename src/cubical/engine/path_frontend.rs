@@ -1,7 +1,7 @@
 //! Untrusted producer for the scoped PathP experiment. No kernel changes.
 use crate::cubical::engine::frontend::{E, Producer, lam};
-use crate::sexp::{Result, Sexp, atom, call};
-use std::{collections::BTreeMap, rc::Rc};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
+use std::collections::BTreeMap;
 
 #[path = "face_ops.rs"]
 mod face_ops;
@@ -77,20 +77,18 @@ impl Op {
 type TransformKey = (u8, usize, usize, Option<usize>);
 #[derive(Default)]
 struct TransformMemo {
-    terms: BTreeMap<Rc<str>, usize>,
-    values: Vec<Rc<str>>,
+    terms: std::collections::HashMap<Sexp, usize>,
+    values: Vec<Sexp>,
     operations: BTreeMap<TransformKey, (usize, usize)>,
 }
 impl TransformMemo {
     fn intern(&mut self, t: &Sexp) -> usize {
-        let text = t.to_string();
-        if let Some(id) = self.terms.get(text.as_str()) {
+        if let Some(id) = self.terms.get(t) {
             return *id;
         }
         let id = self.values.len();
-        let text: Rc<str> = text.into();
-        self.terms.insert(Rc::clone(&text), id);
-        self.values.push(text);
+        self.terms.insert(t.clone(), id);
+        self.values.push(t.clone());
         id
     }
 }
@@ -182,7 +180,7 @@ impl PathProducer {
             };
             let key = (kind, input, op.cutoff(), replacement);
             if let Some((out, id)) = memo.operations.get(&key) {
-                return Ok((crate::sexp::parse(&memo.values[*out])?.remove(0), *id));
+                return Ok((memo.values[*out].clone(), *id));
             }
             Some(key)
         } else {
@@ -424,7 +422,7 @@ impl PathProducer {
             let input = memo.intern(g);
             let key = (4, input, k, None);
             if let Some((out, id)) = memo.operations.get(&key) {
-                return Ok((crate::sexp::parse(&memo.values[*out])?.remove(0), *id));
+                return Ok((memo.values[*out].clone(), *id));
             }
             Some(key)
         } else {
@@ -453,7 +451,7 @@ impl PathProducer {
     }
     pub fn interval(&mut self, d: usize, r: &Sexp) -> Result<usize> {
         if self.memoization_enabled()
-            && let Some(id) = self.p.known_judgment(&format!("(interval {} {r})", num(d)))
+            && let Some(id) = self.p.known_judgment(&call("interval", [num(d), r.clone()]))
         {
             return Ok(id);
         }
@@ -739,7 +737,7 @@ impl PathProducer {
             ids.push(self.p.emit(
                 &rule,
                 refs.iter().map(|n| ids[*n]).collect(),
-                Sexp::List(xs),
+                crate::cubical::engine::term::list(xs),
             ));
         }
         Ok(ids[root])

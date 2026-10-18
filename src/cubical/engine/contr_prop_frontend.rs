@@ -3,7 +3,7 @@ use crate::cubical::engine::face_frontend::Face;
 use crate::cubical::engine::glue_fiber_frontend::extend_contr;
 use crate::cubical::engine::path_frontend::{Op, dim, papp, path, u, v};
 use crate::cubical::engine::restricted_frontend::{RestrictedProducer, system};
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 fn app(f: Sexp, a: Sexp) -> Sexp {
     call("app", [f, a])

@@ -1,7 +1,7 @@
 //! Untrusted proof producer. Lambda domains are annotations erased by quote().
 //! Equality search is deliberately limited to chains of root beta steps.
-use crate::sexp::{Result, Sexp, atom, call};
-use std::{collections::BTreeMap, rc::Rc};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
+
 
 #[derive(Clone, Debug)]
 pub enum E {
@@ -86,68 +86,38 @@ fn universe(a: &E) -> Result<usize> {
 pub struct Producer {
     // In archive mode use judgment(id), rather than reading the third field.
     pub steps: Vec<(String, Vec<usize>, Sexp)>,
-    cache: BTreeMap<Rc<str>, usize>,
+    cache: std::collections::HashMap<Sexp, usize>,
     results: Vec<(String, usize)>,
-    // Optional lossless storage for large, untrusted producer runs. The kernel
-    // still receives the same fully expanded textual certificate.
-    archive: Option<Vec<Rc<str>>>,
+    // Judgments are hash-consed, so storing them is cheap; this flag only
+    // turns on progress messages for large runs.
+    archive: Option<()>,
 }
 
 impl Producer {
     #[allow(dead_code)] // Only large-certificate producers enable this mode.
     pub fn archive_judgments(&mut self) {
-        if self.archive.is_some() {
-            return;
-        }
-        let cache = &self.cache;
-        let archive = self
-            .steps
-            .iter_mut()
-            .map(|(_, _, j)| {
-                let text = j.to_string();
-                let shared = cache
-                    .get_key_value(text.as_str())
-                    .map(|(key, _)| Rc::clone(key))
-                    .unwrap_or_else(|| Rc::from(text));
-                *j = atom("archived-judgment");
-                shared
-            })
-            .collect();
-        self.archive = Some(archive);
+        self.archive = Some(());
     }
 
     #[allow(dead_code)] // Deep producers read judgments through this accessor.
     pub fn judgment(&self, id: usize) -> Sexp {
-        if let Some(archive) = &self.archive {
-            crate::sexp::parse(&archive[id])
-                .expect("producer stored valid syntax")
-                .remove(0)
-        } else {
-            self.steps[id].2.clone()
-        }
+        self.steps[id].2.clone()
     }
 
     #[allow(dead_code)]
-    pub fn known_judgment(&self, text: &str) -> Option<usize> {
-        self.cache.get(text).copied()
+    pub fn known_judgment(&self, judgment: &Sexp) -> Option<usize> {
+        self.cache.get(judgment).copied()
     }
     pub fn emit(&mut self, rule: &str, refs: Vec<usize>, judgment: Sexp) -> usize {
-        let key: Rc<str> = judgment.to_string().into();
-        if let Some(id) = self.cache.get(&key) {
+        if let Some(id) = self.cache.get(&judgment) {
             return *id;
         }
         let id = self.steps.len();
         if self.archive.is_some() && id > 0 && id.is_multiple_of(100_000) {
             eprintln!("GENERATING (not checked): {id} proof steps");
         }
-        let stored = if let Some(archive) = &mut self.archive {
-            archive.push(key.clone());
-            atom("archived-judgment")
-        } else {
-            judgment
-        };
-        self.cache.insert(key, id);
-        self.steps.push((rule.to_owned(), refs, stored));
+        self.cache.insert(judgment.clone(), id);
+        self.steps.push((rule.to_owned(), refs, judgment));
         id
     }
 
@@ -163,11 +133,7 @@ impl Producer {
         let mut out = String::new();
         for (i, (rule, refs, j)) in self.steps.iter().enumerate() {
             let refs = Sexp::List(refs.iter().map(|n| atom(n.to_string())).collect());
-            if let Some(archive) = &self.archive {
-                out.push_str(&format!("(step {i} {rule} {refs} {})\n", archive[i]));
-            } else {
-                out.push_str(&format!("(step {i} {rule} {refs} {j})\n"));
-            }
+            out.push_str(&format!("(step {i} {rule} {refs} {j})\n"));
         }
         for (name, id) in &self.results {
             out.push_str(&format!("(result {name} {id})\n"));
@@ -208,20 +174,28 @@ impl Producer {
                 }
             })
             .collect();
+        let mut names = std::collections::HashMap::new();
         for (i, (rule, refs, j)) in self.steps.iter().enumerate() {
             let Some(id) = ids[i] else {
                 continue;
             };
-            let refs = Sexp::List(
-                refs.iter()
-                    .map(|r| atom(ids[*r].expect("retained earlier premise").to_string()))
-                    .collect(),
-            );
-            if let Some(archive) = &self.archive {
-                writeln!(out, "(step {id} {rule} {refs} {})", archive[i])?;
-            } else {
-                writeln!(out, "(step {id} {rule} {refs} {j})")?;
+            let refs: Vec<String> = refs
+                .iter()
+                .map(|r| ids[*r].expect("retained earlier premise").to_string())
+                .collect();
+            // The judgment's arguments refer to shared definitions, so the
+            // text grows with the number of distinct subterms, not their size.
+            let Sexp::List(parts) = j else {
+                writeln!(out, "(step {id} {rule} ({}) {j})", refs.join(" "))?;
+                continue;
+            };
+            let mut judgment = format!("({}", parts[0]);
+            for arg in &parts[1..] {
+                judgment.push(' ');
+                judgment.push_str(&shared(arg, &mut names, &mut out)?);
             }
+            judgment.push(')');
+            writeln!(out, "(step {id} {rule} ({}) {judgment})", refs.join(" "))?;
         }
         for (name, id) in &self.results {
             writeln!(
@@ -497,4 +471,29 @@ pub fn dtt_demo() -> Result<Producer> {
     let (_, _, beta) = p.reduce(&[U(0), V(0)], &app(lam(Nat, lam(V(2), V(2))), Zero), 128)?;
     p.result("open-dependent-beta", beta);
     Ok(p)
+}
+
+/// The text for `t` in a compact certificate: an atom itself, or `?dN` for a
+/// compound term, writing its `def` (after those of its subterms) once.
+fn shared(
+    t: &Sexp,
+    names: &mut std::collections::HashMap<Sexp, usize>,
+    out: &mut impl std::io::Write,
+) -> std::io::Result<String> {
+    let Sexp::List(xs) = t else {
+        return Ok(t.to_string());
+    };
+    if let Some(n) = names.get(t) {
+        return Ok(format!("?d{n}"));
+    }
+    let mut text = format!("({}", xs[0]);
+    for x in &xs[1..] {
+        text.push(' ');
+        text.push_str(&shared(x, names, out)?);
+    }
+    text.push(')');
+    let n = names.len();
+    writeln!(out, "(def ?d{n} {text})")?;
+    names.insert(t.clone(), n);
+    Ok(format!("?d{n}"))
 }

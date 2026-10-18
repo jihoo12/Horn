@@ -16,7 +16,7 @@ accepts the oracle. In [bool.hcs](examples/cubical/script/bool.hcs), `not`
 becomes an equivalence and a path `ua not : Path U0 bool bool`; transporting
 `btrue` along it evaluates to `bfalse`. See [CUBICAL_SCRIPT.md](docs/CUBICAL_SCRIPT.md).
 The certificate engine now lives in Horn (`horn cubical generate NAME`
-regenerates the univalence certificate in a minute), so kamo3 is not needed.
+regenerates the univalence certificate in about five seconds), so kamo3 is not needed.
 
 ## Standalone language and cubical integration
 

@@ -3,7 +3,7 @@
 use crate::cubical::engine::face_frontend::{Face, FaceProducer};
 use crate::cubical::engine::frontend::number as num;
 use crate::cubical::engine::path_frontend::{Op, cons, papp, path, u};
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[path = "computation_frontend.rs"]
@@ -46,11 +46,11 @@ fn level(t: &Sexp) -> Result<usize> {
 #[derive(Default)]
 pub struct RestrictedProducer {
     pub f: FaceProducer,
-    inferred: BTreeMap<String, (Sexp, usize)>,
-    checked: BTreeMap<String, usize>,
-    equalities: BTreeMap<String, usize>,
-    equality_active: BTreeSet<String>,
-    restriction_hints: Option<BTreeMap<String, Vec<(Face, String)>>>,
+    inferred: BTreeMap<Sexp, (Sexp, usize)>,
+    checked: BTreeMap<Sexp, usize>,
+    equalities: BTreeMap<Sexp, usize>,
+    equality_active: BTreeSet<Sexp>,
+    restriction_hints: Option<BTreeMap<Sexp, Vec<(Face, Sexp)>>>,
     closed_annotation_reuse: bool,
     type_directed_composition: bool,
     certified_check_reuse: bool,
@@ -60,7 +60,7 @@ pub struct RestrictedProducer {
     /// With `keep_reduct_types`: where each term that needs an annotation was
     /// checked, by term, as (d, Γ, type). A failed inference of the same term
     /// in an extension of such a context retries with the transported type.
-    checked_forms: BTreeMap<String, Vec<(usize, Sexp, Sexp)>>,
+    checked_forms: BTreeMap<Sexp, Vec<(usize, Sexp, Sexp)>>,
 }
 
 /// Whether ordinary variable `k` occurs free in `t`.
@@ -259,7 +259,7 @@ impl RestrictedProducer {
                 self.f
                     .path
                     .p
-                    .known_judgment(&format!("(rctx {} {g} {})", num(d), phi.quote()))
+                    .known_judgment(&call("rctx", [num(d), g.clone(), phi.quote()]))
         {
             return Ok(id);
         }
@@ -300,7 +300,7 @@ impl RestrictedProducer {
                 .f
                 .path
                 .p
-                .known_judgment(&format!("(length {g} {})", num(n)))
+                .known_judgment(&call("length", [g.clone(), num(n)]))
             {
                 return Ok((n, id));
             }
@@ -322,7 +322,7 @@ impl RestrictedProducer {
                 self.f
                     .path
                     .p
-                    .known_judgment(&format!("(scoped {} {} {t})", num(d), num(n)))
+                    .known_judgment(&call("scoped", [num(d), num(n), t.clone()]))
         {
             return Ok(id);
         }
@@ -394,12 +394,12 @@ impl RestrictedProducer {
         ))
     }
     pub fn infer(&mut self, d: usize, g: &Sexp, phi: &Face, t: &Sexp) -> Result<(Sexp, usize)> {
-        let key = call("rhas-key", [num(d), g.clone(), phi.quote(), t.clone()]).to_string();
+        let key = call("rhas-key", [num(d), g.clone(), phi.quote(), t.clone()]);
         if let Some(result) = self.inferred.get(&key) {
             return Ok(result.clone());
         }
         if let Some(hints) = &self.restriction_hints {
-            let hint_key = call("typing-hints", [num(d), g.clone(), t.clone()]).to_string();
+            let hint_key = call("typing-hints", [num(d), g.clone(), t.clone()]);
             let candidates = hints.get(&hint_key).cloned().unwrap_or_default();
             let normal = phi.normal();
             for (source, source_key) in candidates {
@@ -720,14 +720,13 @@ impl RestrictedProducer {
         let key = call(
             "rhas",
             [num(d), g.clone(), phi.quote(), t.clone(), expected.clone()],
-        )
-        .to_string();
+        );
         if let Some(id) = self.checked.get(&key) {
             return Ok(*id);
         }
         if self.certified_check_reuse {
             let inferred_key =
-                call("rhas-key", [num(d), g.clone(), phi.quote(), t.clone()]).to_string();
+                call("rhas-key", [num(d), g.clone(), phi.quote(), t.clone()]);
             if let Some((actual, id)) = self.inferred.get(&inferred_key)
                 && actual == expected
             {
@@ -1144,8 +1143,7 @@ impl RestrictedProducer {
                 let checked = call(
                     "rhas",
                     [num(d), g.clone(), phi.quote(), out.clone(), ty.clone()],
-                )
-                .to_string();
+                );
                 self.checked.insert(checked, oi);
                 let eq = self.eq(d, g, phi, t, &out, &ty, "req.beta-typed", vec![ti, si, oi]);
                 return Ok((out, ty, eq));
@@ -1433,8 +1431,7 @@ impl RestrictedProducer {
                 b.clone(),
                 ty.clone(),
             ],
-        )
-        .to_string();
+        );
         if let Some(id) = self.equalities.get(&key) {
             return Ok(*id);
         }
@@ -1680,7 +1677,7 @@ impl RestrictedProducer {
         }
         let known = self
             .checked_forms
-            .get(&t.to_string())
+            .get(t)
             .cloned()
             .unwrap_or_default();
         for (d0, g0, a0) in known {
@@ -1715,15 +1712,15 @@ impl RestrictedProducer {
     }
     fn remember(&mut self, d: usize, g: &Sexp, phi: &Face, t: &Sexp, a: &Sexp, id: usize) {
         if self.reduct_types && matches!(shape(t), Ok(("lam" | "pair" | "plam", _))) {
-            let known = self.checked_forms.entry(t.to_string()).or_default();
+            let known = self.checked_forms.entry(t.clone()).or_default();
             let entry = (d, g.clone(), a.clone());
             if !known.contains(&entry) {
                 known.push(entry);
             }
         }
-        let key = call("rhas-key", [num(d), g.clone(), phi.quote(), t.clone()]).to_string();
+        let key = call("rhas-key", [num(d), g.clone(), phi.quote(), t.clone()]);
         if let Some(hints) = &mut self.restriction_hints {
-            let hint_key = call("typing-hints", [num(d), g.clone(), t.clone()]).to_string();
+            let hint_key = call("typing-hints", [num(d), g.clone(), t.clone()]);
             let candidates = hints.entry(hint_key).or_default();
             if !candidates.iter().any(|(f, _)| f == phi) {
                 candidates.push((phi.clone(), key.clone()));

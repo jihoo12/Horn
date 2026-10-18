@@ -4,7 +4,7 @@
 use crate::cubical::engine::face_frontend::Face;
 use crate::cubical::engine::path_frontend::{cons, dim, papp, path, u, v};
 use crate::cubical::engine::restricted_frontend::RestrictedProducer;
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 pub fn transport_at(line: Sexp, x: Sexp) -> Sexp {
     call("comp", [papp(line, dim(0)), atom("ff"), atom("zero"), x])

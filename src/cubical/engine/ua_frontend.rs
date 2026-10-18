@@ -3,7 +3,7 @@ use crate::cubical::engine::face_frontend::Face;
 use crate::cubical::engine::identity_frontend::identity_core;
 use crate::cubical::engine::path_frontend::{cons, path, u, v};
 use crate::cubical::engine::restricted_frontend::{RestrictedProducer, system};
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 pub fn ua_family(offset: usize) -> Sexp {
     // Under <i>, ordinary context is e : Equiv A B, B : U_l, A : U_l.

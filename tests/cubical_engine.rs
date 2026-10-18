@@ -1,16 +1,12 @@
 //! The engine moved from kamo3 regenerates bundled examples inside Horn.
-//! Only the small ua-transport example runs here; canonicity and univalence
-//! regenerate with `horn cubical generate NAME` (minutes, a few GB).
 use horn::cubical;
 
 #[test]
-fn ua_transport_regenerates_to_the_bundled_goal_and_checks() {
-    let example = cubical::EXAMPLES
-        .iter()
-        .find(|e| e.name == "ua-transport")
-        .unwrap();
-    let generated = cubical::generate::regenerate("ua-transport").unwrap();
-    assert_eq!(generated.goals, example.goals);
-    assert_eq!(generated.checked.goals, 1);
+fn every_bundled_example_regenerates_to_its_goals_and_checks() {
+    for example in cubical::EXAMPLES {
+        let generated = cubical::generate::regenerate(example.name).unwrap();
+        assert_eq!(generated.goals, example.goals, "{}", example.name);
+        assert_eq!(generated.checked.goals, example.goals.lines().count());
+    }
     assert!(cubical::generate::regenerate("missing").is_err());
 }

@@ -1,6 +1,6 @@
 //! Untrusted syntax operations. Each result has a Horn derivation.
 use super::{Op, PathProducer, natural, num, shape};
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 impl PathProducer {
     pub fn boundary_syntax(&mut self, r: &Sexp) -> Result<(Sexp, Sexp, usize)> {

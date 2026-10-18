@@ -32,7 +32,7 @@ use crate::cubical::engine::restricted_frontend::RestrictedProducer;
 use crate::cubical::engine::ua_beta_frontend::{beta_term, beta_type};
 use crate::cubical::engine::ua_eta_frontend::{canonical_with, constant_equiv_type, evidence, square};
 use crate::cubical::engine::ua_frontend::{ua_term, ua_type};
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 /// `Equiv (Path U₀ A B) (Equiv A B)` in a context starting B, A.
 pub fn statement(p: &mut RestrictedProducer) -> Result<Sexp> {

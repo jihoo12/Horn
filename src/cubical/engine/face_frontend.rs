@@ -1,6 +1,6 @@
 //! Untrusted face search. The kernel checks the emitted branching derivations.
 use crate::cubical::engine::path_frontend::{Op, PathProducer, dim};
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Face {
@@ -118,7 +118,7 @@ fn natural(t: &Sexp) -> Result<usize> {
 #[derive(Default)]
 pub struct FaceProducer {
     pub path: PathProducer,
-    entailments: std::collections::BTreeMap<String, Result<usize>>,
+    entailments: std::collections::HashMap<Sexp, Result<usize>>,
 }
 impl FaceProducer {
     fn emit(&mut self, rule: &str, refs: Vec<usize>, j: Sexp) -> usize {
@@ -162,7 +162,7 @@ impl FaceProducer {
             && let Some(id) =
                 self.path
                     .p
-                    .known_judgment(&format!("(face {} {})", number(d), f.quote()))
+                    .known_judgment(&call("face", [number(d), f.quote()]))
         {
             return Ok(id);
         }
@@ -280,7 +280,7 @@ impl FaceProducer {
     }
     pub fn entails(&mut self, d: usize, a: &Face, b: &Face) -> Result<usize> {
         if self.path.memoization_enabled() {
-            let key = format!("(entails {} {} {})", number(d), a.quote(), b.quote());
+            let key = call("entails", [number(d), a.quote(), b.quote()]);
             if let Some(result) = self.entailments.get(&key) {
                 return result.clone();
             }

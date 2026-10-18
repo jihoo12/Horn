@@ -14,7 +14,7 @@ use crate::cubical::engine::identity_frontend::identity_core;
 use crate::cubical::engine::iso_equiv_frontend::{iso_equiv_term, iso_equiv_type};
 use crate::cubical::engine::path_frontend::{path, v};
 use crate::cubical::engine::restricted_frontend::{RestrictedProducer, system};
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 fn app(f: Sexp, a: Sexp) -> Sexp {
     call("app", [f, a])

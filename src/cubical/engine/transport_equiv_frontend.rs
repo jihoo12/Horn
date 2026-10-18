@@ -6,7 +6,7 @@ use crate::cubical::engine::identity_frontend::identity_core;
 use crate::cubical::engine::path_frontend::{cons, dim, papp, path, u, v};
 use crate::cubical::engine::restricted_frontend::RestrictedProducer;
 use crate::cubical::engine::transport_frontend::transport_at;
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 // Context P,B,A with optional extra ordinary variables.
 pub fn transported_equiv(p: &mut RestrictedProducer, offset: usize) -> Result<Sexp> {

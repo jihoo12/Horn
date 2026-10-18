@@ -4,7 +4,7 @@ use crate::cubical::engine::canonical_map_frontend::canonical_map_at;
 use crate::cubical::engine::path_frontend::v;
 use crate::cubical::engine::restricted_frontend::RestrictedProducer;
 use crate::cubical::engine::transport_equiv_frontend::transport_equiv_type;
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 pub fn program(l: usize) -> Result<Sexp> {
     let mut p = RestrictedProducer::default();

@@ -2,7 +2,7 @@
 use crate::cubical::engine::contr_prop_frontend::{contr_prop_line, contr_prop_type};
 use crate::cubical::engine::path_frontend::{Op, dim, papp, path, u, v};
 use crate::cubical::engine::restricted_frontend::RestrictedProducer;
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 pub fn isequiv_prop_line(p: &mut RestrictedProducer, l: usize) -> Result<Sexp> {
     // Under y and path direction: y,d,c,f,B,A.

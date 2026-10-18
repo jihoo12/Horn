@@ -28,7 +28,7 @@ use crate::cubical::engine::path_frontend::{Op, cons, dim, papp, path, u, v};
 use crate::cubical::engine::restricted_frontend::{RestrictedProducer, system};
 use crate::cubical::engine::transport_frontend::transport_at;
 use crate::cubical::engine::ua_frontend::{ua_term, ua_type};
-use crate::sexp::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 /// The canonical map of `line : Path U₀ a b` with evidence `c`. With the
 /// closed evidence lemma for `c` and a line without free dimensions this is
