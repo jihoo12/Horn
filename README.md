@@ -42,8 +42,9 @@ six minutes.
 ## Research: a surface language
 
 `horn FILE.hn` reads a small Lean-style language: sorts, constructors,
-predicates and rules, functions by pattern matching, `#eval`, and theorems
-proved by search or induction. Every answer and theorem goes into one
+predicates and rules, functions by pattern matching, `#eval`, and theorems,
+including implications like `le a b → le b c → le a c`, proved by search,
+case analysis on hypotheses, and induction. Every answer and theorem goes into one
 schematic certificate that is checked before the run succeeds, and that
 can be exported for the Agda model. See [LANGUAGE.md](docs/LANGUAGE.md) and
 [examples/lang/nat.hn](examples/lang/nat.hn).

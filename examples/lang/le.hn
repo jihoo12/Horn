@@ -1,0 +1,31 @@
+-- Implications: theorems with hypotheses, proved by induction and by case
+-- analysis on how a hypothesis was derived.
+sort Nat
+ctor zero : Nat
+ctor succ : Nat → Nat
+
+def add : Nat → Nat → Nat
+| zero,   n => n
+| succ m, n => succ (add m n)
+
+pred le : Nat → Nat → Prop
+rule le.zero : le zero n
+rule le.succ : le m n → le (succ m) (succ n)
+
+theorem le_refl (n : Nat) : le n n
+
+-- Only le.succ can conclude le (succ m) (succ n).
+theorem le_pred (m n : Nat) : le (succ m) (succ n) → le m n
+
+-- No rule concludes le (succ n) zero, so anything follows.
+theorem not_succ_le_zero (n : Nat) : le (succ n) zero → le (succ zero) zero
+
+-- Induction on a, generalizing b and c in the induction hypothesis.
+theorem le_trans (a b c : Nat) : le a b → le b c → le a c
+
+theorem le_step (m n : Nat) : le m n → le m (succ n)
+
+-- A call nested in the statement: add m n = r → add m (succ n) = succ r.
+theorem add_succ (m n : Nat) : add m (succ n) = succ (add m n)
+
+theorem le_add (m n : Nat) : le n (add m n)

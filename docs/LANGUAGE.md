@@ -53,7 +53,7 @@ certificate accepted: …
 | `pred p : S₁ → … → Prop` | a predicate |
 | `rule name : J₁ → … → J` | a Horn rule; lower-case names that are not symbols are its variables, and their sorts are inferred |
 | `def f : S₁ → … → S` with clauses `\| p₁, …, pₙ => e` | a function |
-| `theorem name (x y : S) : J := by auto` or `by induction x` | a theorem; `:= by auto` may be omitted |
+| `theorem name (x y : S) : J₁ → … → J := by auto` or `by induction x` | a theorem, possibly with hypotheses; `:= by auto` may be omitted |
 | `#eval J` or `#eval f a b` | a query: logic variables `?x` are solved, and a function call asks for its result |
 | `#check J` | a ground judgment to derive |
 
@@ -68,7 +68,8 @@ are printed back as numerals. Comments start with `--`.
 ## Proof search
 
 Goals are solved by depth-first search with iterative deepening over, in
-order, induction hypotheses, earlier theorems and facts, and the rules. An
+order, hypotheses, earlier theorems, the rules, and last earlier theorems
+with hypotheses, whose hypotheses become subgoals. An
 earlier theorem is used through an instance of its statement, so the
 certificate refers to it rather than re-deriving it. `by induction x`
 splits on the constructors of `x`'s sort; each case is searched with the
@@ -78,6 +79,36 @@ that fails tries induction on each variable in turn.
 Search is untrusted and incomplete: it can fail to find a proof, it never
 makes one up. A function defined by overlapping or partial clauses is just a
 relation; `#eval` reports the first result found.
+
+## Implications
+
+A theorem may have hypotheses: `theorem le_trans (a b c : Nat) : le a b → le b c → le a c`.
+A function call nested in a statement becomes a hypothesis about a fresh
+result, so `add m (succ n) = succ (add m n)` is proved as
+`add m n = r → add m (succ n) = succ r`. See
+[examples/lang/le.hn](../examples/lang/le.hn).
+
+With hypotheses in scope, a goal is searched for with them; if that fails,
+the prover does case analysis on a hypothesis, newest first and at most two
+levels deep. It unifies the hypothesis with the conclusion of each rule for
+its predicate: rules that cannot have derived it drop out, and each
+remaining rule gives a case with its premises as new hypotheses. A
+hypothesis no rule concludes, like `le (succ n) zero`, proves anything.
+
+Induction on `x` keeps the hypotheses: each case assumes them at the
+constructor, and the induction hypothesis is a rule from the hypotheses at
+a recursive argument to the conclusion there, for all values of the other
+variables. `le_trans` needs this: in the case `succ p` it applies the
+induction hypothesis at a different `b` and `c`. A proved implication
+becomes a lemma whose hypotheses are premises, for the hypotheses its proof
+actually used.
+
+In the certificate these are `hyp` steps for the hypotheses, `invert` steps
+for case analysis, `induct` steps with hypotheses, and `apply` steps for the
+use of a rule hypothesis or a lemma; the goal states its hypotheses. Case
+analysis must give the same unifier the checker computes, so the prover
+runs the checker's unification algorithm on the same terms. Each failed
+attempt is rolled back, so the certificate holds only the proof found.
 
 ## What is checked
 
@@ -95,18 +126,20 @@ theory: `rule bad : le (succ n) n` makes false things provable.
 
 ## Limits
 
-- A statement is one judgment. A function call nested inside it, as in
-  `add m (succ n) = succ (add m n)`, would need an implication, which the
-  schematic calculus does not have yet.
+- Certificates with implications are checked by `horn::schematic`, whose
+  rules are proved sound at the level of the calculus in
+  [agda/Implication.agda](../agda/Implication.agda), but the Agda export
+  does not support them yet; `--agda` fails for such a file.
+- Case analysis is at most two levels deep, and hypothetical goals get a
+  smaller search budget.
 - Induction is structural on one variable per proof, one level deep.
 - No implicit arguments, notation, type classes or modules.
 - The search is plain backtracking with a step budget per depth bound.
 
 ## Next steps
 
-1. Implicational theorems (`J₁ → J₂`): derived rules, and induction over
-   derivations rather than terms, so that lemmas like associativity can be
-   stated and proved.
+1. Exporting implications to the Agda model, with a proof that the
+   unification algorithm computes a most general unifier.
 2. Nested induction and a small tactic language (`apply`, `cases`, `exact`).
 3. Using a function's clauses as rewrite rules, so that `#eval` computes
    instead of searching.

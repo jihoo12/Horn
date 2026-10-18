@@ -139,7 +139,8 @@ enum Decl {
     Pred(String, Vec<String>),
     Rule(String, Vec<Term>, Term),
     Def(String, Vec<String>, String, Vec<(Vec<Term>, Term)>),
-    Theorem(String, Vec<(String, String)>, Term, Tactic),
+    /// Name, binders, hypotheses, conclusion, tactic.
+    Theorem(String, Vec<(String, String)>, Vec<Term>, Term, Tactic),
     Eval(Term),
     Check(Term),
 }
@@ -343,7 +344,12 @@ impl Parser {
                     binders.extend(names.into_iter().map(|n| (n, sort.clone())));
                 }
                 self.sym(":")?;
-                let stmt = self.term()?;
+                let mut js = vec![self.term()?];
+                while self.is_sym("→") {
+                    self.pos += 1;
+                    js.push(self.term()?);
+                }
+                let concl = js.pop().expect("nonempty");
                 let tactic = if self.is_sym(":=") {
                     self.pos += 1;
                     match (self.next(), self.next()) {
@@ -363,7 +369,7 @@ impl Parser {
                 } else {
                     Tactic::Auto
                 };
-                Decl::Theorem(name, binders, stmt, tactic)
+                Decl::Theorem(name, binders, js, concl, tactic)
             }
             "#eval" => Decl::Eval(self.term()?),
             "#check" => Decl::Check(self.term()?),
@@ -421,6 +427,9 @@ enum Just {
     /// An earlier fact: a step of the certificate, with the instantiation
     /// of its statement's names.
     Fact(usize, Vec<(u32, T)>),
+    /// A rule hypothesis or an earlier implication applied as a rule: its
+    /// step, the instantiation of its names, and the proofs of its premises.
+    Apply(usize, Vec<(u32, T)>),
 }
 
 #[derive(Clone)]
@@ -430,12 +439,23 @@ struct Proof {
     children: Vec<Proof>,
 }
 
-/// A usable fact: its statement, the names it generalizes over (instances
-/// may replace them), and its step.
+/// A usable fact: its statement and hypotheses, the names it generalizes
+/// over (instances may replace them), and its step.
 #[derive(Clone)]
 struct Fact {
     stmt: Pat,
+    premises: Vec<Pat>,
     names: Vec<u32>,
+    step: usize,
+}
+
+/// A hypothesis in scope: plain (no premises, nothing generalized), or a
+/// rule whose generalized names an application may instantiate.
+#[derive(Clone)]
+struct Hyp {
+    premises: Vec<T>,
+    concl: T,
+    general: Vec<u32>,
     step: usize,
 }
 
@@ -670,6 +690,25 @@ impl Sig {
         }
     }
 
+    /// A judgment with the calls in its arguments flattened into premises.
+    fn flatten_judgment(
+        &self,
+        t: &Term,
+        premises: &mut Vec<Term>,
+        fresh: &mut usize,
+    ) -> Result<Term> {
+        match t {
+            Term::App(p, args) => {
+                let args = args
+                    .iter()
+                    .map(|a| self.flatten(a, premises, fresh))
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(Term::App(p.clone(), args))
+            }
+            t => Ok(t.clone()),
+        }
+    }
+
     fn theory_text(&self) -> String {
         let mut s = String::new();
         for name in &self.sorts {
@@ -732,9 +771,14 @@ struct Prover {
     var_sort: Vec<u32>,
     trail: Vec<usize>,
     facts: Vec<Fact>,
-    /// Facts available only inside the current induction case.
-    hyps: Vec<(T, usize)>,
+    /// Hypotheses in scope.
+    hyps: Vec<Hyp>,
     budget: u64,
+    /// Steps per depth bound, and the largest bound.
+    round: u64,
+    max_depth: u32,
+    /// Whether the depth bound cut off some branch.
+    cut: bool,
 }
 
 impl Prover {
@@ -842,42 +886,55 @@ impl Prover {
             }
             Work::Goal(goal, depth) => {
                 if *depth == 0 {
+                    self.cut = true;
                     return None;
                 }
-                // Hypotheses and facts first, then earlier theorems, then rules.
+                // Hypotheses first, then earlier theorems, then rules. A
+                // rule hypothesis or an implication becomes subgoals.
                 for i in 0..self.hyps.len() {
                     let mark = self.trail.len();
-                    let (h, step) = self.hyps[i].clone();
-                    if self.unify(goal, &h) {
-                        let next = cons(
-                            Work::Build(Just::Fact(step, Vec::new()), goal.clone(), 0),
-                            &node.next,
-                        );
-                        if let Some(r) = self.solve(next, proofs.clone()) {
-                            return Some(r);
-                        }
-                    }
-                    self.undo(mark);
-                }
-                for i in 0..self.facts.len() {
-                    let mark = self.trail.len();
-                    let fact = self.facts[i].clone();
-                    let names: Vec<(u32, T)> = fact
-                        .names
+                    let h = self.hyps[i].clone();
+                    let names: Vec<(u32, T)> = h
+                        .general
                         .iter()
                         .map(|&e| (e, self.fresh(self.sig.rigid[e as usize].1)))
                         .collect();
-                    let stmt = self.inst(&fact.stmt, &mut Vec::new(), &[], &names);
-                    if self.unify(goal, &stmt) {
-                        let next = cons(
-                            Work::Build(Just::Fact(fact.step, names), goal.clone(), 0),
-                            &node.next,
-                        );
-                        if let Some(r) = self.solve(next, proofs.clone()) {
+                    let concl = subst_names(&h.concl, &names);
+                    if self.unify(goal, &concl) {
+                        let r = if h.premises.is_empty() && h.general.is_empty() {
+                            let next = cons(
+                                Work::Build(Just::Fact(h.step, Vec::new()), goal.clone(), 0),
+                                &node.next,
+                            );
+                            self.solve(next, proofs.clone())
+                        } else {
+                            let mut next = cons(
+                                Work::Build(
+                                    Just::Apply(h.step, names.clone()),
+                                    goal.clone(),
+                                    h.premises.len(),
+                                ),
+                                &node.next,
+                            );
+                            for p in h.premises.iter().rev() {
+                                next = cons(Work::Goal(subst_names(p, &names), depth - 1), &next);
+                            }
+                            self.solve(next, proofs.clone())
+                        };
+                        if let Some(r) = r {
                             return Some(r);
                         }
                     }
                     self.undo(mark);
+                }
+                // Earlier theorems without premises, then the rules, then
+                // theorems with premises, which make deeper subgoals.
+                for i in 0..self.facts.len() {
+                    if self.facts[i].premises.is_empty()
+                        && let Some(r) = self.try_fact(i, goal, *depth, &node.next, &proofs)
+                    {
+                        return Some(r);
+                    }
                 }
                 for r in 0..self.sig.rules.len() {
                     let mark = self.trail.len();
@@ -903,25 +960,68 @@ impl Prover {
                     }
                     self.undo(mark);
                 }
+                for i in 0..self.facts.len() {
+                    if !self.facts[i].premises.is_empty()
+                        && let Some(r) = self.try_fact(i, goal, *depth, &node.next, &proofs)
+                    {
+                        return Some(r);
+                    }
+                }
                 None
             }
         }
     }
 
+    fn try_fact(
+        &mut self,
+        i: usize,
+        goal: &T,
+        depth: u32,
+        next: &WList,
+        proofs: &PList,
+    ) -> Option<PList> {
+        let mark = self.trail.len();
+        let fact = self.facts[i].clone();
+        let names: Vec<(u32, T)> = fact
+            .names
+            .iter()
+            .map(|&e| (e, self.fresh(self.sig.rigid[e as usize].1)))
+            .collect();
+        let stmt = self.inst(&fact.stmt, &mut Vec::new(), &[], &names);
+        if self.unify(goal, &stmt) {
+            let just = if fact.premises.is_empty() {
+                Just::Fact(fact.step, names.clone())
+            } else {
+                Just::Apply(fact.step, names.clone())
+            };
+            let mut next = cons(Work::Build(just, goal.clone(), fact.premises.len()), next);
+            for p in fact.premises.iter().rev() {
+                let t = self.inst(p, &mut Vec::new(), &[], &names);
+                next = cons(Work::Goal(t, depth - 1), &next);
+            }
+            if let Some(r) = self.solve(next, proofs.clone()) {
+                return Some(r);
+            }
+        }
+        self.undo(mark);
+        None
+    }
+
     /// Search with increasing depth.
     fn prove(&mut self, goal: &T) -> Option<Proof> {
         let mut depth = 4;
-        while depth <= 1 << 14 {
-            self.budget = 2_000_000;
+        while depth <= self.max_depth {
+            self.budget = self.round;
+            self.cut = false;
             let mark = self.trail.len();
             let work = cons(Work::Goal(goal.clone(), depth), &None);
             if let Some(Some(p)) = self.solve(work, None) {
                 return Some(p.proof.clone());
             }
             self.undo(mark);
-            if self.budget > 0 && depth > 64 {
-                // The whole tree was explored below this depth bound without
-                // running out of budget; deeper search may still help.
+            // The whole tree was explored: a deeper bound cannot help.
+            if self.budget > 0 && !self.cut {
+                break;
             }
             depth *= 2;
         }
@@ -945,13 +1045,20 @@ struct Cert {
     steps: usize,
     /// Hypothesis-free judgments already derived, by text.
     derived: HashMap<String, usize>,
+    /// For each step, the hypothesis steps it depends on.
+    deps: Vec<Vec<usize>>,
+    /// Hypothesis steps.
+    hyps: HashSet<usize>,
 }
 
 impl Cert {
-    fn line(&mut self, s: String) -> usize {
+    fn line(&mut self, s: String, mut deps: Vec<usize>) -> usize {
         let n = self.steps;
         let _ = writeln!(self.proof, "{s}");
         self.steps += 1;
+        deps.sort_unstable();
+        deps.dedup();
+        self.deps.push(deps);
         n
     }
 }
@@ -1073,40 +1180,103 @@ impl Session {
         })
     }
 
+    /// The hypotheses a reference depends on, as the checker computes them.
+    fn deps_of(&self, r: &str) -> Vec<usize> {
+        r.parse::<usize>()
+            .map_or_else(|_| Vec::new(), |n| self.cert.deps[n].clone())
+    }
+
+    /// `(X t)…` for an instantiation.
+    fn bindings(&self, pr: &Prover, names: &[(u32, T)]) -> Result<Vec<String>> {
+        names
+            .iter()
+            .map(|(e, t)| {
+                let t = self.close(pr, t)?;
+                Ok(format!(
+                    "({} {})",
+                    self.sig.rigid[*e as usize].0,
+                    self.text(&t)
+                ))
+            })
+            .collect()
+    }
+
     /// Write a proof; returns how to refer to its conclusion.
-    fn emit(&mut self, pr: &Prover, p: &Proof, memo: bool) -> Result<String> {
+    fn emit(&mut self, pr: &Prover, p: &Proof) -> Result<String> {
         let goal = self.close(pr, &p.goal)?;
         let text = self.text(&goal);
         match &p.just {
             Just::Fact(step, names) if names.is_empty() => Ok(step.to_string()),
             Just::Fact(step, names) => {
-                let mut s = step.to_string();
-                for (e, t) in names {
-                    let t = self.close(pr, t)?;
-                    let _ = write!(s, " ({} {})", self.sig.rigid[*e as usize].0, self.text(&t));
+                Ok(format!("({step} {})", self.bindings(pr, names)?.join(" ")))
+            }
+            Just::Apply(step, names) => {
+                let binds = self.bindings(pr, names)?;
+                let mut refs = Vec::new();
+                let mut deps = Vec::new();
+                for c in &p.children {
+                    let r = self.emit(pr, c)?;
+                    deps.extend(self.deps_of(&r));
+                    refs.push(r);
                 }
-                Ok(format!("({s})"))
+                // A rule hypothesis stays a hypothesis of the result; an
+                // earlier theorem's hypotheses are discharged by the refs.
+                if self.cert.hyps.contains(step) {
+                    deps.push(*step);
+                }
+                let n = self.cert.line(
+                    format!(
+                        "(apply {} {step} ({}) ({}))",
+                        self.cert.steps,
+                        binds.join(" "),
+                        refs.join(" ")
+                    ),
+                    deps,
+                );
+                Ok(n.to_string())
             }
             Just::Rule(r) => {
-                if memo && let Some(&n) = self.cert.derived.get(&text) {
+                if let Some(&n) = self.cert.derived.get(&text) {
                     return Ok(n.to_string());
                 }
                 let mut refs = Vec::new();
+                let mut deps = Vec::new();
                 for c in &p.children {
-                    refs.push(self.emit(pr, c, memo)?);
+                    let r = self.emit(pr, c)?;
+                    deps.extend(self.deps_of(&r));
+                    refs.push(r);
                 }
                 let name = self.sig.rules[*r].name.clone();
-                let n = self.cert.line(format!(
-                    "(step {} {name} ({}) {text})",
-                    self.cert.steps,
-                    refs.join(" ")
-                ));
-                if memo {
+                let n = self.cert.line(
+                    format!(
+                        "(step {} {name} ({}) {text})",
+                        self.cert.steps,
+                        refs.join(" ")
+                    ),
+                    deps,
+                );
+                // Only a judgment that depends on no hypothesis holds
+                // everywhere later.
+                if self.cert.deps[n].is_empty() {
                     self.cert.derived.insert(text, n);
                 }
                 Ok(n.to_string())
             }
         }
+    }
+
+    /// A step number for a reference; an instance of an earlier theorem
+    /// becomes an `apply` step.
+    fn as_step(&mut self, r: &str) -> usize {
+        if let Ok(n) = r.parse() {
+            return n;
+        }
+        let inner = &r[1..r.len() - 1];
+        let (k, binds) = inner.split_once(' ').unwrap_or((inner, ""));
+        self.cert.line(
+            format!("(apply {} {k} ({binds}) ())", self.cert.steps),
+            Vec::new(),
+        )
     }
 
     fn prover(&self) -> Prover {
@@ -1118,28 +1288,197 @@ impl Session {
             facts: self.facts.clone(),
             hyps: Vec::new(),
             budget: 0,
+            round: 2_000_000,
+            max_depth: 1 << 14,
+            cut: false,
         }
     }
 
-    /// Prove a judgment with no rigid names, or with the theorem's names as
-    /// constants; returns a reference.
-    fn search(&mut self, stmt: &T, hyps: Vec<(T, usize)>) -> Result<Option<String>> {
+    /// Search for a proof of a closed goal from hypotheses; returns a
+    /// reference.
+    fn search(&mut self, goal: &T, ctx: &[Hyp]) -> Result<Option<String>> {
         let mut pr = self.prover();
-        pr.hyps = hyps.clone();
-        let found = pr.prove(stmt);
-        match found {
-            Some(p) => {
-                // Inside an induction case the result may depend on its
-                // hypotheses, so it is not reused elsewhere.
-                let memo = hyps.is_empty();
-                let r = self.emit(&pr, &p, memo)?;
-                Ok(Some(r))
-            }
+        pr.hyps = ctx.to_vec();
+        if !ctx.is_empty() {
+            // Hypothetical goals are tried often, under case analysis.
+            pr.round = 20_000;
+            pr.max_depth = 64;
+        }
+        match pr.prove(goal) {
+            Some(p) => Ok(Some(self.emit(&pr, &p)?)),
             None => Ok(None),
         }
     }
 
-    fn induct(&mut self, x: u32, stmt: &Pat) -> Result<Option<usize>> {
+    /// Search, then case analysis on plain hypotheses, newest first, up to
+    /// `inv` levels deep.
+    fn prove_goal(&mut self, goal: &T, ctx: &[Hyp], inv: u32) -> Result<Option<String>> {
+        if let Some(r) = self.search(goal, ctx)? {
+            return Ok(Some(r));
+        }
+        if inv == 0 {
+            return Ok(None);
+        }
+        for k in (0..ctx.len()).rev() {
+            if !ctx[k].premises.is_empty() || !ctx[k].general.is_empty() {
+                continue;
+            }
+            let mark = self.mark();
+            if let Some(n) = self.invert(k, goal, ctx, inv - 1)? {
+                return Ok(Some(n.to_string()));
+            }
+            self.restore(mark);
+        }
+        Ok(None)
+    }
+
+    fn mark(&self) -> Mark {
+        Mark(self.cert.proof.len(), self.cert.steps, self.sig.rigid.len())
+    }
+
+    /// Forget everything written since the mark.
+    fn restore(&mut self, m: Mark) {
+        self.cert.proof.truncate(m.0);
+        self.cert.steps = m.1;
+        self.cert.deps.truncate(m.1);
+        self.cert.derived.retain(|_, n| *n < m.1);
+        self.cert.hyps.retain(|n| *n < m.1);
+        self.sig.rigid.truncate(m.2);
+    }
+
+    /// Declare a fresh eigenvariable in the proof.
+    fn declare(&mut self, base: &str, sort: u32) -> u32 {
+        let name = self.unique(base);
+        let e = self.sig.rigid.len() as u32;
+        let _ = writeln!(
+            self.cert.proof,
+            "(var {name} {})",
+            self.sig.sorts[sort as usize]
+        );
+        self.sig.rigid.push((name, sort));
+        e
+    }
+
+    /// Assume a hypothesis: plain, or a rule over its premises that
+    /// generalizes the given names.
+    fn hyp_line(&mut self, premises: &[T], concl: &T, general: &[u32]) -> Hyp {
+        let n = self.cert.steps;
+        let line = if premises.is_empty() && general.is_empty() {
+            format!("(hyp {n} {})", self.text(concl))
+        } else {
+            let ps: Vec<String> = premises.iter().map(|p| self.text(p)).collect();
+            let gs: Vec<String> = general
+                .iter()
+                .map(|&g| self.sig.rigid[g as usize].0.clone())
+                .collect();
+            format!(
+                "(hyp {n} ({}) {} ({}))",
+                ps.join(" "),
+                self.text(concl),
+                gs.join(" ")
+            )
+        };
+        self.cert.line(line, vec![n]);
+        self.cert.hyps.insert(n);
+        Hyp {
+            premises: premises.to_vec(),
+            concl: concl.clone(),
+            general: general.to_vec(),
+            step: n,
+        }
+    }
+
+    /// Case analysis on the plain hypothesis `ctx[k]`: one case per rule
+    /// whose conclusion unifies with it, under the most general unifier.
+    fn invert(&mut self, k: usize, goal: &T, ctx: &[Hyp], inv: u32) -> Result<Option<usize>> {
+        let h = ctx[k].concl.clone();
+        let T::A(pred, _) = &h else { return Ok(None) };
+        let context: Vec<Hyp> = ctx
+            .iter()
+            .enumerate()
+            .filter(|&(i, _)| i != k)
+            .map(|(_, c)| c.clone())
+            .collect();
+        let mut cases = Vec::new();
+        for r in 0..self.sig.rules.len() {
+            let rule = self.sig.rules[r].clone();
+            if !matches!(&rule.conclusion, Pat::A(p, _) if p == pred) {
+                continue;
+            }
+            let mark = self.mark();
+            let names: Vec<u32> = rule
+                .sorts
+                .iter()
+                .enumerate()
+                .map(|(i, &s)| self.declare(&format!("{}.{i}", rule.name), s))
+                .collect();
+            let env: Vec<T> = names.iter().map(|&e| T::E(e)).collect();
+            let Some(theta) = unify_names(&h, &pat_inst(&rule.conclusion, &env)) else {
+                self.restore(mark);
+                continue;
+            };
+            let mut case_ctx = Vec::new();
+            for p in &rule.premises {
+                let t = subst_map(&pat_inst(p, &env), &theta);
+                case_ctx.push(self.hyp_line(&[], &t, &[]));
+            }
+            // A rule hypothesis keeps its generalized names.
+            for c in &context {
+                let local: HashMap<u32, T> = theta
+                    .iter()
+                    .filter(|(v, _)| !c.general.contains(v))
+                    .map(|(&v, t)| (v, t.clone()))
+                    .collect();
+                if local
+                    .values()
+                    .any(|t| c.general.iter().any(|&g| mentions(t, g)))
+                {
+                    return Ok(None);
+                }
+                let ps: Vec<T> = c.premises.iter().map(|p| subst_map(p, &local)).collect();
+                let cj = subst_map(&c.concl, &local);
+                case_ctx.push(self.hyp_line(&ps, &cj, &c.general));
+            }
+            let want = subst_map(goal, &theta);
+            let Some(m) = self.prove_goal(&want, &case_ctx, inv)? else {
+                return Ok(None);
+            };
+            let m = self.as_step(&m);
+            let xs: Vec<String> = names
+                .iter()
+                .map(|&e| self.sig.rigid[e as usize].0.clone())
+                .collect();
+            cases.push(format!("({} {m} ({}))", rule.name, xs.join(" ")));
+        }
+        let mut deps: Vec<usize> = context.iter().map(|c| c.step).collect();
+        deps.push(ctx[k].step);
+        let cs: Vec<String> = context.iter().map(|c| c.step.to_string()).collect();
+        let n = self.cert.line(
+            format!(
+                "(invert {} {} ({}) {} ({}))",
+                self.cert.steps,
+                ctx[k].step,
+                cs.join(" "),
+                self.text(goal),
+                cases.join(" ")
+            ),
+            deps,
+        );
+        Ok(Some(n))
+    }
+
+    /// Structural induction on `x` for `hyps → concl`. With hypotheses,
+    /// the induction hypothesis is a rule that generalizes the other names.
+    fn induct(&mut self, x: u32, hyps: &[Hyp], concl: &T, inv: u32) -> Result<Option<usize>> {
+        let mut motive = Vec::new();
+        rigid_vars(concl, &mut motive);
+        for h in hyps {
+            rigid_vars(&h.concl, &mut motive);
+        }
+        if !motive.contains(&x) {
+            return Ok(None);
+        }
+        let others: Vec<u32> = motive.iter().copied().filter(|&v| v != x).collect();
         let sort = self.sig.rigid[x as usize].1;
         let ctors: Vec<u32> = (0..self.sig.names.len() as u32)
             .filter(|&c| self.sig.output[c as usize] == Some(sort))
@@ -1148,41 +1487,37 @@ impl Session {
         for c in ctors {
             let mut ys = Vec::new();
             for (k, &s) in self.sig.inputs[c as usize].clone().iter().enumerate() {
-                let name = format!(
+                let base = format!(
                     "{}.{}{k}",
                     self.sig.rigid[x as usize].0, self.sig.names[c as usize]
                 );
-                let name = self.unique(&name);
-                let e = self.sig.rigid.len() as u32;
-                self.sig.rigid.push((name.clone(), s));
-                let _ = writeln!(
-                    self.cert.proof,
-                    "(var {name} {})",
-                    self.sig.sorts[s as usize]
-                );
-                ys.push((e, s));
+                ys.push((self.declare(&base, s), s));
             }
             let term = T::A(
                 c,
                 ys.iter().map(|&(e, _)| T::E(e)).collect::<Vec<_>>().into(),
             );
-            let mut hyps = Vec::new();
+            let mut ctx = Vec::new();
+            for h in hyps {
+                ctx.push(self.hyp_line(&[], &subst_e(&h.concl, x, &term), &[]));
+            }
             for &(e, s) in &ys {
                 if s == sort {
-                    let h = subst_e(&pat_t(stmt), x, &T::E(e));
-                    let text = self.text(&h);
-                    let n = self.cert.line(format!("(hyp {} {text})", self.cert.steps));
-                    hyps.push((h, n));
+                    let y = T::E(e);
+                    let ps: Vec<T> = hyps.iter().map(|h| subst_e(&h.concl, x, &y)).collect();
+                    let general = if hyps.is_empty() {
+                        Vec::new()
+                    } else {
+                        others.clone()
+                    };
+                    ctx.push(self.hyp_line(&ps, &subst_e(concl, x, &y), &general));
                 }
             }
-            let goal = subst_e(&pat_t(stmt), x, &term);
-            let Some(r) = self.search(&goal, hyps.clone())? else {
+            let goal = subst_e(concl, x, &term);
+            let Some(r) = self.prove_goal(&goal, &ctx, inv)? else {
                 return Ok(None);
             };
-            let step = match r.parse::<usize>() {
-                Ok(n) => n,
-                Err(_) => return Ok(None),
-            };
+            let step = self.as_step(&r);
             let vars: Vec<String> = ys
                 .iter()
                 .map(|&(e, _)| self.sig.rigid[e as usize].0.clone())
@@ -1193,13 +1528,29 @@ impl Session {
                 format!("({step} {})", vars.join(" "))
             });
         }
-        let text = self.text(&pat_t(stmt));
-        let n = self.cert.line(format!(
-            "(induct {} {} {text} ({}))",
-            self.cert.steps,
-            self.sig.rigid[x as usize].0,
-            cases.join(" ")
-        ));
+        let text = self.text(concl);
+        let xname = self.sig.rigid[x as usize].0.clone();
+        let n = if hyps.is_empty() {
+            self.cert.line(
+                format!(
+                    "(induct {} {xname} {text} ({}))",
+                    self.cert.steps,
+                    cases.join(" ")
+                ),
+                Vec::new(),
+            )
+        } else {
+            let hs: Vec<String> = hyps.iter().map(|h| h.step.to_string()).collect();
+            self.cert.line(
+                format!(
+                    "(induct {} {xname} ({}) {text} ({}))",
+                    self.cert.steps,
+                    hs.join(" "),
+                    cases.join(" ")
+                ),
+                hyps.iter().map(|h| h.step).collect(),
+            )
+        };
         Ok(Some(n))
     }
 
@@ -1211,11 +1562,44 @@ impl Session {
         n
     }
 
-    fn goal(&mut self, name: &str, stmt: &T, r: &str) {
+    fn goal(&mut self, name: &str, hyps: &[T], stmt: &T, r: &str) {
         let text = self.text(stmt);
-        let _ = writeln!(self.cert.goals, "(goal {name} {text})");
+        if hyps.is_empty() {
+            let _ = writeln!(self.cert.goals, "(goal {name} {text})");
+        } else {
+            let hs: Vec<String> = hyps.iter().map(|h| self.text(h)).collect();
+            let _ = writeln!(self.cert.goals, "(goal {name} ({}) {text})", hs.join(" "));
+        }
         let _ = writeln!(self.cert.proof, "(result {name} {r})");
         self.goal_count += 1;
+    }
+}
+
+/// How many case analyses deep a proof may go.
+const MAX_INV: u32 = 2;
+
+/// A position in the certificate to roll back to.
+struct Mark(usize, usize, usize);
+
+fn pat_inst(p: &Pat, env: &[T]) -> T {
+    match p {
+        Pat::Var(v) => env[*v].clone(),
+        Pat::E(e) => T::E(*e),
+        Pat::A(f, args) => T::A(
+            *f,
+            args.iter()
+                .map(|a| pat_inst(a, env))
+                .collect::<Vec<_>>()
+                .into(),
+        ),
+    }
+}
+
+fn t_pat(t: &T) -> Pat {
+    match t {
+        T::V(_) => unreachable!("closed"),
+        T::E(e) => Pat::E(*e),
+        T::A(f, args) => Pat::A(*f, args.iter().map(t_pat).collect()),
     }
 }
 
@@ -1280,6 +1664,8 @@ pub fn run(src: &str) -> Result<Run> {
             proof: String::new(),
             steps: 0,
             derived: HashMap::new(),
+            deps: Vec::new(),
+            hyps: HashSet::new(),
         },
         facts: Vec::new(),
         report: Vec::new(),
@@ -1379,9 +1765,9 @@ pub fn run(src: &str) -> Result<Run> {
                     return Err(at("no derivation found".into()));
                 };
                 let closed = s.close(&pr, &goal).map_err(at)?;
-                let r = s.emit(&pr, &p, true).map_err(at)?;
+                let r = s.emit(&pr, &p).map_err(at)?;
                 let name = format!("eval.{evals}");
-                s.goal(&name, &closed, &r);
+                s.goal(&name, &[], &closed, &r);
                 let shown = match (&query, t) {
                     (Term::App(_, _), Term::App(f, args))
                         if s.sig.defs.contains(f)
@@ -1413,7 +1799,7 @@ pub fn run(src: &str) -> Result<Run> {
                 };
                 s.report.push(shown);
             }
-            Decl::Theorem(name, binders, stmt, tactic) => {
+            Decl::Theorem(name, binders, hyps, concl, tactic) => {
                 let mut rigid = HashMap::new();
                 let mut order = Vec::new();
                 for (b, sort) in binders {
@@ -1425,21 +1811,59 @@ pub fn run(src: &str) -> Result<Run> {
                     rigid.insert(b.clone(), e);
                     order.push((b.clone(), e));
                 }
+                // A call nested in the statement becomes a hypothesis about
+                // a fresh result: `add m (succ n) = succ (add m n)` is
+                // `add m n r → add m (succ n) (succ r)`.
+                let mut calls = Vec::new();
+                let mut fresh = 0;
+                let mut stmt = Vec::new();
+                for h in hyps {
+                    let h = s
+                        .sig
+                        .flatten_judgment(h, &mut calls, &mut fresh)
+                        .map_err(at)?;
+                    stmt.append(&mut calls);
+                    stmt.push(h);
+                }
+                let concl = s
+                    .sig
+                    .flatten_judgment(concl, &mut calls, &mut fresh)
+                    .map_err(at)?;
+                stmt.append(&mut calls);
                 let mut vars = Vars {
                     names: Vec::new(),
                     sorts: Vec::new(),
                 };
-                let pat = s
-                    .sig
-                    .pattern(stmt, None, &mut vars, &rigid, true)
-                    .map_err(at)?;
-                if !vars.names.is_empty() {
-                    return Err(at(format!(
-                        "{} is not bound; add it as `({} : Sort)`",
-                        vars.names[0], vars.names[0]
-                    )));
+                for j in stmt.iter().chain([&concl]) {
+                    s.sig
+                        .pattern(j, None, &mut vars, &rigid, true)
+                        .map_err(at)?;
                 }
+                for (v, sort) in vars.names.iter().zip(&vars.sorts) {
+                    let Some(k) = v.strip_prefix("result.") else {
+                        return Err(at(format!("{v} is not bound; add it as `({v} : Sort)`")));
+                    };
+                    let sort = sort.ok_or_else(|| at(format!("cannot tell the sort of {v}")))?;
+                    let var = s.unique(&format!("{name}.r{k}"));
+                    let e = s.sig.rigid.len() as u32;
+                    s.sig.rigid.push((var.clone(), sort));
+                    let _ = writeln!(s.cert.goals, "(var {var} {})", s.sig.sorts[sort as usize]);
+                    rigid.insert(v.clone(), e);
+                    order.push((format!("r{k}"), e));
+                }
+                let mut vars = Vars {
+                    names: Vec::new(),
+                    sorts: Vec::new(),
+                };
+                let mut judgment = |j: &Term| s.sig.pattern(j, None, &mut vars, &rigid, true);
+                let hyp_ts: Vec<T> = stmt
+                    .iter()
+                    .map(|j| judgment(j).map(|p| pat_t(&p)))
+                    .collect::<Result<_>>()
+                    .map_err(at)?;
+                let pat = judgment(&concl).map_err(at)?;
                 let goal = pat_t(&pat);
+                let ctx: Vec<Hyp> = hyp_ts.iter().map(|h| s.hyp_line(&[], h, &[])).collect();
                 let mut how = String::new();
                 let result = match tactic {
                     Tactic::Induction(x) => {
@@ -1447,9 +1871,11 @@ pub fn run(src: &str) -> Result<Run> {
                             .get(x)
                             .ok_or_else(|| at(format!("{x} is not a binder")))?;
                         how = format!("by induction {x}");
-                        s.induct(e, &pat).map_err(at)?.map(|n| n.to_string())
+                        s.induct(e, &ctx, &goal, MAX_INV)
+                            .map_err(at)?
+                            .map(|n| n.to_string())
                     }
-                    Tactic::Auto => match s.search(&goal, Vec::new()).map_err(at)? {
+                    Tactic::Auto => match s.prove_goal(&goal, &ctx, MAX_INV).map_err(at)? {
                         Some(r) => {
                             how = "by auto".into();
                             Some(r)
@@ -1457,13 +1883,13 @@ pub fn run(src: &str) -> Result<Run> {
                         None => {
                             let mut found = None;
                             for (b, e) in order.iter().map(|(b, e)| (b, *e)) {
-                                if mentions(&goal, e)
-                                    && let Some(n) = s.induct(e, &pat).map_err(at)?
-                                {
+                                let mark = s.mark();
+                                if let Some(n) = s.induct(e, &ctx, &goal, MAX_INV).map_err(at)? {
                                     how = format!("by induction {b}");
                                     found = Some(n.to_string());
                                     break;
                                 }
+                                s.restore(mark);
                             }
                             found
                         }
@@ -1472,18 +1898,26 @@ pub fn run(src: &str) -> Result<Run> {
                 let Some(r) = result else {
                     return Err(at(format!("could not prove {name}")));
                 };
-                s.goal(name, &goal, &r);
-                // Later proofs may use the theorem.
-                let step = r.parse().unwrap_or(usize::MAX);
-                if step != usize::MAX {
+                s.goal(name, &hyp_ts, &goal, &r);
+                // Later proofs may use the theorem, with the hypotheses
+                // its proof needs as premises.
+                if let Ok(step) = r.parse::<usize>() {
+                    let used = s.cert.deps[step].clone();
                     s.facts.push(Fact {
                         stmt: pat.clone(),
+                        premises: ctx
+                            .iter()
+                            .filter(|h| used.contains(&h.step))
+                            .map(|h| t_pat(&h.concl))
+                            .collect(),
                         names: order.iter().map(|&(_, e)| e).collect(),
                         step,
                     });
                 }
+                let mut shown: Vec<String> = hyp_ts.iter().map(|h| s.show(h)).collect();
+                shown.push(s.show(&goal));
                 s.report
-                    .push(format!("theorem {name} : {}  ✓ ({how})", s.show(&goal)));
+                    .push(format!("theorem {name} : {}  ✓ ({how})", shown.join(" → ")));
             }
             _ => {}
         }
@@ -1517,4 +1951,94 @@ impl Session {
             .collect();
         format!("{} {}", self.sig.names[*f as usize], args.join(" "))
     }
+}
+
+/// Replace rigid names.
+fn subst_names(t: &T, names: &[(u32, T)]) -> T {
+    match t {
+        T::E(e) => names
+            .iter()
+            .find(|(n, _)| n == e)
+            .map_or(T::E(*e), |(_, u)| u.clone()),
+        T::A(f, args) => T::A(
+            *f,
+            args.iter()
+                .map(|a| subst_names(a, names))
+                .collect::<Vec<_>>()
+                .into(),
+        ),
+        t => t.clone(),
+    }
+}
+
+fn subst_map(t: &T, map: &HashMap<u32, T>) -> T {
+    match t {
+        T::E(e) => map.get(e).cloned().unwrap_or(T::E(*e)),
+        T::A(f, args) => T::A(
+            *f,
+            args.iter()
+                .map(|a| subst_map(a, map))
+                .collect::<Vec<_>>()
+                .into(),
+        ),
+        t => t.clone(),
+    }
+}
+
+fn same(a: &T, b: &T) -> bool {
+    match (a, b) {
+        (T::E(x), T::E(y)) => x == y,
+        (T::V(x), T::V(y)) => x == y,
+        (T::A(f, xs), T::A(g, ys)) => {
+            f == g && xs.len() == ys.len() && xs.iter().zip(ys.iter()).all(|(x, y)| same(x, y))
+        }
+        _ => false,
+    }
+}
+
+fn rigid_vars(t: &T, out: &mut Vec<u32>) {
+    match t {
+        T::E(e) => {
+            if !out.contains(e) {
+                out.push(*e);
+            }
+        }
+        T::A(_, args) => args.iter().for_each(|a| rigid_vars(a, out)),
+        T::V(_) => {}
+    }
+}
+
+/// The most general unifier the schematic checker computes, with rigid
+/// names as the unification variables; `src/schematic.rs` (`unify`) uses
+/// the same order, so the certificate's case judgments match.
+fn unify_names(a: &T, b: &T) -> Option<HashMap<u32, T>> {
+    let mut theta: HashMap<u32, T> = HashMap::new();
+    let mut work = vec![(a.clone(), b.clone())];
+    while let Some((s, t)) = work.pop() {
+        let s = subst_map(&s, &theta);
+        let t = subst_map(&t, &theta);
+        if same(&s, &t) {
+            continue;
+        }
+        let (x, u) = match (&s, &t) {
+            (T::E(x), _) => (*x, t.clone()),
+            (_, T::E(y)) => (*y, s.clone()),
+            (T::A(f, xs), T::A(g, ys)) => {
+                if f != g || xs.len() != ys.len() {
+                    return None;
+                }
+                work.extend(xs.iter().cloned().zip(ys.iter().cloned()));
+                continue;
+            }
+            _ => return None,
+        };
+        if mentions(&u, x) {
+            return None;
+        }
+        for v in theta.values_mut() {
+            *v = subst_e(v, x, &u);
+        }
+        theta.insert(x, u);
+    }
+    Some(theta)
 }
