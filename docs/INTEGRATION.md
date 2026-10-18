@@ -43,11 +43,27 @@ This is a runnable bridge, not a complete cubical source language or a new
 implementation of Lean 4. Replaying a frozen proof is not constructing a new
 proof, and level-generic schemas are not internally universe-polymorphic terms.
 
+## Current producer migration
+
+The first fresh generator is now Horn-owned: `cubical::producer` certifies
+universes, dependent functions, both substitutions and scoped dependent paths
+against the unchanged path-theory fragment. `horn cubical run FILE.hcu`
+reads an explicit annotated core source file, fixes its requested judgments,
+generates new evidence and asks the ground kernel to check it. Exported data
+can be replayed independently. See [CUBICAL_PRODUCER.md](CUBICAL_PRODUCER.md).
+
+This is a new generation route, not just frozen replay. It is still bounded,
+uses de Bruijn indices rather than a named-binder surface syntax, and requires
+syntactically matching types. New face/composition/Glue/univalence producers,
+general conversion and connection to the `.hn` programming frontend remain
+open. The theories, ground/schematic checkers and Agda models are unchanged.
+
 ## Following increments
 
 1. Move cubical certificate producers behind a Horn-owned library API, one
-   feature at a time. Start with contexts, universes, dependent functions,
-   substitution, and paths; then faces, systems, composition, Glue and ua.
+   feature at a time. The bounded contexts/universes/functions/substitution/path
+   generator is implemented; continue with faces, systems, composition, Glue
+   and ua after strengthening conversion and source elaboration.
    Keep imported snapshot replay as an independent migration oracle. Do not
    copy the entire research frontend without checking its assumptions.
 2. Add source modules/imports, dependent binders and diagnostics; elaborate

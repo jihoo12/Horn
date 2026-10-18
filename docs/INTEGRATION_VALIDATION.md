@@ -1,5 +1,7 @@
 # Standalone integration validation
 
+## Initial replay increment
+
 Validated 2026-10-18 (Asia/Seoul) on Linux x86_64, with an 8 GiB cgroup
 memory limit. Nix 2.20.6, the repository's unchanged flake.lock,
 Rust 1.91.1 / Cargo 1.91.0. No Cargo dependencies were added.
@@ -49,12 +51,51 @@ These are one environment's observations, including launcher overhead, not a
 cross-platform benchmark or a guaranteed upper bound. The encoded artifacts
 are 35,830 and 4,086 bytes; checking still validates every reconstructed step.
 
-## Scope
+## Initial scope
 
-This does not re-run kamo3's expensive producers or repair their OOM test.
-It supplies standalone replay of real evidence, plus bounded execution and
-certification of ordinary source-language programs. The cubical source
-elaborator, producers, all-level computational univalence, a total dependent
-programming fragment and a native compiler remain on the integration roadmap.
+The initial replay increment did not re-run kamo3's expensive producers or repair their OOM test.
+It supplied standalone replay of real evidence, plus bounded execution and
+certification of ordinary source-language programs. The fresh producer and
+core source increment below now extends that scope. All-level computational
+univalence, a total dependent programming fragment and a native compiler
+remain on the integration roadmap.
 The import preserves the chosen mathematical specification; it does not prove
 its semantic soundness. No new Agda soundness theorem is claimed here.
+
+
+## Fresh generation increment
+
+Validated 2026-10-18 (Asia/Seoul), with the same pinned Nix environment.
+
+- `cargo test --release --locked --offline`: **73 passed, 0 failed**.
+- `cargo fmt --all -- --check` and
+  `cargo clippy --locked --offline --all-targets -- -D warnings` passed.
+- Seven producer tests cover fresh universe-level identities, applications,
+  beta/path computation, endpoint rules, mixed binder substitution and
+  dimension-dependent contexts. Generation is followed by independent ground
+  kernel replay. Forged goals and invented rules are rejected.
+- Four source/CLI tests cover fresh inputs, malformed syntax, source bounds,
+  false typing/equality goals, rule injection, duplicate names, non-overwriting
+  export and independent `kernel` CLI replay. No snapshot is used for these
+  fresh certificates.
+- The complete suite still checks the bundled univalence and ua-transport
+  oracles, ordinary language execution, induction and negative kernel cases.
+- `kernel.rs`, `lex.rs`, `sexp.rs`, `schematic.rs`, the object theories and Agda
+  models are byte-for-byte unchanged from `3e363a7`. No new Cargo dependencies.
+
+The new release commands produced:
+
+```text
+horn cubical run examples/cubical/source/basics.hcu
+ACCEPT (generated cubical): 9 goals, 75 proof steps
+
+horn cubical run examples/cubical/source/binders.hcu
+ACCEPT (generated cubical): 3 goals, 139 proof steps
+```
+
+Fresh generation uses the existing scoped-path theory only. The `.hcu` core
+uses explicit annotations and separate de Bruijn namespaces; it has bounded
+root reduction and syntactic type matching, not general conversion or the
+final named-binder surface syntax. Face/composition/Glue/univalence generation,
+the semantic soundness of the theory and source elaboration correctness remain
+separate obligations. This does not claim to fix kamo3's large-producer OOM.
