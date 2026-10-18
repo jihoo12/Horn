@@ -30,8 +30,9 @@ with explicit overlap/coverage checks and local type conversion; see
 also produce independently replayable certificates.
 [Dependent pairs](docs/CUBICAL_SIGMA.md) and
 [certified equivalence definitions](docs/CUBICAL_EQUIVALENCE.md) are supported
-in fresh source. Glue and univalence are currently
-available through bundled replay, while their fresh producers remain future work. See [CUBICAL.md](docs/CUBICAL.md) and the staged
+in fresh source. [Glue typing and beta/face/eta evidence](docs/CUBICAL_GLUE.md)
+can also be generated. Univalence and ua-transport remain available through
+bundled replay; fresh ua/univalence generation is future work. See [CUBICAL.md](docs/CUBICAL.md) and the staged
 [integration plan](docs/INTEGRATION.md).
 
 ## What 0.3 adds: oracle certificates

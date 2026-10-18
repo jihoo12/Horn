@@ -126,6 +126,14 @@ impl Producer {
                 self.lower_box(tube)?,
                 self.lower_box(base)?,
             ),
+            GlueType(a, phi, t, e) => GlueType(
+                self.lower_box(a)?,
+                phi.clone(),
+                self.lower_box(t)?,
+                self.lower_box(e)?,
+            ),
+            Glue(g, u, v) => Glue(self.lower_box(g)?, self.lower_box(u)?, self.lower_box(v)?),
+            Unglue(u) => Unglue(self.lower_box(u)?),
             System(ty, sides) => System(
                 self.lower_box(ty)?,
                 sides

@@ -253,6 +253,9 @@ impl Producer {
         if let Some(eta) = self.sigma_eta(scope, phi, a, b, ty)? {
             return Ok(eta);
         }
+        if let Some(eta) = self.glue_eta(scope, phi, a, b, ty)? {
+            return Ok(eta);
+        }
         if let Some((out, actual, step)) = self.restricted_reduce(scope, phi, a)? {
             let step =
                 self.restricted_convert_equality(scope, phi, (a, &out), (&actual, ty), step)?;

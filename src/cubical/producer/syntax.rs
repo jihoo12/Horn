@@ -52,17 +52,17 @@ pub(super) fn term(t: &Term, depth: usize, nodes: &mut usize) -> Result<()> {
             term(a, depth + 1, nodes)?;
             term(b, depth + 1, nodes)?;
         }
-        Term::Path(a, b, c) | Term::Pair(a, b, c) => {
+        Term::Path(a, b, c) | Term::Pair(a, b, c) | Term::Glue(a, b, c) => {
             term(a, depth + 1, nodes)?;
             term(b, depth + 1, nodes)?;
             term(c, depth + 1, nodes)?;
         }
-        Term::Fst(p) | Term::Snd(p) => term(p, depth + 1, nodes)?,
+        Term::Fst(p) | Term::Snd(p) | Term::Unglue(p) => term(p, depth + 1, nodes)?,
         Term::PathApp(p, r) => {
             term(p, depth + 1, nodes)?;
             interval(r, depth + 1, nodes)?;
         }
-        Term::Comp(a, phi, tube, base) => {
+        Term::Comp(a, phi, tube, base) | Term::GlueType(a, phi, tube, base) => {
             term(a, depth + 1, nodes)?;
             face(phi, depth + 1, nodes)?;
             term(tube, depth + 1, nodes)?;

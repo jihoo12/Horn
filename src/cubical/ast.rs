@@ -93,6 +93,9 @@ pub enum Term {
     PathApp(Box<Term>, Interval),
     System(Box<Term>, Vec<(Face, Term)>),
     Comp(Box<Term>, Face, Box<Term>, Box<Term>),
+    GlueType(Box<Term>, Face, Box<Term>, Box<Term>),
+    Glue(Box<Term>, Box<Term>, Box<Term>),
+    Unglue(Box<Term>),
 }
 
 pub(super) fn number(n: usize) -> Sexp {
@@ -131,6 +134,11 @@ impl Term {
             Self::PathLam(_, body) => call("plam", [body.quote()]),
             Self::PathApp(p, r) => call("papp", [p.quote(), r.quote()]),
             Self::System(_, sides) => call("system", [system(sides)]),
+            Self::GlueType(a, phi, t, e) => {
+                call("glue-type", [a.quote(), phi.quote(), t.quote(), e.quote()])
+            }
+            Self::Glue(g, u, v) => call("glue", [g.quote(), u.quote(), v.quote()]),
+            Self::Unglue(t) => call("unglue", [t.quote()]),
             Self::Comp(a, phi, tube, base) => {
                 call("comp", [a.quote(), phi.quote(), tube.quote(), base.quote()])
             }
@@ -166,12 +174,20 @@ impl Term {
                 | Self::Lam(a, b)
                 | Self::App(a, b)
                 | Self::PathLam(a, b) => a.any(f) || b.any(f),
-                Self::Pair(a, b, c) | Self::Path(a, b, c) => a.any(f) || b.any(f) || c.any(f),
-                Self::PathApp(p, _) | Self::Fst(p) | Self::Snd(p) => p.any(f),
+                Self::Pair(a, b, c) | Self::Path(a, b, c) | Self::Glue(a, b, c) => {
+                    a.any(f) || b.any(f) || c.any(f)
+                }
+                Self::PathApp(p, _) | Self::Fst(p) | Self::Snd(p) | Self::Unglue(p) => p.any(f),
                 Self::System(ty, sides) => ty.any(f) || sides.iter().any(|(_, t)| t.any(f)),
-                Self::Comp(a, _, tube, base) => a.any(f) || tube.any(f) || base.any(f),
+                Self::Comp(a, _, tube, base) | Self::GlueType(a, _, tube, base) => {
+                    a.any(f) || tube.any(f) || base.any(f)
+                }
                 _ => false,
             }
+    }
+
+    pub(super) fn has_glue(&self) -> bool {
+        self.any(&|t| matches!(t, Self::GlueType(..) | Self::Glue(..) | Self::Unglue(..)))
     }
 
     pub(super) fn has_definition(&self) -> bool {

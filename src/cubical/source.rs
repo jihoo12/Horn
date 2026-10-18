@@ -44,9 +44,42 @@ fn binder(s: &Sexp) -> Result<String> {
         return Err(format!("invalid binder name {name}"));
     }
     if [
-        "nat", "zero", "i0", "i1", "u", "v", "dim", "pi", "lam", "app", "path", "plam", "papp",
-        "neg", "meet", "join", "scope", "ff", "ft", "at0", "at1", "fand", "for", "system", "comp",
-        "sigma", "pair", "fst", "snd", "contr", "fiber", "isequiv", "equiv",
+        "nat",
+        "zero",
+        "i0",
+        "i1",
+        "u",
+        "v",
+        "dim",
+        "pi",
+        "lam",
+        "app",
+        "path",
+        "plam",
+        "papp",
+        "neg",
+        "meet",
+        "join",
+        "scope",
+        "ff",
+        "ft",
+        "at0",
+        "at1",
+        "fand",
+        "for",
+        "system",
+        "comp",
+        "sigma",
+        "pair",
+        "fst",
+        "snd",
+        "contr",
+        "fiber",
+        "isequiv",
+        "equiv",
+        "glue-type",
+        "glue",
+        "unglue",
     ]
     .contains(&name)
     {
@@ -224,6 +257,11 @@ fn term(s: &Sexp, depth: usize, names: &Names) -> Result<Term> {
             ordinary_binder(kind, Some(name), a, b, depth, names)?
         }
         ("app", [f, a]) => Term::App(t(f)?, t(a)?),
+        ("glue-type", [a, phi, partial, e]) => {
+            Term::GlueType(t(a)?, face(phi, depth + 1, names)?, t(partial)?, t(e)?)
+        }
+        ("glue", [g, u, v]) => Term::Glue(t(g)?, t(u)?, t(v)?),
+        ("unglue", [u]) => Term::Unglue(t(u)?),
         ("pair", [ty, a, b]) => Term::Pair(t(ty)?, t(a)?, t(b)?),
         ("fst", [p]) => Term::Fst(t(p)?),
         ("snd", [p]) => Term::Snd(t(p)?),

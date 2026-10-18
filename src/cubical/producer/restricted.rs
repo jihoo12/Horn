@@ -215,6 +215,11 @@ impl Producer {
                 self.restricted_inferred.insert(key, out.clone());
                 return Ok(out);
             }
+            GlueType(..) | Glue(..) | Unglue(..) => {
+                let out = self.glue_infer((d, g), phi, t)?;
+                self.restricted_inferred.insert(key, out.clone());
+                return Ok(out);
+            }
             Comp(..) => {
                 let out = self.composition_has((d, g), phi, t)?;
                 self.restricted_inferred.insert(key, out.clone());
@@ -266,6 +271,7 @@ impl Producer {
         use Term::*;
         let (d, g) = scope;
         let (out, ty, refs, rule) = match t {
+            GlueType(..) | Glue(..) | Unglue(..) => return self.glue_reduce(scope, phi, t),
             Fst(p) | Snd(p) if matches!(p.as_ref(), Pair(..)) => {
                 return self.sigma_reduce(scope, phi, t);
             }

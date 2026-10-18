@@ -32,7 +32,8 @@ Formation of `equiv A B` does not supply an inhabitant of it. The last example
 uses a witness explicitly declared in its context. A function by itself, or
 a pair with an unrelated second component, is rejected as an equivalence.
 This increment does not generate a contraction proof for arbitrary fibers,
-a fresh identity equivalence proof, Glue, ua or univalence.
+a fresh identity equivalence proof, ua or univalence. Glue typing uses these
+definitions in the [separate Glue profile](CUBICAL_GLUE.md).
 
 `(expand NAME [SCOPE] DEFINITION EXPECTED)` fixes a definition-expansion goal:
 
@@ -66,6 +67,6 @@ depth/index/node limits. The final expanded request also has the shared
 behind compact source. Expansion may therefore reject a small source whose
 expanded form exceeds bounds. The shared 50,000 proof-step limit also applies.
 General congruence and dependent transport, type-directed composition and
-fresh Glue/ua construction remain open. Source elaboration correctness and
+Glue-directed composition and fresh ua construction remain open. Source elaboration correctness and
 the semantic adequacy of the object specification remain separate proof
 obligations from certificate checking.

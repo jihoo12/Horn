@@ -65,8 +65,10 @@ composition typing and active-face computation use the unchanged composition
 fragment; see [its guide](CUBICAL_COMPOSITION.md). Dependent Sigma pairs,
 projections and beta/eta evidence are also generated; see
 [dependent pairs](CUBICAL_SIGMA.md). Equivalence definitions lower to the same
-core with explicit `def.*` certificates; see [their guide](CUBICAL_EQUIVALENCE.md). General congruence and
-dependent transport, type-directed composition/Glue/univalence producers and
+core with explicit `def.*` certificates; see [their guide](CUBICAL_EQUIVALENCE.md).
+Fresh Glue formation, values and beta/face/eta equations now use the existing
+Glue fragment; see [Glue evidence](CUBICAL_GLUE.md). General congruence and
+dependent transport, type-directed composition and fresh ua/univalence producers and
 connection to the `.hn` programming frontend remain open. The theories,
 ground/schematic checkers and Agda models are unchanged.
 
@@ -76,7 +78,7 @@ ground/schematic checkers and Agda models are unchanged.
    feature at a time. The bounded contexts/universes/functions/substitution/path
    generator, restricted inference and composition typing/face computation are
    implemented. Continue with equivalence witnesses, type-directed
-   composition, Glue and ua. Named binders and bounded root conversion are
+   composition including Glue, and ua. Named binders and bounded root conversion are
    implemented; stronger conversion still requires congruence evidence.
    Keep imported snapshot replay as an independent migration oracle. Do not
    copy the entire research frontend without checking its assumptions.

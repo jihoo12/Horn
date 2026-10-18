@@ -1,0 +1,33 @@
+; An equivalence witness is an explicit hypothesis, never an assumed axiom.
+(check formation (scope () ((e (equiv nat nat))))
+  (glue-type nat ft nat e) (u 0))
+(check make (scope () ((e (equiv nat nat))))
+  (glue (glue-type nat ft nat e) zero (app (fst e) zero))
+  (glue-type nat ft nat e))
+(equal unglue-beta (scope () ((e (equiv nat nat))))
+  (unglue (glue (glue-type nat ft nat e) zero (app (fst e) zero)))
+  (app (fst e) zero) nat)
+
+; Glue's type and value compute to the partial side only on an active face.
+(equal type-face (scope () ((e (equiv nat nat))))
+  (glue-type nat ft nat e) nat (u 0))
+(equal value-face (scope () ((e (equiv nat nat))))
+  (glue (glue-type nat ft nat e) zero (app (fst e) zero)) zero nat)
+(equal unglue-face (scope () ((e (equiv nat nat)) (item (glue-type nat ft nat e))))
+  (unglue item) (app (fst e) item) nat)
+
+; Reconstruction is global even when the attaching face is partial.
+(equal eta (scope (i) ((e (equiv nat nat)) (item (glue-type nat (at0 i) nat e))))
+  (glue (glue-type nat (at0 i) nat e) item (unglue item)) item
+  (glue-type nat (at0 i) nat e))
+(equal eta-reversed (scope (i) ((e (equiv nat nat)) (item (glue-type nat (at0 i) nat e))))
+  item (glue (glue-type nat (at0 i) nat e) item (unglue item))
+  (glue-type nat (at0 i) nat e))
+
+; No equivalence witness is needed off the empty attaching face: the empty
+; system has exactly the required partial typing, with no false elimination.
+(check closed-empty-type
+  (glue-type nat ff nat (system (equiv nat nat) ())) (u 0))
+(equal closed-empty-beta
+  (unglue (glue (glue-type nat ff nat (system (equiv nat nat) ()))
+    (system nat ()) zero)) zero nat)

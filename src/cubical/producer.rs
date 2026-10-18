@@ -3,6 +3,7 @@
 mod composition;
 mod definitions;
 mod faces;
+mod glue;
 mod restricted;
 mod sigma;
 mod syntax;
@@ -24,6 +25,7 @@ pub enum Profile {
     Composition,
     Sigma,
     Equivalence,
+    Glue,
 }
 
 impl Profile {
@@ -35,6 +37,7 @@ impl Profile {
             Self::Composition => 6,
             Self::Sigma => 7,
             Self::Equivalence => 8,
+            Self::Glue => 9,
         };
         super::FRAGMENTS[..count]
             .iter()
@@ -276,6 +279,36 @@ impl Producer {
                     },
                     if matches!(t, Fst(..)) { "fst" } else { "snd" },
                 )
+            }
+            GlueType(a, phi, t, e) => {
+                let (a, x) = self.transform(a, op)?;
+                refs.push(x);
+                let phi = if matches!(op, Op::DShift(_) | Op::DSubst(..)) {
+                    let (phi, id) = self.transform_face(phi, op)?;
+                    refs.push(id);
+                    phi
+                } else {
+                    phi.clone()
+                };
+                let (t, y) = self.transform(t, op)?;
+                let (e, z) = self.transform(e, op)?;
+                refs.extend([y, z]);
+                (
+                    GlueType(Box::new(a), phi, Box::new(t), Box::new(e)),
+                    "glue-type",
+                )
+            }
+            Glue(g, u, v) => {
+                let (g, x) = self.transform(g, op)?;
+                let (u, y) = self.transform(u, op)?;
+                let (v, z) = self.transform(v, op)?;
+                refs.extend([x, y, z]);
+                (Glue(Box::new(g), Box::new(u), Box::new(v)), "glue")
+            }
+            Unglue(u) => {
+                let (u, x) = self.transform(u, op)?;
+                refs.push(x);
+                (Unglue(Box::new(u)), "unglue")
             }
             App(f, a) => {
                 let (f, x) = self.transform(f, op)?;
@@ -626,6 +659,10 @@ impl Producer {
                 let (ty, restricted) = self.sigma_infer((d, g), &Face::True, t)?;
                 (ty, vec![restricted], "rhas.export")
             }
+            GlueType(..) | Glue(..) | Unglue(..) => {
+                let (ty, restricted) = self.glue_infer((d, g), &Face::True, t)?;
+                (ty, vec![restricted], "rhas.export")
+            }
             Comp(..) => {
                 let (ty, restricted) = self.composition_has((d, g), &Face::True, t)?;
                 (ty, vec![restricted], "rhas.export")
@@ -676,7 +713,7 @@ impl Producer {
     fn reduce(&mut self, d: usize, g: &[Term], t: &Term) -> Result<Option<(Term, usize)>> {
         use Term::*;
         match t {
-            Comp(..) | Fst(..) | Snd(..) => {
+            Comp(..) | Fst(..) | Snd(..) | GlueType(..) | Glue(..) | Unglue(..) => {
                 let Some((out, ty, step)) = self.restricted_reduce((d, g), &Face::True, t)? else {
                     return Ok(None);
                 };
@@ -995,6 +1032,26 @@ fn needs_equivalence(request: &Request) -> bool {
     }
 }
 
+fn needs_glue(request: &Request) -> bool {
+    if request.context.iter().any(Term::has_glue) {
+        return true;
+    }
+    match &request.judgment {
+        Judgment::Has { term, ty } | Judgment::RestrictedHas { term, ty, .. } => {
+            term.has_glue() || ty.has_glue()
+        }
+        Judgment::Equal { left, right, ty }
+        | Judgment::RestrictedEqual {
+            left, right, ty, ..
+        } => left.has_glue() || right.has_glue() || ty.has_glue(),
+        Judgment::Definition {
+            definition,
+            expansion,
+        } => definition.arguments().into_iter().any(Term::has_glue) || expansion.has_glue(),
+        _ => false,
+    }
+}
+
 /// Generate fresh evidence, fix goals from the requests (not from inferred
 /// answers), and accept only after the unchanged ground kernel replays it.
 pub fn produce(requests: &[Request]) -> Result<Generated> {
@@ -1004,7 +1061,9 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
     for request in requests {
         validate(request).map_err(|e| format!("{}: {e}", request.name))?;
     }
-    let profile = if requests.iter().any(needs_equivalence) {
+    let profile = if requests.iter().any(needs_glue) {
+        Profile::Glue
+    } else if requests.iter().any(needs_equivalence) {
         Profile::Equivalence
     } else if requests.iter().any(needs_sigma) {
         Profile::Sigma
@@ -1024,7 +1083,7 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
     };
     let theory = profile.theory();
     let mut p = Producer::default();
-    let lowered = if profile == Profile::Equivalence {
+    let lowered = if matches!(profile, Profile::Equivalence | Profile::Glue) {
         Some(
             requests
                 .iter()
@@ -1138,7 +1197,10 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
                     (
                         if matches!(
                             profile,
-                            Profile::Composition | Profile::Sigma | Profile::Equivalence
+                            Profile::Composition
+                                | Profile::Sigma
+                                | Profile::Equivalence
+                                | Profile::Glue
                         ) {
                             let restricted =
                                 p.restricted_equal((d, g), &Face::True, left, right, ty)?;
