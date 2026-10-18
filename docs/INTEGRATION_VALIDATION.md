@@ -250,3 +250,74 @@ composition, fresh Sigma/equivalence/Glue/ua generation and `.hn`/`.hcu`
 frontend integration remain open. Restricted search remains bounded and
 incomplete. These tests do not establish semantic adequacy of the cubical
 specification or executable-to-Agda refinement.
+
+## Dependent Sigma pairs and equivalence definitions
+
+Validated implementation commits `9449d77` and `921b572` in the rootless Nix
+shell (Rust 1.91.1). All fresh generation remains Horn-owned and uses neither
+a kamo3 process nor frozen oracle data.
+
+- `cargo test --release --locked --offline`: **108 passed, 0 failed**.
+- `cargo fmt --all -- --check` and strict all-target release clippy pass.
+- A further targeted check verifies that corrupting a definition fact used
+  only in erased metadata is rejected, even when no definition assertion is
+  an exported goal. Every emitted step is checked.
+- Sigma formation, annotated pairs, dependent first/second projections,
+  projection beta and pair eta emit evidence for existing rules. Second
+  projection beta retains BODY[fst(pair)] as its natural type; using the
+  equation at BODY[FIRST] requires checked conversion. Tests reject bad
+  components, annotations, dependencies, mixed-pair eta, unscoped terms and
+  face casts escaping globally, and replay all four substitutions.
+- `contr`, `fiber`, `isequiv` and `equiv` elaborate to Pi/Sigma/Path terms.
+  Every expansion/lift is certified with the existing def.* and transform
+  rules. Generic types at differing universe levels, a supplied isEquiv
+  witness, function projection and locally well-formed fiber endpoints pass.
+- `expand` fixes a definition-expansion goal from the caller's EXPECTED term;
+  mismatch, ill-typed arguments/expected annotations, variable capture and
+  fake equivalence witnesses are rejected. Independently written named
+  expansions exercise ordinary AND dimension lifting under nested binders.
+- Input and each intermediate expanded tree are bounded before recursive
+  quotation/further duplication. The expanded request must also fit its
+  shared node budget. Tests reject nested macro growth and oversized public
+  API syntax before inference.
+- Profile selection scans contexts and erased annotations. Sigma uses the
+  first seven fragments; definitions use the first eight. Neither fresh
+  profile includes Glue. Macro syntax never becomes a new object constructor.
+- Both actual CLI exports replay in independent generic kernel processes.
+  Bundled univalence/ua-transport replay and ordinary arithmetic/induction
+  execution also pass, with the unchanged counts below.
+- A diff against `2f86b54` confirms no change to the 547-line kernel,
+  lexer/S-expression parser, schematic checker, any object theory, Agda
+  models, Cargo dependencies or flake pins.
+
+Actual release CLI results, inside `nix develop`:
+
+```text
+horn cubical run examples/cubical/source/sigma.hcu --emit NEW_DIR
+ACCEPT (generated cubical): 10 goals, 185 proof steps
+kernel NEW_DIR/theory.horn NEW_DIR/goals NEW_DIR/proof
+ACCEPT: 10 goals, 185 proof steps, 15760 bytes, 230 distinct terms
+
+horn cubical run examples/cubical/source/equivalence.hcu --emit OTHER_NEW_DIR
+ACCEPT (generated cubical): 12 goals, 1541 proof steps
+kernel OTHER_NEW_DIR/theory.horn OTHER_NEW_DIR/goals OTHER_NEW_DIR/proof
+ACCEPT: 12 goals, 1541 proof steps, 341840 bytes, 1683 distinct terms
+
+horn cubical check all
+ACCEPT (cubical univalence): 2 goals, 185673 proof steps, 35830 oracle bytes
+ACCEPT (cubical ua-transport): 1 goals, 18849 proof steps, 4086 oracle bytes
+
+horn examples/lang/program.hn
+square (add 2 3) => 25
+add (square 3) (mul 2 4) => 17
+certificate accepted: 4 goals, 72 steps, 1 inductions
+```
+
+Definition expansion and type formation do not construct an equivalence
+witness. The pair example uses an explicitly declared isEquiv witness; it is
+not a fresh proof that the identity function is an equivalence. The object
+*def predicates describe syntax; source expand checks well-formed arguments
+and EXPECTED separately. Stronger congruence/dependent transport,
+type-directed composition, fresh equivalence witnesses and Glue/ua/univalence
+producers, and connection to the ordinary frontend remain open. No semantic
+soundness or executable-to-Agda refinement theorem is claimed here.
