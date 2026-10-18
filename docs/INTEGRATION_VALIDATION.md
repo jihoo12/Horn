@@ -138,3 +138,49 @@ full normalization under binders/constructors. The path fragment has no general
 are reported as unsupported before an invalid transitivity step is emitted.
 Nested conversion obligations are bounded at 32. Source/semantic soundness and
 the later face/system/composition/Glue migration remain separate work.
+
+## Fresh face and coherent-system evidence
+
+Validated 2026-10-18 (Asia/Seoul), using the same pinned Nix environment.
+
+- `cargo test --release --locked --offline`: **90 passed, 0 failed**.
+- Formatting and all-target clippy with `-D warnings` passed.
+- Face search agrees with an independent model on 160 generated implications
+  over two dimensions and all nine partial assignments. The generic dimension
+  case rejects Boolean endpoint excluded middle. Every accepted implication
+  is also independently replayed by the generic kernel.
+- Compound interval boundaries/local equalities are certified. Unknown or
+  out-of-scope faces and interval dimensions are rejected even on false bases.
+- System tests cover branch typing, all pairwise overlaps, explicit coverage,
+  partial and empty systems, restricted endpoint equalities, full-system
+  reduction and all four system shift/substitution operations. Compound
+  interval substitution also certifies its effect on face syntax.
+- A three-branch case catches non-adjacent overlap inconsistency. A forged
+  `rhas.export` from a partial result is rejected by the kernel. False faces
+  do not bypass the producer's supported typing/scope checks.
+- CLI export includes the actual profile's theory, and the independent kernel
+  CLI accepts the exported goals/proof. Composition and Glue rules are not
+  present in the systems profile.
+- Kernel/lexer/parser/schematic checker, all object-theory files, Agda models,
+  Cargo dependencies and flake pins are unchanged from `46e8ed6`.
+
+Actual release CLI results:
+
+```text
+horn cubical run examples/cubical/source/faces.hcu
+ACCEPT (generated cubical): 9 goals, 90 proof steps
+
+horn cubical run examples/cubical/source/systems.hcu --emit NEW_DIR
+ACCEPT (generated cubical): 7 goals, 240 proof steps
+
+kernel NEW_DIR/theory.horn NEW_DIR/goals NEW_DIR/proof
+ACCEPT: 7 goals, 240 proof steps, 20311 bytes, 313 distinct terms
+```
+
+Theory selection is explicit in `Generated.profile` and `Generated.theory`:
+path-only requests use one existing fragment; face assertions use two;
+system/restricted assertions use the first five existing fragments. The
+certificate cannot introduce rules. Local search and restricted inference are
+bounded subsets, not complete decision procedures. The new producer does not
+yet construct composition, Glue or univalence proofs, and no semantic/model
+soundness theorem is claimed for the source frontend or imported specification.

@@ -22,7 +22,9 @@ rules are explicit theory data; the generic kernel has no new primitives.
 Fresh dependent-function and path proofs can also be generated from explicit
 core files. Try `horn cubical run examples/cubical/source/named.hcu` for named
 binders, and `conversion.hcu` in the same directory for certified root type
-conversion; see the [producer guide](docs/CUBICAL_PRODUCER.md). Glue and univalence are currently
+conversion; see the [producer guide](docs/CUBICAL_PRODUCER.md). Face implication,
+local interval evidence and coherent systems are also generated from source
+with explicit overlap/coverage checks; see [faces and systems](docs/CUBICAL_FACES_SYSTEMS.md). Glue and univalence are currently
 available through bundled replay, while their fresh producers remain future work. See [CUBICAL.md](docs/CUBICAL.md) and the staged
 [integration plan](docs/INTEGRATION.md).
 

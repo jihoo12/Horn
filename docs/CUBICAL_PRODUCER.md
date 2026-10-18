@@ -73,7 +73,8 @@ establishes the fixed elaborated judgments relative to the selected rules.
 
 The annotated `Term` API supports universes, variables, Nat/zero, dependent
 products, annotated lambdas, application, dependent paths, annotated path
-lambdas and path application. Lambda domain and path-lambda family annotations
+lambdas, path application and annotated coherent systems. Lambda domain,
+path-lambda family and system type annotations
 are source metadata, erased from object terms. Their typing obligations are
 still derived. Context types are oldest first at their binding sites;
 ordinary and dimension variables have independent de Bruijn indices.

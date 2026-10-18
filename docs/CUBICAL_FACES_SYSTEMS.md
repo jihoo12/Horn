@@ -79,7 +79,9 @@ certified with `req.false`, after both terms have been typed.
 The first supported subset uses globally typed contexts/types/branch terms,
 plus recursively checked system branches. It embeds those typings with
 `rhas.global`. It does not implement general restricted type inference or
-face-dependent type conversion, and does not use false elimination to admit
+face-dependent type conversion. Direct restricted system checking requires
+the annotation to match the requested type syntactically, and does not use
+false elimination to admit
 ill-typed or unscoped branch terms. Matching path applications can be related
 by certified local interval equality when the family instances and requested
 type are syntactically identical. Path endpoint equations then yield local
