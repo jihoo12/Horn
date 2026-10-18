@@ -2,7 +2,7 @@
 //! No Agda invocation, semantic univalence lemmas, or cubical kernel extensions.
 use crate::cubical::engine::face_frontend::{Face, FaceProducer};
 use crate::cubical::engine::frontend::number as num;
-use crate::cubical::engine::path_frontend::{Op, cons, papp, path, u};
+use crate::cubical::engine::path_frontend::{Op, cons, papp, path, u, v};
 use crate::cubical::engine::term::{Result, Sexp, atom, call};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -330,7 +330,8 @@ impl RestrictedProducer {
         let refs = match (head, args) {
             ("u", [_]) | ("nat" | "zero", []) => vec![],
             ("bool" | "btrue" | "bfalse", []) => vec![],
-            ("bif", [p, tt, f, b]) => vec![
+            ("suc", [x]) => vec![self.scope(d, n, x)?],
+            ("bif" | "natrec", [p, tt, f, b]) => vec![
                 self.scope(d, n + 1, p)?,
                 self.scope(d, n, tt)?,
                 self.scope(d, n, f)?,
@@ -464,6 +465,30 @@ impl RestrictedProducer {
                 if head == "btrue" { "rhas.btrue" } else { "rhas.bfalse" },
                 vec![self.ctx(d, g, phi)?],
             ),
+            ("suc", [x]) => {
+                let xi = self.check(d, g, phi, x, &atom("nat"))?;
+                (atom("nat"), "rhas.suc", vec![xi])
+            }
+            ("natrec", [p, z, f, m]) => {
+                let nat = atom("nat");
+                let gn = cons(nat.clone(), g.clone());
+                let (up, pi) = self.infer(d, &gn, phi, p)?;
+                let l = level(&up)?;
+                let (pz, szi) = self.f.path.transform(p, &Op::Subst(0, atom("zero")))?;
+                let zi = self.check(d, g, phi, z, &pz)?;
+                let (p1, sh1) = self.f.path.transform(p, &Op::Shift(1))?;
+                let (p2, sh2) = self.f.path.transform(&p1, &Op::Shift(1))?;
+                let (psk, ssk) = self
+                    .f
+                    .path
+                    .transform(&p2, &Op::Subst(0, call("suc", [v(1)])))?;
+                let step = call("pi", [nat.clone(), call("pi", [p.clone(), psk])]);
+                let fi = self.check(d, g, phi, f, &step)?;
+                let mi = self.check(d, g, phi, m, &nat)?;
+                let (pm, smi) = self.f.path.transform(p, &Op::Subst(0, m.clone()))?;
+                let ui = self.check(d, g, phi, &pm, &u(l))?;
+                (pm, "rhas.natrec", vec![pi, szi, zi, sh1, sh2, ssk, fi, mi, smi, ui])
+            }
             ("bif", [p, tt, f, b]) => {
                 let gb = cons(atom("bool"), g.clone());
                 let (up, pi) = self.infer(d, &gb, phi, p)?;
@@ -900,6 +925,32 @@ impl RestrictedProducer {
             current = next;
         }
         Err(format!("evaluation did not finish in {fuel} steps"))
+    }
+
+    /// Like `whnf`, but a natural number is normalized under every `suc`, so
+    /// a closed term of type nat reaches a numeral.
+    pub fn value(
+        &mut self,
+        d: usize,
+        g: &Sexp,
+        phi: &Face,
+        t: &Sexp,
+        ty: &Sexp,
+        fuel: usize,
+    ) -> Result<(Sexp, usize)> {
+        let (w, e) = self.whnf(d, g, phi, t, ty, fuel)?;
+        if *ty == atom("nat")
+            && let ("suc", [x]) = shape(&w)?
+        {
+            let (xv, ex) = self.value(d, g, phi, x, ty, fuel)?;
+            if xv != *x {
+                let out = call("suc", [xv]);
+                let inner = self.eq(d, g, phi, &w, &out, ty, "req.suc-cong", vec![ex]);
+                let eq = self.eq(d, g, phi, t, &out, ty, "req.trans", vec![e, inner]);
+                return Ok((out, eq));
+            }
+        }
+        Ok((w, e))
     }
 
     /// With `keep_reduct_types`, reduce a term whose type the caller knows

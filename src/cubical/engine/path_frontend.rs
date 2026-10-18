@@ -193,7 +193,12 @@ impl PathProducer {
         let out = match (head, args) {
             ("u", [_]) | ("nat", []) | ("zero", []) => t.clone(),
             ("bool" | "btrue" | "bfalse", []) => t.clone(),
-            ("bif", [p, tt, f, b]) => {
+            ("suc", [n]) => {
+                let (n2, id) = self.transform(n, op)?;
+                refs.push(id);
+                call("suc", [n2])
+            }
+            (head @ ("bif" | "natrec"), [p, tt, f, b]) => {
                 let pop = self.under(op, false, &mut refs)?;
                 let (p2, id) = self.transform(p, &pop)?;
                 refs.push(id);
@@ -204,7 +209,7 @@ impl PathProducer {
                     rest.push(x2);
                 }
                 let [t2, f2, b2]: [Sexp; 3] = rest.try_into().unwrap();
-                call("bif", [p2, t2, f2, b2])
+                call(head, [p2, t2, f2, b2])
             }
             ("v", [n]) if op.dimension() => {
                 let _ = n;

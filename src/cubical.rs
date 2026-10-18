@@ -46,6 +46,7 @@ pub const FRAGMENTS: &[(&str, &str)] = &[
     // Appended after the kamo3 snapshot; oracles encoded against the
     // twelve fragments above decode unchanged (oracle format 2).
     ("bool", include_str!("../theories/cubical/bool.horn")),
+    ("nat", include_str!("../theories/cubical/nat.horn")),
 ];
 
 pub fn theory() -> String {

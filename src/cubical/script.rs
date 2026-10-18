@@ -10,7 +10,9 @@
 //!
 //! Terms use named binders. `(lam x A body)`, `(pi x A B)`, `(sigma x A B)`,
 //! `(plam i body)`, `(path i A l r)` or `(path A l r)`, `(papp p r)`,
-//! `(bif c P t f b)` (P is the motive over `c : bool`), `(pair a b)`,
+//! `(bif c P t f b)` (P is the motive over `c : bool`), `(suc n)`,
+//! `(natrec k P z s n)` (motive P over `k : nat`, `s : Π k. P k → P (suc k)`),
+//! numerals, `(pair a b)`,
 //! `(fst p)`, `(snd p)`, `(app f a ...)`, `(ann t A)`, `(u N)`, `(equiv A B)`
 //! and `(transport i A x)` (transport of x along the line `i ↦ A`).
 //! Constants are `bool btrue bfalse nat zero`. The prelude names `ua`
@@ -89,7 +91,7 @@ fn binder(s: &Sexp) -> Result<&str> {
 const RESERVED: &[&str] = &[
     "bool", "btrue", "bfalse", "nat", "zero", "i0", "i1", "u", "pi", "lam", "app", "sigma",
     "pair", "fst", "snd", "path", "plam", "papp", "bif", "ann", "equiv", "transport", "neg",
-    "meet", "join", "ua", "iso-equiv",
+    "meet", "join", "ua", "iso-equiv", "suc", "natrec",
 ];
 
 struct Elaborator {
@@ -146,6 +148,13 @@ impl Elaborator {
             Sexp::Atom(a) => {
                 return if ["bool", "btrue", "bfalse", "nat", "zero"].contains(&&**a) {
                     Ok(s.clone())
+                } else if let Ok(n) = a.parse::<usize>()
+                    && a.bytes().all(|c| c.is_ascii_digit())
+                {
+                    if n > 10_000 {
+                        return Err(format!("numeral {n} is too large"));
+                    }
+                    Ok((0..n).fold(atom("zero"), |t, _| call("suc", [t])))
                 } else if let Some(i) = index(&names.ordinary, &**a) {
                     Ok(v(i))
                 } else if let Some(t) = self.defs.get(&**a) {
@@ -195,8 +204,9 @@ impl Elaborator {
                 self.term(r, names)?,
             ),
             ("papp", [p, r]) => papp(self.term(p, names)?, self.interval(r, names)?),
-            ("bif", [c, motive, t, f, b]) => call(
-                "bif",
+            ("suc", [n]) => call("suc", [self.term(n, names)?]),
+            (head @ ("bif" | "natrec"), [c, motive, t, f, b]) => call(
+                head,
                 [
                     self.term(motive, &names.with_ordinary(binder(c)?))?,
                     self.term(t, names)?,
@@ -238,6 +248,16 @@ fn show(s: &Sexp) -> String {
             Sexp::List(xs) if xs.len() == 2 && xs[0] == atom("s") => unary(&xs[1]).map(|n| n + 1),
             _ => None,
         }
+    }
+    fn numeral(s: &Sexp) -> Option<usize> {
+        match s {
+            Sexp::Atom(a) if &**a == "zero" => Some(0),
+            Sexp::List(xs) if xs.len() == 2 && xs[0] == atom("suc") => numeral(&xs[1]).map(|n| n + 1),
+            _ => None,
+        }
+    }
+    if let Some(n) = numeral(s) {
+        return n.to_string();
     }
     match s {
         Sexp::Atom(a) => a.to_string(),
@@ -308,7 +328,7 @@ pub fn run(source: &str) -> Result<Script> {
                     };
                     let (value, id) = e
                         .p
-                        .whnf(0, &nil, &top, &t, &ty, FUEL)
+                        .value(0, &nil, &top, &t, &ty, FUEL)
                         .map_err(|err| format!("eval {name}: {err}"))?;
                     e.p.f.path.p.result(&name, id);
                     evaluations.push(Evaluation {

@@ -335,6 +335,40 @@ impl RestrictedProducer {
                     vec![ai, bi, base, lr, rl, partial, def, equiv],
                 )
             }
+            ("suc", [at], [bt], _, _) => {
+                let nat = atom("nat");
+                let eq = self.equality(d, g, phi, at, bt, &nat)?;
+                let eq = self.eq(d, g, phi, a, b, &nat, "req.suc-cong", vec![eq]);
+                return self.retype_eq(d, g, phi, a, b, &nat, ty, eq);
+            }
+            ("natrec", [ap, az, af, am], [bp, bz, bf, bm], _, _)
+                if ap == bp && az == bz && af == bf =>
+            {
+                let ai = self.check(d, g, phi, a, ty)?;
+                let bi = self.check(d, g, phi, b, ty)?;
+                let eq = self.equality(d, g, phi, am, bm, &atom("nat"))?;
+                return Ok(self.eq(d, g, phi, a, b, ty, "req.natrec-cong", vec![ai, bi, eq]));
+            }
+            ("bif", [ap, at, af, ab], [bp, bt, bf, bb], _, _)
+                if ap == bp && at == bt && af == bf =>
+            {
+                // Same motive and branches: only the scrutinee may differ.
+                let ai = self.check(d, g, phi, a, ty)?;
+                let bi = self.check(d, g, phi, b, ty)?;
+                let bool = atom("bool");
+                let gb = crate::cubical::engine::path_frontend::cons(bool.clone(), g.clone());
+                let (up, pi) = self.infer(d, &gb, phi, ap)?;
+                let ep = self.eq(d, &gb, phi, ap, ap, &up, "req.refl", vec![pi]);
+                let mut refs = vec![ai, bi, ep];
+                for (branch, value) in [("btrue", at), ("bfalse", af)] {
+                    let (pv, si) = self.f.path.transform(ap, &Op::Subst(0, atom(branch)))?;
+                    let vi = self.check(d, g, phi, value, &pv)?;
+                    let ev = self.eq(d, g, phi, value, value, &pv, "req.refl", vec![vi]);
+                    refs.extend([si, ev]);
+                }
+                refs.push(self.equality(d, g, phi, ab, bb, &bool)?);
+                return Ok(self.eq(d, g, phi, a, b, ty, "req.bif-cong", refs));
+            }
             ("unglue", [at], [bt], _, _) => {
                 let (gt, _) = self.infer(d, g, phi, at)?;
                 let ("glue-type", [base, _, _, _]) = shape(&gt)? else {

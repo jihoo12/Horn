@@ -37,6 +37,11 @@ is sound because bool is discrete (the constant presheaf 2 in the cubical-set
 model). It uses the thirteenth fragment, [bool.horn](../theories/cubical/bool.horn),
 which is new in Horn and not a kamo3 snapshot.
 
+[nat.horn](../theories/cubical/nat.horn), the fourteenth fragment, adds `suc`,
+the dependent recursor `natrec` with its computation rules, and composition in
+nat, which returns its base for the same reason as bool (it subsumes the
+snapshot's `req.comp-nat-zero`).
+
 Oracles use format 2, which records the theory size they were encoded
 against; appending fragments does not change how existing oracles decode.
 

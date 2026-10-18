@@ -240,7 +240,12 @@ impl RestrictedProducer {
                     None
                 } else {
                     let Ok(eq) = self.congruence(d, g, psi, t, &canonical, &atom("nat")) else {
-                        return Ok(None);
+                        // nat is discrete: any composition returns its base.
+                        let nat = atom("nat");
+                        let source = self.check(d, g, psi, t, &nat)?;
+                        let eq = self.eq(d, g, psi, t, base, &nat, "req.comp-nat", vec![source]);
+                        let eq = self.retype_eq(d, g, psi, t, base, &nat, ty, eq)?;
+                        return Ok(Some((base.clone(), ty.clone(), eq)));
                     };
                     Some(eq)
                 };

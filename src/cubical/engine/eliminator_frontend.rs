@@ -8,7 +8,7 @@ use crate::cubical::engine::term::{Result, Sexp, atom, call};
 impl RestrictedProducer {
     fn eliminator_redex(t: &Sexp) -> Result<bool> {
         Ok(match shape(t)? {
-            ("ann" | "system" | "papp" | "comp" | "glue" | "unglue" | "glue-type" | "bif", _) => true,
+            ("ann" | "system" | "papp" | "comp" | "glue" | "unglue" | "glue-type" | "bif" | "natrec", _) => true,
             ("app", [f, _]) => shape(f)?.0 == "lam" || Self::eliminator_redex(f)?,
             ("fst" | "snd", [t]) => shape(t)?.0 == "pair" || Self::eliminator_redex(t)?,
             _ => false,
@@ -236,6 +236,30 @@ impl RestrictedProducer {
                     refs,
                 );
                 let eq = self.retype_eq(d, g, phi, t, &out, &result_ty, ty, eq)?;
+                return Ok(Some((out, ty.clone(), eq)));
+            }
+            ("natrec", [p, z, f, m]) => {
+                if let ("zero", []) = shape(m)? {
+                    let oi = self.check(d, g, phi, z, ty)?;
+                    let eq = self.eq(d, g, phi, t, z, ty, "req.natrec-zero", vec![ti, oi]);
+                    return Ok(Some((z.clone(), ty.clone(), eq)));
+                }
+                if let ("suc", [k]) = shape(m)? {
+                    let rec = call("natrec", [p.clone(), z.clone(), f.clone(), k.clone()]);
+                    let out = call("app", [call("app", [f.clone(), k.clone()]), rec]);
+                    let oi = self.check(d, g, phi, &out, ty)?;
+                    let eq = self.eq(d, g, phi, t, &out, ty, "req.natrec-suc", vec![ti, oi]);
+                    return Ok(Some((out, ty.clone(), eq)));
+                }
+                let nat = atom("nat");
+                let (m2, mty, em) = self.reduce(d, g, phi, m)?;
+                if m2 == *m {
+                    return Ok(None);
+                }
+                let em = self.retype_eq(d, g, phi, m, &m2, &mty, &nat, em)?;
+                let out = call("natrec", [p.clone(), z.clone(), f.clone(), m2]);
+                let oi = self.check(d, g, phi, &out, ty)?;
+                let eq = self.eq(d, g, phi, t, &out, ty, "req.natrec-cong", vec![ti, oi, em]);
                 return Ok(Some((out, ty.clone(), eq)));
             }
             ("bif", [p, tt, f, b]) => {

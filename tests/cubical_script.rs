@@ -60,3 +60,37 @@ fn ill_typed_or_malformed_scripts_fail() {
         assert!(cubical::script::run(bad).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn natural_number_programs_evaluate_and_induction_checks() {
+    let script = cubical::script::run(include_str!("../examples/cubical/script/nat.hcs")).unwrap();
+    let shown: Vec<_> = script
+        .evaluations
+        .iter()
+        .map(|e| format!("{} = {} : {}", e.name, e.value, e.ty))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            "two-plus-three = 5 : nat",
+            "three-times-four = 12 : nat",
+            "transport-nat = 6 : nat"
+        ]
+    );
+    let add = "(def add (pi m nat (pi n nat nat))
+        (lam m nat (lam n nat (natrec k nat m (lam k nat (lam r nat (suc r))) n))))";
+    for bad in [
+        // 0 + n is not suc n: the base case fails.
+        "(def wrong (pi n nat (path nat (app add 0 n) (suc n)))
+          (lam n nat (natrec k (path nat (app add 0 k) (suc k)) (plam i 1)
+            (lam k nat (lam p (path nat (app add 0 k) (suc k)) (plam i (suc (papp p i))))) n)))",
+        // A step that does not use the hypothesis cannot reach suc k.
+        "(def wrong (pi n nat (path nat (app add 0 n) n))
+          (lam n nat (natrec k (path nat (app add 0 k) k) (plam i 0)
+            (lam k nat (lam p (path nat (app add 0 k) k) p)) n)))",
+        // 2 + 2 is not 5.
+        "(check wrong (plam i 5) (path nat (app add 2 2) 5))",
+    ] {
+        assert!(cubical::script::run(&format!("{add}\n{bad}")).is_err(), "{bad}");
+    }
+}

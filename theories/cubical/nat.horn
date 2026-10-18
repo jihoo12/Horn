@@ -1,0 +1,58 @@
+; Natural numbers, appended after bool.horn: the successor, a dependent
+; recursor, its computation rules, and composition. nat and zero are
+; declared in path.horn.
+; natrec P z s n eliminates n : nat into the motive P, which binds one
+; ordinary variable of type nat; z : P zero and s : Π k:nat. P k → P (suc k).
+; Declarative object theory only: no kernel algorithm.
+(ctor suc (Tm) Tm)
+(ctor natrec (Tm Tm Tm Tm) Tm)
+
+(rule scope.suc ((scoped ?d ?n ?t)) (scoped ?d ?n (suc ?t)))
+(rule scope.natrec ((scoped ?d (s ?n) ?p) (scoped ?d ?n ?z) (scoped ?d ?n ?f)
+    (scoped ?d ?n ?m))
+  (scoped ?d ?n (natrec ?p ?z ?f ?m)))
+
+(rule shift.suc ((shift ?t ?k ?t2)) (shift (suc ?t) ?k (suc ?t2)))
+(rule shift.natrec ((shift ?p (s ?k) ?p2) (shift ?z ?k ?z2) (shift ?f ?k ?f2)
+    (shift ?m ?k ?m2))
+  (shift (natrec ?p ?z ?f ?m) ?k (natrec ?p2 ?z2 ?f2 ?m2)))
+(rule subst.suc ((subst ?t ?k ?r ?t2)) (subst (suc ?t) ?k ?r (suc ?t2)))
+(rule subst.natrec ((shift ?r z ?r2) (subst ?p (s ?k) ?r2 ?p2)
+    (subst ?z ?k ?r ?z2) (subst ?f ?k ?r ?f2) (subst ?m ?k ?r ?m2))
+  (subst (natrec ?p ?z ?f ?m) ?k ?r (natrec ?p2 ?z2 ?f2 ?m2)))
+(rule dshift.suc ((dshift ?t ?k ?t2)) (dshift (suc ?t) ?k (suc ?t2)))
+(rule dshift.natrec ((dshift ?p ?k ?p2) (dshift ?z ?k ?z2) (dshift ?f ?k ?f2)
+    (dshift ?m ?k ?m2))
+  (dshift (natrec ?p ?z ?f ?m) ?k (natrec ?p2 ?z2 ?f2 ?m2)))
+(rule dsubst.suc ((dsubst ?t ?k ?r ?t2)) (dsubst (suc ?t) ?k ?r (suc ?t2)))
+(rule dsubst.natrec ((dsubst ?p ?k ?r ?p2) (dsubst ?z ?k ?r ?z2)
+    (dsubst ?f ?k ?r ?f2) (dsubst ?m ?k ?r ?m2))
+  (dsubst (natrec ?p ?z ?f ?m) ?k ?r (natrec ?p2 ?z2 ?f2 ?m2)))
+
+(rule rhas.suc ((rhas ?d ?g ?phi ?t nat)) (rhas ?d ?g ?phi (suc ?t) nat))
+; The step's type Π k:nat. P k → P (suc k) is spelled out with the shifts
+; and substitutions it needs, all certified: P lives over (x, Γ); two shifts
+; at cutoff 1 make room for k and the induction hypothesis, and x becomes
+; suc k, which is v1 under the hypothesis.
+(rule rhas.natrec ((rhas ?d (cons nat ?g) ?phi ?p (u ?l))
+    (subst ?p z zero ?pz) (rhas ?d ?g ?phi ?z ?pz)
+    (shift ?p (s z) ?p1) (shift ?p1 (s z) ?p2) (subst ?p2 z (suc (v (s z))) ?psk)
+    (rhas ?d ?g ?phi ?f (pi nat (pi ?p ?psk)))
+    (rhas ?d ?g ?phi ?m nat) (subst ?p z ?m ?pm) (rhas ?d ?g ?phi ?pm (u ?l)))
+  (rhas ?d ?g ?phi (natrec ?p ?z ?f ?m) ?pm))
+
+(rule req.natrec-zero ((rhas ?d ?g ?phi (natrec ?p ?z ?f zero) ?a) (rhas ?d ?g ?phi ?z ?a))
+  (req ?d ?g ?phi (natrec ?p ?z ?f zero) ?z ?a))
+(rule req.natrec-suc ((rhas ?d ?g ?phi (natrec ?p ?z ?f (suc ?m)) ?a)
+    (rhas ?d ?g ?phi (app (app ?f ?m) (natrec ?p ?z ?f ?m)) ?a))
+  (req ?d ?g ?phi (natrec ?p ?z ?f (suc ?m)) (app (app ?f ?m) (natrec ?p ?z ?f ?m)) ?a))
+(rule req.natrec-cong ((rhas ?d ?g ?phi (natrec ?p ?z ?f ?m) ?a)
+    (rhas ?d ?g ?phi (natrec ?p ?z ?f ?m2) ?a) (req ?d ?g ?phi ?m ?m2 nat))
+  (req ?d ?g ?phi (natrec ?p ?z ?f ?m) (natrec ?p ?z ?f ?m2) ?a))
+(rule req.suc-cong ((req ?d ?g ?phi ?t ?t2 nat)) (req ?d ?g ?phi (suc ?t) (suc ?t2) nat))
+
+; Composition in the constant type nat returns its base: nat is discrete
+; (the constant presheaf of naturals in the cubical-set model), as for bool.
+; This subsumes req.comp-nat-zero of computation.horn.
+(rule req.comp-nat ((rhas ?d ?g ?phi (comp nat ?psi ?t ?b) nat))
+  (req ?d ?g ?phi (comp nat ?psi ?t ?b) ?b nat))
