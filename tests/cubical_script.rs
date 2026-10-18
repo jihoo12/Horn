@@ -110,3 +110,49 @@ fn a_function_transported_along_ua_computes() {
         ["moved-true = bfalse : bool", "moved-false = btrue : bool"]
     );
 }
+
+#[test]
+fn declared_data_types_compute_and_move_along_ua() {
+    let script = cubical::script::run(include_str!("../examples/cubical/script/data.hcs")).unwrap();
+    let shown: Vec<_> = script
+        .evaluations
+        .iter()
+        .map(|e| format!("{} = {} : {}", e.name, e.value, e.ty))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            "after-red = green : color",
+            "along-ua = green : color",
+            "total = 6 : nat",
+            "mirrored = (node leaf 2 (node leaf 1 leaf)) : tree"
+        ]
+    );
+    // The generated rules travel with the certificate.
+    let c = &script.certified;
+    assert!(c.theory.contains("(rule req.comp-ty/color "));
+    oracle::check(&c.theory, &c.goals, &c.oracle).unwrap();
+    assert!(oracle::check(&cubical::theory(), &c.goals, &c.oracle).is_err());
+}
+
+#[test]
+fn malformed_data_declarations_and_eliminations_fail() {
+    let color = "(data color (red) (green))";
+    for bad in [
+        // Only discrete argument types are allowed.
+        "(data box (mk (u 0)))",
+        "(data box (mk later))",
+        "(data box)",
+        "(data two (a) (a))",
+        "(data color (blue))",
+        // Method count and method types are checked.
+        "(def f (pi c color color) (lam c color (elim color k color (red) c)))",
+        "(def f (pi c color nat) (lam c color (elim color k nat (red green) c)))",
+        // A case analysis that does not prove its motive.
+        "(def f (pi c color (path color c red))
+           (lam c color (elim color k (path color k red) ((plam i red) (plam i red)) c)))",
+        "(eval x (red green))",
+    ] {
+        assert!(cubical::script::run(&format!("{color}\n{bad}")).is_err(), "{bad}");
+    }
+}

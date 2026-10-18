@@ -1,0 +1,44 @@
+; User-declared data types. Each declaration generates explicit rules that
+; are appended to the theory this certificate is checked against.
+(data color (red) (green) (blue))
+
+(def next (pi c color color)
+  (lam c color (elim color k color (green blue red) c)))
+(def prev (pi c color color)
+  (lam c color (elim color k color (blue red green) c)))
+(eval after-red (app next red))
+
+; Inverse laws, case by case.
+(def next-prev (pi c color (path color (app next (app prev c)) c))
+  (lam c color
+    (elim color k (path color (app next (app prev k)) k)
+      ((plam i red) (plam i green) (plam i blue)) c)))
+(def prev-next (pi c color (path color (app prev (app next c)) c))
+  (lam c color
+    (elim color k (path color (app prev (app next k)) k)
+      ((plam i red) (plam i green) (plam i blue)) c)))
+
+; Rotation is an equivalence, so it is a path of types, and transport
+; along that path runs the rotation.
+(def rotate (equiv color color)
+  (pair next (app iso-equiv color color next prev next-prev prev-next)))
+(eval along-ua (transport i (papp (app ua color color rotate) i) red))
+
+; A recursive type with a nat field, and recursion over it.
+(data tree (leaf) (node tree nat tree))
+(def add (pi m nat (pi n nat nat))
+  (lam m nat (lam n nat (natrec k nat m (lam k nat (lam r nat (suc r))) n))))
+(def sum (pi t tree nat)
+  (lam t tree
+    (elim tree k nat
+      (0 (lam l tree (lam n nat (lam r tree (lam sl nat (lam sr nat
+        (app add (app add sl n) sr)))))))
+      t)))
+(eval total (app sum (node (node leaf 1 leaf) 2 (node leaf 3 leaf))))
+; Values are normalized under constructors.
+(def mirror (pi t tree tree)
+  (lam t tree
+    (elim tree k tree
+      (leaf (lam l tree (lam n nat (lam r tree (lam ml tree (lam mr tree (node mr n ml)))))))
+      t)))
+(eval mirrored (app mirror (node (node leaf 1 leaf) (app add 1 1) leaf)))

@@ -269,6 +269,9 @@ impl RestrictedProducer {
             let eq = self.equality(d, g, phi, b, a, ty)?;
             return Ok(self.eq(d, g, phi, a, b, ty, "req.sym", vec![eq]));
         }
+        if let Some(eq) = self.congruence_declared(d, g, phi, a, b, ty)? {
+            return Ok(eq);
+        }
         if ah != bh {
             return Err(format!(
                 "local equality search failed: {a} versus {b} : {ty} under {} in {d} dimensions",

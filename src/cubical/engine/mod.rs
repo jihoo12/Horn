@@ -4,6 +4,7 @@
 #![allow(dead_code, clippy::all)]
 
 pub mod term;
+pub mod data;
 pub mod canonical_code_frontend;
 pub mod canonical_map_frontend;
 pub mod canonical_ua_frontend;

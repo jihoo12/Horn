@@ -18,6 +18,10 @@ mod equivalence_ops;
 #[allow(dead_code)]
 mod equality_frontend;
 
+#[path = "data_frontend.rs"]
+#[allow(dead_code)]
+mod data_frontend;
+
 #[path = "eliminator_frontend.rs"]
 #[allow(dead_code)]
 mod eliminator_frontend;
@@ -367,6 +371,15 @@ impl RestrictedProducer {
                 self.scope(d + 1, n, tube)?,
                 self.scope(d, n, base)?,
             ],
+            (h, xs) if crate::cubical::engine::data::is_declared(h) => {
+                let binds = crate::cubical::engine::data::by_elim(h).is_some();
+                let mut refs = Vec::new();
+                for (i, x) in xs.iter().enumerate() {
+                    let depth = if binds && i == 0 { n + 1 } else { n };
+                    refs.push(self.scope(d, depth, x)?);
+                }
+                refs
+            }
             _ => return Err(format!("unsupported syntax in scope: {t}")),
         };
         Ok(self.emit(
@@ -723,6 +736,11 @@ impl RestrictedProducer {
                 )
             }
             _ => {
+                if let Some((ty, rule, refs)) = self.infer_declared(d, g, phi, t)? {
+                    let id = self.has(d, g, phi, t, &ty, &rule, refs);
+                    self.remember(d, g, phi, t, &ty, id);
+                    return Ok((ty, id));
+                }
                 if let Some(found) = self.recall_checked_form(d, g, phi, t)? {
                     return Ok(found);
                 }
@@ -939,6 +957,10 @@ impl RestrictedProducer {
         fuel: usize,
     ) -> Result<(Sexp, usize)> {
         let (w, e) = self.whnf(d, g, phi, t, ty, fuel)?;
+        if let Some((out, inner)) = self.value_declared(d, g, phi, &w, ty, fuel)? {
+            let eq = self.eq(d, g, phi, t, &out, ty, "req.trans", vec![e, inner]);
+            return Ok((out, eq));
+        }
         if *ty == atom("nat")
             && let ("suc", [x]) = shape(&w)?
         {
@@ -1460,6 +1482,9 @@ impl RestrictedProducer {
             && let Some(out) = self.reduce_composition(d, g, phi, t, &ty, ti)?
         {
             return Ok(out);
+        }
+        if let Some(reduced) = self.reduce_declared(d, g, phi, t, &ty, ti)? {
+            return Ok(reduced);
         }
         if let Some(reduced) = self.reduce_eliminator(d, g, phi, t, &ty, ti)? {
             return Ok(reduced);

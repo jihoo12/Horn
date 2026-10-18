@@ -19,22 +19,26 @@ pub const GENERATORS: &[(&str, fn() -> Result<RestrictedProducer>)] = &[
 ];
 
 pub struct Regenerated {
+    /// The theory the oracle was checked against.
+    pub theory: String,
     pub goals: String,
     pub oracle: Vec<u8>,
     pub checked: Report,
 }
 
 /// Run `produce` on a large stack, encode the results it registered as goals
-/// into an oracle, and check that oracle with the kernel.
+/// into an oracle, and check that oracle with the kernel. `produce` also
+/// returns theory text to append to the bundled theory (generated data
+/// declarations); the certificate is checked against the combined theory.
 pub fn certify<T: Send>(
-    produce: impl FnOnce() -> Result<(RestrictedProducer, T)> + Send,
+    produce: impl FnOnce() -> Result<(RestrictedProducer, T, String)> + Send,
 ) -> Result<(Regenerated, T)> {
-    let theory = super::theory();
-    let (goals, oracle, extra) = std::thread::scope(|scope| {
+    let (goals, oracle, extra, theory) = std::thread::scope(|scope| {
         let worker = std::thread::Builder::new()
             .stack_size(STACK_BYTES)
-            .spawn_scoped(scope, || -> Result<(String, Vec<u8>, T)> {
-                let (p, extra) = produce()?;
+            .spawn_scoped(scope, || -> Result<(String, Vec<u8>, T, String)> {
+                let (p, extra, appended) = produce()?;
+                let theory = super::theory() + &appended;
                 let steps = &p.f.path.p;
                 let goals: String = steps
                     .results()
@@ -68,7 +72,7 @@ pub fn certify<T: Send>(
                     written?;
                     Ok(encoded.0)
                 })?;
-                Ok((goals, oracle, extra))
+                Ok((goals, oracle, extra, theory))
             })
             .map_err(|e| e.to_string())?;
         worker.join().map_err(|_| "producer panicked".to_string())?
@@ -79,6 +83,7 @@ pub fn certify<T: Send>(
             goals,
             oracle,
             checked,
+            theory,
         },
         extra,
     ))
@@ -90,5 +95,5 @@ pub fn regenerate(name: &str) -> Result<Regenerated> {
         .find(|(n, _)| *n == name)
         .ok_or_else(|| format!("no generator for cubical example {name}"))?;
     let produce = *produce;
-    Ok(certify(|| Ok((produce()?, ())))?.0)
+    Ok(certify(|| Ok((produce()?, (), String::new())))?.0)
 }

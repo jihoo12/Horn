@@ -8,6 +8,11 @@
 //! (eval r (app not btrue))                       ; r = bfalse : bool
 //! ```
 //!
+//! `(data NAME (CTOR ARG-TYPE...) ...)` declares a closed data type; its
+//! rules are generated and appended to the theory the certificate is checked
+//! against. Constructors apply like functions, `(elim NAME k P (METHODS...) x)`
+//! eliminates into the motive P over `k : NAME`.
+//!
 //! Terms use named binders. `(lam x A body)`, `(pi x A B)`, `(sigma x A B)`,
 //! `(plam i body)`, `(path i A l r)` or `(path A l r)`, `(papp p r)`,
 //! `(bif c P t f b)` (P is the motive over `c : bool`), `(suc n)`,
@@ -19,6 +24,7 @@
 //! (`Π A B : U0. Equiv A B → Path U0 A B`) and `iso-equiv`
 //! (`Π X Y f g s t. isEquiv f`) are closed library terms, checked like any
 //! definition; neither is an axiom. Definitions are closed and transparent.
+use super::engine::data::{self, Ctor, Data};
 use super::engine::face_frontend::Face;
 use super::engine::iso_equiv_frontend::{iso_equiv_term, iso_equiv_type};
 use super::engine::path_frontend::{dim, papp, path, u, v};
@@ -91,7 +97,7 @@ fn binder(s: &Sexp) -> Result<&str> {
 const RESERVED: &[&str] = &[
     "bool", "btrue", "bfalse", "nat", "zero", "i0", "i1", "u", "pi", "lam", "app", "sigma",
     "pair", "fst", "snd", "path", "plam", "papp", "bif", "ann", "equiv", "transport", "neg",
-    "meet", "join", "ua", "iso-equiv", "suc", "natrec",
+    "meet", "join", "ua", "iso-equiv", "suc", "natrec", "data", "elim",
 ];
 
 struct Elaborator {
@@ -157,6 +163,15 @@ impl Elaborator {
                     Ok((0..n).fold(atom("zero"), |t, _| call("suc", [t])))
                 } else if let Some(i) = index(&names.ordinary, &**a) {
                     Ok(v(i))
+                } else if let Some(d) = data::by_name(a) {
+                    Ok(data::type_term(&d))
+                } else if let Some((d, i)) = data::by_ctor_name(a) {
+                    let c = &d.ctors[i];
+                    if c.args.is_empty() {
+                        Ok(data::ctor_term(c, vec![]))
+                    } else {
+                        Err(format!("constructor {a} needs {} arguments", c.args.len()))
+                    }
                 } else if let Some(t) = self.defs.get(&**a) {
                     Ok(t.clone())
                 } else if let Some(t) = self.prelude.get(&**a) {
@@ -215,6 +230,28 @@ impl Elaborator {
                 ],
             ),
             ("ann", [t, a]) => call("ann", [self.term(t, names)?, self.term(a, names)?]),
+            ("elim", [ty, k, motive, methods, x]) => {
+                let d = data::by_name(ty.atom()?).ok_or_else(|| format!("unknown data type {ty}"))?;
+                let methods = methods.list()?;
+                if methods.len() != d.ctors.len() {
+                    return Err(format!("elim {} needs {} methods", d.name, d.ctors.len()));
+                }
+                let mut items = vec![self.term(motive, &names.with_ordinary(binder(k)?))?];
+                for m in methods {
+                    items.push(self.term(m, names)?);
+                }
+                items.push(self.term(x, names)?);
+                call(&d.elim, items)
+            }
+            (c, args) if data::by_ctor_name(c).is_some() => {
+                let (d, i) = data::by_ctor_name(c).unwrap();
+                let ctor = &d.ctors[i];
+                if args.len() != ctor.args.len() {
+                    return Err(format!("constructor {c} needs {} arguments", ctor.args.len()));
+                }
+                let args = args.iter().map(|a| self.term(a, names)).collect::<Result<Vec<_>>>()?;
+                data::ctor_term(ctor, args)
+            }
             ("equiv", [a, b]) => {
                 let (a, b) = (self.term(a, names)?, self.term(b, names)?);
                 self.p.equiv_type(&a, &b)?.0
@@ -232,7 +269,62 @@ impl Elaborator {
         })
     }
 
+    /// Register a data declaration and return its generated theory text.
+    fn declare(&mut self, name: &str, ctors: &[Sexp]) -> Result<String> {
+        self.fresh(name)?;
+        let ty = format!("ty/{name}");
+        let mut out = Vec::new();
+        for c in ctors {
+            let xs = c.list()?;
+            let cname = xs.first().ok_or("empty constructor")?.atom()?;
+            self.fresh(cname)?;
+            if out.iter().any(|o: &Ctor| o.name == cname) {
+                return Err(format!("duplicate constructor {cname}"));
+            }
+            let mut args = Vec::new();
+            let mut recursive = Vec::new();
+            for (j, a) in xs[1..].iter().enumerate() {
+                // Only discrete argument types keep composition sound.
+                let arg = match a.atom()? {
+                    "bool" | "nat" => atom(a.atom()?),
+                    n if n == name => {
+                        recursive.push(j);
+                        atom(&ty)
+                    }
+                    n => match data::by_name(n) {
+                        Some(d) => data::type_term(&d),
+                        None => {
+                            return Err(format!(
+                                "constructor argument {n} must be bool, nat, {name} or an earlier data type"
+                            ));
+                        }
+                    },
+                };
+                args.push(arg);
+            }
+            out.push(Ctor {
+                name: cname.to_owned(),
+                symbol: format!("ctor/{name}/{cname}"),
+                args,
+                recursive,
+            });
+        }
+        if out.is_empty() {
+            return Err(format!("data {name} needs a constructor"));
+        }
+        let d = data::register(Data {
+            name: name.to_owned(),
+            ty,
+            elim: format!("elim/{name}"),
+            ctors: out,
+        });
+        Ok(d.theory())
+    }
+
     fn fresh(&self, name: &str) -> Result<()> {
+        if data::by_name(name).is_some() || data::by_ctor_name(name).is_some() {
+            return Err(format!("{name} is already declared"));
+        }
         if self.defs.contains_key(name) || self.prelude.contains_key(name) {
             return Err(format!("{name} is already defined"));
         }
@@ -260,6 +352,10 @@ fn show(s: &Sexp) -> String {
         return n.to_string();
     }
     match s {
+        // Generated symbols print as the names they were declared with.
+        Sexp::Atom(a) if a.starts_with("ctor/") || a.starts_with("ty/") => {
+            a.rsplit('/').next().unwrap_or(a).to_string()
+        }
         Sexp::Atom(a) => a.to_string(),
         Sexp::List(xs) => {
             let parts: Vec<_> = xs
@@ -280,6 +376,8 @@ pub fn run(source: &str) -> Result<Script> {
     // Terms are interned per thread, so parsing happens on the worker.
     let (certified, evaluations) = certify(move || {
         let forms = parse(&source)?;
+        data::clear();
+        let mut appended = String::new();
         let mut e = Elaborator::new()?;
         let nil = atom("nil");
         let top = Face::True;
@@ -294,6 +392,7 @@ pub fn run(source: &str) -> Result<Script> {
             }
             let empty = Names::default();
             match (head, &xs[2..]) {
+                ("data", ctors) => appended.push_str(&e.declare(&name, ctors)?),
                 ("def", [ty, t]) => {
                     e.fresh(&name)?;
                     let ty = e.term(ty, &empty)?;
@@ -348,7 +447,7 @@ pub fn run(source: &str) -> Result<Script> {
                 _ => return Err(format!("invalid form {form}")),
             }
         }
-        Ok((e.p, evaluations))
+        Ok((e.p, evaluations, appended))
     })?;
     Ok(Script {
         certified,

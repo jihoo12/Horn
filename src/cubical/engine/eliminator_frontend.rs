@@ -9,6 +9,7 @@ impl RestrictedProducer {
     fn eliminator_redex(t: &Sexp) -> Result<bool> {
         Ok(match shape(t)? {
             ("ann" | "system" | "papp" | "comp" | "glue" | "unglue" | "glue-type" | "bif" | "natrec", _) => true,
+            (h, _) if crate::cubical::engine::data::by_elim(h).is_some() => true,
             ("app", [f, _]) => shape(f)?.0 == "lam" || Self::eliminator_redex(f)?,
             ("fst" | "snd", [t]) => shape(t)?.0 == "pair" || Self::eliminator_redex(t)?,
             _ => false,

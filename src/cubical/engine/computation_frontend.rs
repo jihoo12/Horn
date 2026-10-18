@@ -174,6 +174,9 @@ impl RestrictedProducer {
                 return Ok(Some((out, ty.clone(), eq)));
             }
         }
+        if let Some(out) = self.comp_declared(d, g, psi, t, family, base, ty)? {
+            return Ok(Some(out));
+        }
         match shape(family)? {
             ("u", [level]) => {
                 let (endpoint, ei) = self.f.path.transform(tube, &Op::DSubst(0, atom("i1")))?;

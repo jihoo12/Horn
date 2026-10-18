@@ -110,7 +110,8 @@ fn run_cubical(args: &[String]) -> Result<(), String> {
                 fs::create_dir(dir)
                     .map_err(|e| format!("cannot create new directory {dir}: {e}"))?;
                 let dir = std::path::Path::new(dir);
-                fs::write(dir.join("theory.horn"), cubical::theory()).map_err(|e| e.to_string())?;
+                fs::write(dir.join("theory.horn"), &script.certified.theory)
+                    .map_err(|e| e.to_string())?;
                 fs::write(dir.join("goals"), &script.certified.goals).map_err(|e| e.to_string())?;
                 fs::write(dir.join("proof.oracle"), &script.certified.oracle)
                     .map_err(|e| e.to_string())?;

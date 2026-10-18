@@ -332,6 +332,26 @@ impl PathProducer {
                 refs.push(id);
                 call("comp", [a2, phi2, tube2, base2])
             }
+            (h, xs) if crate::cubical::engine::data::is_declared(h) => {
+                // Declared data: the eliminator's motive binds one ordinary
+                // variable; everything else is mapped argumentwise.
+                if xs.is_empty() {
+                    t.clone()
+                } else {
+                    let mut out = Vec::new();
+                    for (i, x) in xs.iter().enumerate() {
+                        let xop = if i == 0 && crate::cubical::engine::data::by_elim(h).is_some() {
+                            self.under(op, false, &mut refs)?
+                        } else {
+                            op.clone()
+                        };
+                        let (x2, id) = self.transform(x, &xop)?;
+                        refs.push(id);
+                        out.push(x2);
+                    }
+                    call(h, out)
+                }
+            }
             _ => return Err(format!("unknown term shape {t}")),
         };
         let mut args = vec![t.clone(), num(k)];

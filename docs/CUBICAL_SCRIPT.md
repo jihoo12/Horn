@@ -52,8 +52,53 @@ gives a function that maps `btrue` to `bfalse` and `bfalse` to `btrue`, as
 conjugating `not` by `not` should. This goes through composition in Pi types,
 then Glue, then bool.
 
+## Declared data types
+
+`(data NAME (CTOR ARG-TYPE...) ...)` declares a closed data type
+([data.hcs](../examples/cubical/script/data.hcs), about 9 s):
+
+```text
+(data color (red) (green) (blue))
+(def next (pi c color color) (lam c color (elim color k color (green blue red) c)))
+(def rotate (equiv color color) (pair next (app iso-equiv color color next prev next-prev prev-next)))
+(eval along-ua (transport i (papp (app ua color color rotate) i) red))   ; green : color
+(data tree (leaf) (node tree nat tree))
+```
+
+A declaration generates its rules as text: formation, constructors and
+their congruence, a dependent eliminator whose method types are spelled out
+with certified shifts and substitutions, one computation rule per
+constructor, congruence, scope/shift/substitution rules, and composition.
+They are appended to the bundled theory, written by `--emit` to
+`theory.horn`, and the oracle is checked against that combined theory; a
+reader sees exactly which rules a script introduced. Nothing about the
+declaration is built into the engine or the kernel.
+
+Constructor arguments may only be `bool`, `nat`, earlier data types or the
+type itself. All of these are discrete (constant presheaves in the
+cubical-set model), so the new type is discrete and composition in it may
+return its base; without function or universe arguments, strict positivity
+is immediate. Parameters, indices, function-typed fields and higher
+constructors are not supported.
+
+## What this language is for
+
+It is not meant to become Lean 4. Its distinguishing commitments are:
+
+- The trusted checker is a generic Horn derivation checker; the type theory
+  is a rule file, and every declaration's rules are explicit data.
+- Univalence computes: transport along an equivalence runs as a program
+  (`along-ua` above), on booleans, functions and declared data.
+- Every result is a portable certificate (tens of kilobytes) that anyone can
+  re-check against the stated theory and goals, independently of the
+  elaborator and the engine that produced it.
+
 ## Forms
 
+- `(data NAME (CTOR ARG-TYPE...) ...)`: a closed data type (above). Constructors
+  apply like functions; `(elim NAME k P (METHODS...) x)` eliminates `x` into
+  the motive `P` over `k : NAME`, with one method per constructor taking its
+  arguments and then one induction hypothesis per recursive argument.
 - `(def NAME TYPE TERM)`: a closed, transparent definition. Its typing is a goal.
 - `(check NAME TERM TYPE)`: a typing goal.
 - `(eval NAME TERM [TYPE])`: weak-head evaluation, continued under `suc` for
@@ -84,6 +129,6 @@ cubical type theory is still a separate obligation; see [CUBICAL.md](CUBICAL.md)
 ## Limits
 
 Evaluation is weak-head and bounded by 100,000 steps. Universe levels are
-fixed at 0 for the prelude. Data types are the fixed bool and nat; there are no user-declared data types, no
-implicit arguments and no modules. This format and the `.hcu` core files
+fixed at 0 for the prelude. Data types are bool, nat and closed declared types; there are no type parameters,
+no implicit arguments and no modules. This format and the `.hcu` core files
 and `.hn` programs are still separate frontends.
