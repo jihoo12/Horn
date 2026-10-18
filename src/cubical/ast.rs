@@ -46,6 +46,7 @@ pub enum Term {
     PathLam(Box<Term>, Box<Term>),
     PathApp(Box<Term>, Interval),
     System(Box<Term>, Vec<(Face, Term)>),
+    Comp(Box<Term>, Face, Box<Term>, Box<Term>),
 }
 
 pub(super) fn number(n: usize) -> Sexp {
@@ -79,6 +80,9 @@ impl Term {
             Self::PathLam(_, body) => call("plam", [body.quote()]),
             Self::PathApp(p, r) => call("papp", [p.quote(), r.quote()]),
             Self::System(_, sides) => call("system", [system(sides)]),
+            Self::Comp(a, phi, tube, base) => {
+                call("comp", [a.quote(), phi.quote(), tube.quote(), base.quote()])
+            }
         }
     }
 }
@@ -103,12 +107,31 @@ pub(super) fn system(sides: &[(Face, Term)]) -> Sexp {
 impl Term {
     pub(super) fn has_system(&self) -> bool {
         match self {
-            Self::System(..) => true,
+            Self::System(..) | Self::Comp(..) => true,
             Self::Pi(a, b) | Self::Lam(a, b) | Self::App(a, b) | Self::PathLam(a, b) => {
                 a.has_system() || b.has_system()
             }
             Self::Path(a, b, c) => a.has_system() || b.has_system() || c.has_system(),
             Self::PathApp(p, _) => p.has_system(),
+            _ => false,
+        }
+    }
+}
+
+impl Term {
+    pub(super) fn has_composition(&self) -> bool {
+        match self {
+            Self::Comp(..) => true,
+            Self::Pi(a, b) | Self::Lam(a, b) | Self::App(a, b) | Self::PathLam(a, b) => {
+                a.has_composition() || b.has_composition()
+            }
+            Self::Path(a, b, c) => {
+                a.has_composition() || b.has_composition() || c.has_composition()
+            }
+            Self::PathApp(p, _) => p.has_composition(),
+            Self::System(ty, sides) => {
+                ty.has_composition() || sides.iter().any(|(_, t)| t.has_composition())
+            }
             _ => false,
         }
     }

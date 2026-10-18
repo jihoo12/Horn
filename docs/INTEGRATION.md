@@ -60,15 +60,17 @@ Fresh face implication/local interval evidence and coherent systems are now
 supported in fixed additive profiles; see [their guide](CUBICAL_FACES_SYSTEMS.md).
 Systems certify every overlap and cover and preserve restricted goals on a
 partial base. Native restricted contexts, typing and bounded local type/equality
-conversion are supported, with explicit evidence for every conversion. General
-congruence and dependent transport, composition/Glue/univalence producers and connection to the `.hn` programming frontend remain open. The theories, ground/schematic checkers and Agda models are unchanged.
+conversion are supported, with explicit evidence for every conversion. Fresh
+composition typing and active-face computation use the unchanged composition
+fragment; see [its guide](CUBICAL_COMPOSITION.md). General
+congruence and dependent transport, type-directed composition/Glue/univalence producers and connection to the `.hn` programming frontend remain open. The theories, ground/schematic checkers and Agda models are unchanged.
 
 ## Following increments
 
 1. Move cubical certificate producers behind a Horn-owned library API, one
    feature at a time. The bounded contexts/universes/functions/substitution/path
    generator plus bounded face/system evidence are implemented. Continue with
-   composition, Glue and ua. Named binders and bounded root conversion are implemented; stronger
+   type-directed composition, Glue and ua. Named binders and bounded root conversion are implemented; stronger
    conversion still requires explicit congruence/equality-transport evidence.
    Keep imported snapshot replay as an independent migration oracle. Do not
    copy the entire research frontend without checking its assumptions.

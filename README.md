@@ -24,7 +24,10 @@ core files. Try `horn cubical run examples/cubical/source/named.hcu` for named
 binders, and `conversion.hcu` in the same directory for certified root type
 conversion; see the [producer guide](docs/CUBICAL_PRODUCER.md). Face implication,
 local interval evidence and coherent systems are also generated from source
-with explicit overlap/coverage checks; see [faces and systems](docs/CUBICAL_FACES_SYSTEMS.md). Glue and univalence are currently
+with explicit overlap/coverage checks and local type conversion; see
+[faces and systems](docs/CUBICAL_FACES_SYSTEMS.md). Fresh
+[composition typing and active-face computation](docs/CUBICAL_COMPOSITION.md)
+also produce independently replayable certificates. Glue and univalence are currently
 available through bundled replay, while their fresh producers remain future work. See [CUBICAL.md](docs/CUBICAL.md) and the staged
 [integration plan](docs/INTEGRATION.md).
 

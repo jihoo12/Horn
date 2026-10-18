@@ -1,5 +1,6 @@
-//! Small, untrusted producer for the existing scoped path theory. Every
+//! Bounded, untrusted producer for existing scoped cubical fragments. Every
 //! substitution and typing operation emits evidence for the ground kernel.
+mod composition;
 mod faces;
 mod restricted;
 mod systems;
@@ -17,6 +18,7 @@ pub enum Profile {
     Path,
     Faces,
     Systems,
+    Composition,
 }
 
 impl Profile {
@@ -25,6 +27,7 @@ impl Profile {
             Self::Path => 1,
             Self::Faces => 2,
             Self::Systems => 5,
+            Self::Composition => 6,
         };
         super::FRAGMENTS[..count]
             .iter()
@@ -260,6 +263,25 @@ impl Producer {
                 let (body, id) = self.transform(body, &inner)?;
                 refs.push(id);
                 (PathLam(Box::new(a), Box::new(body)), "plam")
+            }
+            Comp(a, phi, tube, base) => {
+                let inner = self.under(op, true, &mut refs)?;
+                let (a, x) = self.transform(a, &inner)?;
+                refs.push(x);
+                let phi = if matches!(op, Op::DShift(_) | Op::DSubst(..)) {
+                    let (phi, id) = self.transform_face(phi, op)?;
+                    refs.push(id);
+                    phi
+                } else {
+                    phi.clone()
+                };
+                let (tube, y) = self.transform(tube, &inner)?;
+                let (base, z) = self.transform(base, op)?;
+                refs.extend([y, z]);
+                (
+                    Comp(Box::new(a), phi, Box::new(tube), Box::new(base)),
+                    "comp",
+                )
             }
             System(ty, sides) => {
                 let (ty, _) = self.transform(ty, op)?;
@@ -565,6 +587,10 @@ impl Producer {
                     "type.plam",
                 )
             }
+            Comp(..) => {
+                let (ty, restricted) = self.composition_has((d, g), &Face::True, t)?;
+                (ty, vec![restricted], "rhas.export")
+            }
             System(ty, sides) => {
                 let restricted = self.system_has(d, g, &Face::True, sides, ty)?;
                 (*ty.clone(), vec![restricted], "rhas.export")
@@ -611,6 +637,13 @@ impl Producer {
     fn reduce(&mut self, d: usize, g: &[Term], t: &Term) -> Result<Option<(Term, usize)>> {
         use Term::*;
         match t {
+            Comp(..) => {
+                let Some((out, ty, step)) = self.restricted_reduce((d, g), &Face::True, t)? else {
+                    return Ok(None);
+                };
+                let id = self.equality_step("req.export", vec![step], (d, g), t, &out, &ty)?;
+                Ok(Some((out, id)))
+            }
             System(ty, sides) => self.reduce_system(d, g, sides, ty),
             App(f, r) if matches!(f.as_ref(), Lam(..)) => {
                 let Lam(a, body) = f.as_ref() else {
@@ -832,6 +865,12 @@ fn validate(request: &Request) -> Result<()> {
                 term(p, depth + 1, nodes)?;
                 interval(r, depth + 1, nodes)?;
             }
+            Term::Comp(a, phi, tube, base) => {
+                term(a, depth + 1, nodes)?;
+                face(phi, depth + 1, nodes)?;
+                term(tube, depth + 1, nodes)?;
+                term(base, depth + 1, nodes)?;
+            }
             Term::System(ty, sides) => {
                 if sides.len() > 16 {
                     return Err("system exceeds 16 branches".into());
@@ -929,6 +968,22 @@ fn needs_systems(request: &Request) -> bool {
     }
 }
 
+fn needs_composition(request: &Request) -> bool {
+    if request.context.iter().any(Term::has_composition) {
+        return true;
+    }
+    match &request.judgment {
+        Judgment::Has { term, ty } | Judgment::RestrictedHas { term, ty, .. } => {
+            term.has_composition() || ty.has_composition()
+        }
+        Judgment::Equal { left, right, ty }
+        | Judgment::RestrictedEqual {
+            left, right, ty, ..
+        } => left.has_composition() || right.has_composition() || ty.has_composition(),
+        _ => false,
+    }
+}
+
 /// Generate fresh evidence, fix goals from the requests (not from inferred
 /// answers), and accept only after the unchanged ground kernel replays it.
 pub fn produce(requests: &[Request]) -> Result<Generated> {
@@ -938,7 +993,9 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
     for request in requests {
         validate(request).map_err(|e| format!("{}: {e}", request.name))?;
     }
-    let profile = if requests.iter().any(needs_systems) {
+    let profile = if requests.iter().any(needs_composition) {
+        Profile::Composition
+    } else if requests.iter().any(needs_systems) {
         Profile::Systems
     } else if requests.iter().any(|r| {
         matches!(
@@ -1036,7 +1093,20 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
                 Judgment::Equal { left, right, ty } => {
                     p.universe(d, g, ty)?;
                     (
-                        p.equal(d, g, left, right, ty)?,
+                        if profile == Profile::Composition {
+                            let restricted =
+                                p.restricted_equal((d, g), &Face::True, left, right, ty)?;
+                            p.equality_step(
+                                "req.export",
+                                vec![restricted],
+                                (d, g),
+                                left,
+                                right,
+                                ty,
+                            )?
+                        } else {
+                            p.equal(d, g, left, right, ty)?
+                        },
                         "eq",
                         vec![left.quote(), right.quote(), ty.quote()],
                     )

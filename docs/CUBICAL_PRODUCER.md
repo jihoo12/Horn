@@ -118,5 +118,7 @@ changed goals and invented rule names. This is not a complete cubical
 elaborator or a proof of semantic soundness. A bounded face/system generator is described in [its guide](CUBICAL_FACES_SYSTEMS.md).
 Native restricted inference and local type/equality conversion now use the
 existing restricted rules; see the face/system guide and restricted.hcu.
-General congruence, composition, Glue and fresh univalence generation remain
-later migration stages.
+Composition typing and active-face computation now have a fixed six-fragment
+profile; see [CUBICAL_COMPOSITION.md](CUBICAL_COMPOSITION.md). General congruence,
+type-directed composition, Glue and fresh univalence generation remain later
+migration stages.

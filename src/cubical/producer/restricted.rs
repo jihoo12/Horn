@@ -209,6 +209,11 @@ impl Producer {
                 let (_, u) = self.restricted_universe(d, g, phi, &out)?;
                 (out, vec![x, y, z, u], "rhas.papp")
             }
+            Comp(..) => {
+                let out = self.composition_has((d, g), phi, t)?;
+                self.restricted_inferred.insert(key, out.clone());
+                return Ok(out);
+            }
             System(ty, sides) => {
                 let id = self.system_has(d, g, phi, sides, ty)?;
                 self.restricted_inferred.insert(key, (*ty.clone(), id));
@@ -255,6 +260,15 @@ impl Producer {
         use Term::*;
         let (d, g) = scope;
         let (out, ty, refs, rule) = match t {
+            Comp(_, face, tube, _) => {
+                let (ty, typed) = self.composition_has(scope, phi, t)?;
+                let Ok(cover) = self.entails(d, phi, face) else {
+                    return Ok(None);
+                };
+                let (out, sub) = self.transform(tube, &Op::DSubst(0, Interval::One))?;
+                let output = self.restricted_check(d, g, phi, &out, &ty)?;
+                (out, ty, vec![typed, cover, sub, output], "req.comp-face")
+            }
             System(ty, sides) => {
                 let typed = self.system_has(d, g, phi, sides, ty)?;
                 for (i, (face, value)) in sides.iter().enumerate() {

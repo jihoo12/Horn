@@ -1,0 +1,25 @@
+; comp binds k in FAMILY and TUBE, but not FACE or BASE.
+(check full (comp k nat ft zero zero) nat)
+(equal full-value (comp k nat ft zero zero) zero nat)
+
+; A partial tube only needs typing on its own face, not on the whole cube.
+(check partial-tube (scope (i) ())
+  (comp k nat (at0 i) (system nat (((at0 i) zero))) zero) nat)
+(equal-on partial-value (scope (i) ()) (at0 i)
+  (comp k nat (at0 i) (system nat (((at0 i) zero))) zero) zero nat)
+
+; The empty system is a valid tube on ff. There is no empty-face regularity rule.
+(check empty-tube (comp k nat ff (system nat ()) zero) nat)
+
+; Family syntax may depend on the bound dimension and compute by path beta.
+(equal dependent-family
+  (comp k (papp (plam j (u 0) nat) k) ft zero zero) zero nat)
+
+; The tube may follow an arbitrary path; its start must agree with BASE.
+(equal path-tube (scope () ((p (path nat zero zero))))
+  (comp k nat ft (papp p k) zero) zero nat)
+
+; Even the ambient context can require a face for its well-formedness.
+(equal-on local-context (scope (i)
+    ((P (path (u 1) (u 0) (u 0))) (A (papp P i)) (x A) (p (path j A x x))))
+  (at0 i) (comp k A ft (papp p k) x) x A)

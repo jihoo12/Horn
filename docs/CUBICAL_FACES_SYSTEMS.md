@@ -111,10 +111,11 @@ operations transform faces too. Substituting a compound interval into a face
 literal uses its certified endpoint boundary, not Boolean negation.
 
 Systems and restricted assertions select `Profile::Systems`, comprising the
-existing path, faces, face-ops, restricted and systems fragments. Composition,
-Sigma, Glue and their rules are not included in this fresh profile. Source
+existing path, faces, face-ops, restricted and systems fragments. Sigma and Glue are not included in this profile. Requests containing
+composition select a separate fixed six-fragment profile; see
+[CUBICAL_COMPOSITION.md](CUBICAL_COMPOSITION.md). Source
 selection is based on the requested constructs before evidence generation;
 a certificate cannot install rules. `Generated.theory` and CLI export expose
 the actual specification used. Input systems have at most 16 branches each;
 restricted equality search has a depth limit of 64 in addition to shared
-source, face-search and emitted-step limits. General congruence, composition and Glue generation remain later steps.
+source, face-search and emitted-step limits. General congruence and Glue generation remain later steps.

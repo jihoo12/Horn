@@ -45,7 +45,7 @@ fn binder(s: &Sexp) -> Result<String> {
     }
     if [
         "nat", "zero", "i0", "i1", "u", "v", "dim", "pi", "lam", "app", "path", "plam", "papp",
-        "neg", "meet", "join", "scope", "ff", "ft", "at0", "at1", "fand", "for", "system",
+        "neg", "meet", "join", "scope", "ff", "ft", "at0", "at1", "fand", "for", "system", "comp",
     ]
     .contains(&name)
     {
@@ -180,6 +180,19 @@ fn path_type(
     ))
 }
 
+fn composition(name: Option<&Sexp>, args: &[Sexp], depth: usize, names: &Names) -> Result<Term> {
+    let [family, phi, tube, base] = args else {
+        return Err("composition requires FAMILY FACE TUBE BASE".into());
+    };
+    let inner = names.under(true, name)?;
+    Ok(Term::Comp(
+        Box::new(term(family, depth + 1, &inner)?),
+        face(phi, depth + 1, names)?,
+        Box::new(term(tube, depth + 1, &inner)?),
+        Box::new(term(base, depth + 1, names)?),
+    ))
+}
+
 fn term(s: &Sexp, depth: usize, names: &Names) -> Result<Term> {
     if depth > 32 {
         return Err("term nesting exceeds 32".into());
@@ -205,6 +218,8 @@ fn term(s: &Sexp, depth: usize, names: &Names) -> Result<Term> {
         ("plam", [a, b]) => path_binder(None, a, b, depth, names)?,
         ("plam", [name, a, b]) => path_binder(Some(name), a, b, depth, names)?,
         ("papp", [p, r]) => Term::PathApp(t(p)?, interval(r, depth + 1, names)?),
+        ("comp", args @ [_, _, _, _]) => composition(None, args, depth, names)?,
+        ("comp", [name, rest @ ..]) => composition(Some(name), rest, depth, names)?,
         ("system", [ty, sides]) => {
             let sides = sides.list()?;
             if sides.len() > 16 {
