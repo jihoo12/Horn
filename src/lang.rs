@@ -16,11 +16,14 @@
 //! ```
 //!
 //! Nothing here is trusted. A function becomes a predicate with one more
-//! argument, its result, and one rule per clause. `#eval` and `theorem`
-//! are answered by proof search, and every answer becomes part of one
-//! schematic certificate for the elaborated theory, which
+//! argument, its result, and one rule per clause. Ground forward `#eval`
+//! calls execute clauses; logic queries and theorems use proof search.
+//! Every answer becomes part of one schematic certificate for the elaborated theory, which
 //! `horn::schematic` checks; the certificate can also be exported for the
 //! Agda model. Earlier theorems are used as lemmas by later proofs.
+mod eval;
+use eval::{Evaluator, is_forward_call, source_expression};
+
 use crate::schematic;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
@@ -319,7 +322,11 @@ impl Parser {
                 let mut clauses = Vec::new();
                 while self.is_sym("|") {
                     self.pos += 1;
-                    let mut pats = vec![self.app()?];
+                    let mut pats = if self.is_sym("=>") {
+                        Vec::new()
+                    } else {
+                        vec![self.app()?]
+                    };
                     while self.is_sym(",") {
                         self.pos += 1;
                         pats.push(self.app()?);
@@ -396,7 +403,7 @@ fn parse(src: &str) -> Result<Vec<(Decl, usize)>> {
 
 /// A term during search: a logic variable, a rigid name (an eigenvariable
 /// or case variable), or a symbol applied to terms.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 enum T {
     V(usize),
     E(u32),
@@ -493,6 +500,8 @@ struct Sig {
     output: Vec<Option<u32>>,
     /// Functions: their predicate.
     defs: HashSet<String>,
+    /// Compiled clauses, in source order, separate from user-written rules.
+    clauses: HashMap<u32, Vec<usize>>,
     rules: Vec<Rule>,
     /// Names of eigenvariables and case variables, with sorts.
     rigid: Vec<(String, u32)>,
@@ -655,11 +664,14 @@ impl Sig {
         let rhs = self.flatten(rhs, &mut premises, &mut fresh)?;
         let mut args = pats.to_vec();
         args.push(rhs);
+        let index = self.rules.len();
         self.rule(
             format!("{f}.{n}"),
             &premises,
             &Term::App(f.to_owned(), args),
-        )
+        )?;
+        self.clauses.entry(self.sym_ix[f]).or_default().push(index);
+        Ok(())
     }
 
     fn flatten(&self, t: &Term, premises: &mut Vec<Term>, fresh: &mut usize) -> Result<Term> {
@@ -1656,6 +1668,7 @@ pub fn run(src: &str) -> Result<Run> {
             inputs: Vec::new(),
             output: Vec::new(),
             defs: HashSet::new(),
+            clauses: HashMap::new(),
             rules: Vec::new(),
             rigid: Vec::new(),
         },
@@ -1732,6 +1745,25 @@ pub fn run(src: &str) -> Result<Run> {
         match d {
             Decl::Eval(t) | Decl::Check(t) => {
                 evals += 1;
+                // Ground forward calls execute clauses. Logic queries and
+                // explicit relational judgments continue to use proof search.
+                if matches!(d, Decl::Eval(_)) && is_forward_call(&s.sig, t) {
+                    let mut evaluator = Evaluator::new(&s.sig);
+                    let (value, proofs) = evaluator.expression(t, 0).map_err(at)?;
+                    let root = proofs
+                        .last()
+                        .ok_or_else(|| at("evaluation produced no evidence".into()))?;
+                    let closed = root.goal.clone();
+                    let pr = s.prover();
+                    for proof in &proofs[..proofs.len() - 1] {
+                        s.emit(&pr, proof).map_err(at)?;
+                    }
+                    let r = s.emit(&pr, root).map_err(at)?;
+                    s.goal(&format!("eval.{evals}"), &[], &closed, &r);
+                    s.report
+                        .push(format!("{}  ⟹  {}", source_expression(t), s.show(&value)));
+                    continue;
+                }
                 // A function call asks for its result.
                 let query = match t {
                     Term::App(f, args)

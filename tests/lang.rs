@@ -122,3 +122,65 @@ fn an_implication_is_used_as_a_lemma() {
     let r = lang::run(&src).unwrap();
     assert!(r.proof.contains("(apply "), "{}", r.proof);
 }
+
+#[test]
+fn ground_evaluation_executes_nested_calls_and_certifies_the_result() {
+    let r = lang::run(&format!(
+        "{BASE}#eval add (add 40 2) (add 3 4)\n#eval add 0 5"
+    ))
+    .unwrap();
+    assert_eq!(
+        r.report,
+        ["add (add 40 2) (add 3 4)  ⟹  49", "add 0 5  ⟹  5"]
+    );
+    assert_eq!(r.checked.goals, 2);
+    schematic::check(&r.theory, &r.goals, r.proof.as_bytes()).unwrap();
+    // Independently changing the caller's expected result must be rejected.
+    let wrong = r.goals.replacen("(succ zero)", "zero", 1);
+    assert_ne!(wrong, r.goals);
+    assert!(schematic::check(&r.theory, &wrong, r.proof.as_bytes()).is_err());
+}
+
+#[test]
+fn forward_evaluation_commits_to_the_first_matching_clause() {
+    // Search would skip the recursive branch at a low depth and find the
+    // second clause. Execution must report its limit rather than do that.
+    let src = "sort N\nctor z : N\ndef loop : N → N\n| n => loop n\n| n => z\n#eval loop z";
+    fails(src, "evaluation depth limit exceeded");
+    let r = lang::run(
+        "sort N\nctor z : N\nctor s : N → N\ndef pick : N → N\n| n => z\n| n => s z\n#eval pick z",
+    )
+    .unwrap();
+    assert_eq!(r.report, ["pick z  ⟹  z"]);
+}
+
+#[test]
+fn partial_or_ill_sorted_execution_does_not_fabricate_a_result() {
+    fails(
+        "sort N\nctor z : N\nctor s : N → N\ndef only : N → N\n| z => z\n#eval only (s z)",
+        "no matching clause",
+    );
+    fails(
+        "sort N\nctor z : N\ndef bad : N → N\n| n => m\n#eval bad z",
+        "unbound variable",
+    );
+    fails(
+        "sort N\nsort B\nctor z : N\nctor b : B\ndef id : N → N\n| n => n\n#eval id b",
+        "wrong sort",
+    );
+    fails(
+        "sort N\nctor z : N\npred p : N → Prop\ndef id : N → N\n| n => n\n#eval id (p z)",
+        "not an expression",
+    );
+}
+
+#[test]
+fn nullary_definitions_and_repeated_patterns_execute() {
+    let src = "sort N\nctor z : N\nctor s : N → N\ndef one : N\n| => s z\ndef same : N → N → N\n| n, n => one\n| m, n => z\n#eval one\n#eval same z z\n#eval same z (s z)";
+    let r = lang::run(src).unwrap();
+    assert_eq!(
+        r.report,
+        ["one  ⟹  s z", "same z z  ⟹  s z", "same z (s z)  ⟹  z"]
+    );
+    schematic::check(&r.theory, &r.goals, r.proof.as_bytes()).unwrap();
+}

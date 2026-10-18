@@ -2,7 +2,8 @@
 
 `horn FILE.hn` reads a small language in the style of Lean: declare sorts,
 constructors, predicates and rules, define functions by pattern matching,
-evaluate, and prove theorems. Nothing in the implementation
+evaluate, and prove theorems. Ground forward calls execute function clauses;
+logic queries and theorems use proof search. Nothing in the implementation
 ([src/lang.rs](../src/lang.rs)) is trusted. Every answer and every theorem
 becomes a step of one schematic certificate for the elaborated theory, and
 the run fails unless the schematic checker accepts that certificate. The
@@ -76,9 +77,34 @@ splits on the constructors of `x`'s sort; each case is searched with the
 induction hypotheses for its recursive arguments. `by auto` searches, and if
 that fails tries induction on each variable in turn.
 
-Search is untrusted and incomplete: it can fail to find a proof, it never
-makes one up. A function defined by overlapping or partial clauses is just a
-relation; `#eval` reports the first result found.
+Search is untrusted and incomplete: it can fail to find a proof.
+
+## Executing programs
+
+A ground forward call, such as `#eval square (add 2 3)`, evaluates its
+arguments and follows function clauses in source order. The first matching
+clause commits, including when its body fails or exceeds its limit. There is
+no fallback to a different clause or to proof search. Nullary definitions
+use `def one : Nat` followed by `| => succ zero`.
+
+Execution produces explicit rule applications, checked by the same schematic
+certificate checker as other language results. It supports nested function
+calls in arguments as well as in clause bodies; see
+[examples/lang/program.hn](../examples/lang/program.hn). Existing certificates
+and the NatLang Agda export retain their acceptance and contents.
+
+Execution currently has limits of 128 recursive evaluation frames and 10,000
+function calls per forward query. An error reports a limit, not a proof of
+nontermination. Partial definitions report a missing clause. Unbound function
+outputs cannot be filled with arbitrary inhabitants by the evaluator.
+Coverage, non-overlap and termination are not proved: these are not yet total
+functions in Lean's sense. For relational queries such as `#eval add ?x 2 = 5`
+or explicit judgments such as `#check add 2 3 = 5`, clauses remain Horn rules
+and search may find any derivable answer. Do not infer functional uniqueness
+from acceptance of one result.
+
+The evidence certifies the elaborated Horn judgments; a separate proof that
+source elaboration preserves a language semantics has not been supplied.
 
 ## Implications
 
@@ -142,5 +168,5 @@ theory: `rule bad : le (succ n) n` makes false things provable.
    needs is proved to give most general unifiers in
    [agda/Unify.agda](../agda/Unify.agda).
 2. Nested induction and a small tactic language (`apply`, `cases`, `exact`).
-3. Using a function's clauses as rewrite rules, so that `#eval` computes
-   instead of searching.
+3. Coverage, non-overlap and termination analysis for a total-function fragment;
+   the bounded forward evaluator now executes clauses and certifies results.

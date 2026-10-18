@@ -1,0 +1,22 @@
+-- Forward execution and proof search use the same explicit function clauses.
+sort Nat
+ctor zero : Nat
+ctor succ : Nat → Nat
+
+def add : Nat → Nat → Nat
+| zero, n => n
+| succ m, n => succ (add m n)
+
+def mul : Nat → Nat → Nat
+| zero, n => zero
+| succ m, n => add n (mul m n)
+
+def square : Nat → Nat
+| n => mul n n
+
+#eval square (add 2 3)
+#eval add (square 3) (mul 2 4)
+-- A relational query still uses proof search.
+#eval add ?x 3 = 7
+
+theorem add_zero (n : Nat) : add n zero = n := by induction n
