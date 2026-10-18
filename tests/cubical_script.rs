@@ -197,3 +197,16 @@ fn malformed_parameterized_declarations_fail() {
         assert!(cubical::script::run(bad).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn univalence_one_universe_up_computes_on_data_results() {
+    let script =
+        cubical::script::run(include_str!("../examples/cubical/script/levels.hcs")).unwrap();
+    let shown: Vec<_> = script
+        .evaluations
+        .iter()
+        .map(|e| format!("{} = {} : {}", e.name, e.value, e.ty))
+        .collect();
+    assert_eq!(shown, ["applied = btrue : bool"]);
+    assert!(script.certified.goals.contains("(goal swap-path (rhas z nil ft"));
+}

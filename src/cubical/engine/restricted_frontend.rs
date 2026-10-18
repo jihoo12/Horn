@@ -5,6 +5,7 @@ use crate::cubical::engine::frontend::number as num;
 use crate::cubical::engine::path_frontend::{Op, cons, papp, path, u, v};
 use crate::cubical::engine::term::{Result, Sexp, atom, call};
 use std::collections::{BTreeMap, BTreeSet};
+use super::FUEL_TYPES;
 
 #[path = "computation_frontend.rs"]
 #[allow(dead_code)]
@@ -579,6 +580,14 @@ impl RestrictedProducer {
                 } else {
                     self.infer(d, g, phi, f)?
                 };
+                if shape(&fty)?.0 != "pi"
+                    && let Ok((universe, _)) = self.infer(d, g, phi, &fty)
+                    && let Ok((target, _)) = self.whnf(d, g, phi, &fty, &universe, FUEL_TYPES)
+                    && shape(&target)?.0 == "pi"
+                {
+                    fi = self.retype_has(d, g, phi, f, &fty, &target, fi)?;
+                    fty = target;
+                }
                 let ("pi", [dom, _]) = shape(&fty)? else {
                     return Err("application expects Pi".into());
                 };
@@ -604,7 +613,7 @@ impl RestrictedProducer {
                 (ty, "rhas.app", vec![fi, ai, si, ti])
             }
             (head @ ("fst" | "snd"), [t]) => {
-                let (tt, ti) = self.infer(d, g, phi, t)?;
+                let (tt, ti) = self.infer_as(d, g, phi, t, "sigma")?;
                 let ("sigma", [a, b]) = shape(&tt)? else {
                     return Err("projection expects Sigma".into());
                 };
@@ -698,7 +707,7 @@ impl RestrictedProducer {
                 )
             }
             ("papp", [p, r]) => {
-                let (ty, pi) = self.infer(d, g, phi, p)?;
+                let (ty, pi) = self.infer_as(d, g, phi, p, "path")?;
                 let ("path", [a, _, _]) = shape(&ty)? else {
                     return Err("expected PathP".into());
                 };
@@ -844,6 +853,24 @@ impl RestrictedProducer {
             self.remember(d, g, phi, t, expected, id);
             return Ok(id);
         }
+        // An introduction form checked against a type that is not yet in
+        // the matching form: normalize the type, check, then convert.
+        let former = match shape(t)?.0 {
+            "lam" => Some("pi"),
+            "pair" => Some("sigma"),
+            "plam" => Some("path"),
+            _ => None,
+        };
+        if let Some(former) = former
+            && shape(expected)?.0 != former
+            && let Ok((universe, _)) = self.infer(d, g, phi, expected)
+            && let Ok((target, _)) =
+                self.whnf(d, g, phi, expected, &universe, FUEL_TYPES)
+            && shape(&target)?.0 == former
+        {
+            let id = self.check(d, g, phi, t, &target)?;
+            return self.retype_has(d, g, phi, t, &target, expected, id);
+        }
         if let ("lam", [body]) = shape(t)? {
             let ("pi", [a, b]) = shape(expected)? else {
                 return Err("lambda expects Pi annotation".into());
@@ -922,6 +949,22 @@ impl RestrictedProducer {
         self.reduce_typed(d, g, phi, t, ty, ti)
     }
 
+    /// Infer the type of `t` and, if it is not yet a `former` type, bring it
+    /// to weak-head normal form and convert the typing.
+    fn infer_as(&mut self, d: usize, g: &Sexp, phi: &Face, t: &Sexp, former: &str) -> Result<(Sexp, usize)> {
+        let (ty, id) = self.infer(d, g, phi, t)?;
+        if shape(&ty)?.0 == former {
+            return Ok((ty, id));
+        }
+        let (universe, _) = self.infer(d, g, phi, &ty)?;
+        let (target, _) = self.whnf(d, g, phi, &ty, &universe, FUEL_TYPES)?;
+        if shape(&target)?.0 != former {
+            return Ok((ty, id));
+        }
+        let id = self.retype_has(d, g, phi, t, &ty, &target, id)?;
+        Ok((target, id))
+    }
+
     /// Weak-head normal form of `t : ty` with the equation `t ≡ nf : ty`, by
     /// repeated single steps; at most `fuel` steps. The search is untrusted:
     /// the equation is an ordinary derivation for the kernel to check.
@@ -961,6 +1004,23 @@ impl RestrictedProducer {
         fuel: usize,
     ) -> Result<(Sexp, usize)> {
         let (w, e) = self.whnf(d, g, phi, t, ty, fuel)?;
+        // A pair is normalized componentwise.
+        if let ("sigma", [a, b]) = shape(ty)?
+            && let ("pair", [x, y]) = shape(&w)?
+        {
+            let (xv, ex) = self.value(d, g, phi, x, a, fuel)?;
+            let (by, _) = self.f.path.transform(b, &Op::Subst(0, x.clone()))?;
+            let (yv, ey) = self.value(d, g, phi, y, &by, fuel)?;
+            if xv != *x || yv != *y {
+                let out = call("pair", [xv, yv]);
+                let inner = self.congruence(d, g, phi, &w, &out, ty);
+                if let Ok(inner) = inner {
+                    let _ = (ex, ey);
+                    let eq = self.eq(d, g, phi, t, &out, ty, "req.trans", vec![e, inner]);
+                    return Ok((out, eq));
+                }
+            }
+        }
         if let Some((out, inner)) = self.value_declared(d, g, phi, &w, ty, fuel)? {
             let eq = self.eq(d, g, phi, t, &out, ty, "req.trans", vec![e, inner]);
             return Ok((out, eq));

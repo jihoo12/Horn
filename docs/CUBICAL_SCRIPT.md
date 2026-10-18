@@ -102,6 +102,22 @@ The type (in its parameters), its constructors and its eliminator also get
 congruence rules. Indices, function-typed fields and
 higher constructors are not supported.
 
+## Universe levels
+
+`ua` and `iso-equiv` are the prelude at level 0; `(ua-at L)` and
+`(iso-equiv-at M N)` are the same closed terms at other levels, checked where
+they are used. [levels.hcs](../examples/cubical/script/levels.hcs) (about 4 s)
+builds `swap` on pairs of types, which live in `U1`, turns it into a path with
+`(ua-at 1)`, and transports a function out of pairs of types along it.
+
+Transporting a pair of types itself type-checks, but its components do not
+reduce to `nat` and `bool`: they stay as Glue types with an empty face over
+them. Transport along a constant line of types is not the identity without
+regularity, which the CCHM model lacks. An equation `Glue A [ff ↦ …] ≡ A`
+would force composition in that Glue type to agree with composition in `A`,
+which reintroduces regularity, so the theory does not have it. Results
+reach canonical form when they are data (booleans, numbers, declared types).
+
 ## What this language is for
 
 It is not meant to become Lean 4. Its distinguishing commitments are:
@@ -150,7 +166,8 @@ cubical type theory is still a separate obligation; see [CUBICAL.md](CUBICAL.md)
 
 ## Limits
 
-Evaluation is weak-head and bounded by 100,000 steps. Universe levels are
-fixed at 0 for the prelude. Data types are bool, nat and declared types with parameters but no indices;
+Evaluation is weak-head, continued under constructors and pairs, and bounded
+by 100,000 steps. Universe levels are explicit numbers; there are no level
+variables, and declared data types live in `U0`. Data types are bool, nat and declared types with parameters but no indices;
 there are no implicit arguments and no modules. This format and the `.hcu` core files
 and `.hn` programs are still separate frontends.

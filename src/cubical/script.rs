@@ -97,7 +97,8 @@ fn binder(s: &Sexp) -> Result<&str> {
 const RESERVED: &[&str] = &[
     "bool", "btrue", "bfalse", "nat", "zero", "i0", "i1", "u", "pi", "lam", "app", "sigma",
     "pair", "fst", "snd", "path", "plam", "papp", "bif", "ann", "equiv", "transport", "neg",
-    "meet", "join", "ua", "iso-equiv", "suc", "natrec", "data", "elim",
+    "meet", "join", "ua", "iso-equiv", "suc", "natrec", "data", "elim", "ua-at",
+    "iso-equiv-at",
 ];
 
 struct Elaborator {
@@ -234,6 +235,19 @@ impl Elaborator {
                 ],
             ),
             ("ann", [t, a]) => call("ann", [self.term(t, names)?, self.term(a, names)?]),
+            // The prelude at other universe levels; each instance is a
+            // closed term whose typing is checked where it is used.
+            ("ua-at", [l]) => {
+                let l = level(l)?;
+                call("ann", [ua_term(), ua_type(&mut self.p, l)?])
+            }
+            ("iso-equiv-at", [m, n]) => {
+                let (m, n) = (level(m)?, level(n)?);
+                call(
+                    "ann",
+                    [iso_equiv_term(&mut self.p, m, n)?, iso_equiv_type(&mut self.p, m, n)?],
+                )
+            }
             ("elim", [ty, rest @ ..]) => {
                 let d = data::by_name(ty.atom()?).ok_or_else(|| format!("unknown data type {ty}"))?;
                 // `(elim T k P (METHODS) x)`, or with parameters
