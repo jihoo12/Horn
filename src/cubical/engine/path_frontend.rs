@@ -340,7 +340,7 @@ impl PathProducer {
                 } else {
                     let mut out = Vec::new();
                     for (i, x) in xs.iter().enumerate() {
-                        let xop = if i == 0 && crate::cubical::engine::data::by_elim(h).is_some() {
+                        let xop = if Some(i) == crate::cubical::engine::data::motive_index(h) {
                             self.under(op, false, &mut refs)?
                         } else {
                             op.clone()

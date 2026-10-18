@@ -24,7 +24,7 @@
 //! (`Π A B : U0. Equiv A B → Path U0 A B`) and `iso-equiv`
 //! (`Π X Y f g s t. isEquiv f`) are closed library terms, checked like any
 //! definition; neither is an axiom. Definitions are closed and transparent.
-use super::engine::data::{self, Ctor, Data};
+use super::engine::data::{self, ArgTy, Ctor, Data};
 use super::engine::face_frontend::Face;
 use super::engine::iso_equiv_frontend::{iso_equiv_term, iso_equiv_type};
 use super::engine::path_frontend::{dim, papp, path, u, v};
@@ -164,13 +164,17 @@ impl Elaborator {
                 } else if let Some(i) = index(&names.ordinary, &**a) {
                     Ok(v(i))
                 } else if let Some(d) = data::by_name(a) {
-                    Ok(data::type_term(&d))
+                    if d.params == 0 {
+                        Ok(atom(&d.ty))
+                    } else {
+                        Err(format!("{a} needs {} type parameters", d.params))
+                    }
                 } else if let Some((d, i)) = data::by_ctor_name(a) {
                     let c = &d.ctors[i];
-                    if c.args.is_empty() {
-                        Ok(data::ctor_term(c, vec![]))
+                    if c.args.is_empty() && d.params == 0 {
+                        Ok(atom(&c.symbol))
                     } else {
-                        Err(format!("constructor {a} needs {} arguments", c.args.len()))
+                        Err(format!("constructor {a} needs {} arguments", d.params + c.args.len()))
                     }
                 } else if let Some(t) = self.defs.get(&**a) {
                     Ok(t.clone())
@@ -230,13 +234,27 @@ impl Elaborator {
                 ],
             ),
             ("ann", [t, a]) => call("ann", [self.term(t, names)?, self.term(a, names)?]),
-            ("elim", [ty, k, motive, methods, x]) => {
+            ("elim", [ty, rest @ ..]) => {
                 let d = data::by_name(ty.atom()?).ok_or_else(|| format!("unknown data type {ty}"))?;
+                // `(elim T k P (METHODS) x)`, or with parameters
+                // `(elim T (PARAMS) k P (METHODS) x)`.
+                let (params, k, motive, methods, x) = match rest {
+                    [k, motive, methods, x] if d.params == 0 => (&[][..], k, motive, methods, x),
+                    [params, k, motive, methods, x] => (params.list()?, k, motive, methods, x),
+                    _ => return Err(format!("invalid elim {s}")),
+                };
+                if params.len() != d.params {
+                    return Err(format!("elim {} needs {} parameters", d.name, d.params));
+                }
                 let methods = methods.list()?;
                 if methods.len() != d.ctors.len() {
                     return Err(format!("elim {} needs {} methods", d.name, d.ctors.len()));
                 }
-                let mut items = vec![self.term(motive, &names.with_ordinary(binder(k)?))?];
+                let mut items = Vec::new();
+                for a in params {
+                    items.push(self.term(a, names)?);
+                }
+                items.push(self.term(motive, &names.with_ordinary(binder(k)?))?);
                 for m in methods {
                     items.push(self.term(m, names)?);
                 }
@@ -244,13 +262,25 @@ impl Elaborator {
                 call(&d.elim, items)
             }
             (c, args) if data::by_ctor_name(c).is_some() => {
+                // Parameters are written first: `(cons bool btrue (nil bool))`.
                 let (d, i) = data::by_ctor_name(c).unwrap();
                 let ctor = &d.ctors[i];
-                if args.len() != ctor.args.len() {
-                    return Err(format!("constructor {c} needs {} arguments", ctor.args.len()));
+                if args.len() != d.params + ctor.args.len() {
+                    return Err(format!(
+                        "constructor {c} needs {} arguments",
+                        d.params + ctor.args.len()
+                    ));
                 }
                 let args = args.iter().map(|a| self.term(a, names)).collect::<Result<Vec<_>>>()?;
-                data::ctor_term(ctor, args)
+                data::apply(&ctor.symbol, args)
+            }
+            (n, args) if data::by_name(n).is_some() => {
+                let d = data::by_name(n).unwrap();
+                if args.len() != d.params {
+                    return Err(format!("{n} needs {} type parameters", d.params));
+                }
+                let args = args.iter().map(|a| self.term(a, names)).collect::<Result<Vec<_>>>()?;
+                data::apply(&d.ty, args)
             }
             ("equiv", [a, b]) => {
                 let (a, b) = (self.term(a, names)?, self.term(b, names)?);
@@ -270,8 +300,23 @@ impl Elaborator {
     }
 
     /// Register a data declaration and return its generated theory text.
-    fn declare(&mut self, name: &str, ctors: &[Sexp]) -> Result<String> {
+    fn declare(&mut self, head: &Sexp, ctors: &[Sexp]) -> Result<String> {
+        // `NAME` or `(NAME PARAM...)`.
+        let (name, params): (&str, Vec<&str>) = match head {
+            Sexp::Atom(a) => (a, vec![]),
+            Sexp::List(xs) if !xs.is_empty() => (
+                xs[0].atom()?,
+                xs[1..].iter().map(Sexp::atom).collect::<Result<_>>()?,
+            ),
+            _ => return Err(format!("invalid data head {head}")),
+        };
         self.fresh(name)?;
+        for (j, p) in params.iter().enumerate() {
+            binder(&atom(p))?;
+            if params[..j].contains(p) {
+                return Err(format!("duplicate parameter {p}"));
+            }
+        }
         let ty = format!("ty/{name}");
         let mut out = Vec::new();
         for c in ctors {
@@ -282,23 +327,30 @@ impl Elaborator {
                 return Err(format!("duplicate constructor {cname}"));
             }
             let mut args = Vec::new();
-            let mut recursive = Vec::new();
-            for (j, a) in xs[1..].iter().enumerate() {
-                // Only discrete argument types keep composition sound.
-                let arg = match a.atom()? {
-                    "bool" | "nat" => atom(a.atom()?),
-                    n if n == name => {
-                        recursive.push(j);
-                        atom(&ty)
+            for a in &xs[1..] {
+                // Fields: discrete closed types, a parameter, or the type
+                // itself at its own parameters (uniform recursion).
+                let own = Sexp::List(
+                    std::iter::once(atom(name))
+                        .chain(params.iter().map(|p| atom(p)))
+                        .collect(),
+                );
+                let arg = match a {
+                    Sexp::Atom(n) if &**n == "bool" || &**n == "nat" => ArgTy::Closed(atom(n)),
+                    Sexp::Atom(n) if &**n == name && params.is_empty() => ArgTy::Rec,
+                    _ if params.is_empty() == false && *a == own => ArgTy::Rec,
+                    Sexp::Atom(n) if params.contains(&&**n) => {
+                        ArgTy::Param(params.iter().position(|p| *p == &**n).unwrap())
                     }
-                    n => match data::by_name(n) {
-                        Some(d) => data::type_term(&d),
-                        None => {
+                    Sexp::Atom(n) => match data::by_name(n) {
+                        Some(d) if d.params == 0 => ArgTy::Closed(atom(&d.ty)),
+                        _ => {
                             return Err(format!(
-                                "constructor argument {n} must be bool, nat, {name} or an earlier data type"
+                                "field {n} must be bool, nat, a parameter, the type itself or an earlier closed data type"
                             ));
                         }
                     },
+                    _ => return Err(format!("invalid field type {a}")),
                 };
                 args.push(arg);
             }
@@ -306,7 +358,6 @@ impl Elaborator {
                 name: cname.to_owned(),
                 symbol: format!("ctor/{name}/{cname}"),
                 args,
-                recursive,
             });
         }
         if out.is_empty() {
@@ -316,6 +367,7 @@ impl Elaborator {
             name: name.to_owned(),
             ty,
             elim: format!("elim/{name}"),
+            params: params.len(),
             ctors: out,
         });
         Ok(d.theory())
@@ -386,13 +438,17 @@ pub fn run(source: &str) -> Result<Script> {
         for form in &forms {
             let xs = form.list()?;
             let head = xs.first().ok_or("empty form")?.atom()?;
-            let name = xs.get(1).ok_or("form needs a name")?.atom()?.to_owned();
+            // A data head may be `(NAME PARAM...)`.
+            let name = match xs.get(1).ok_or("form needs a name")? {
+                Sexp::List(h) if head == "data" && !h.is_empty() => h[0].atom()?.to_owned(),
+                other => other.atom()?.to_owned(),
+            };
             if !names_seen.insert(name.clone()) {
                 return Err(format!("duplicate name {name}"));
             }
             let empty = Names::default();
             match (head, &xs[2..]) {
-                ("data", ctors) => appended.push_str(&e.declare(&name, ctors)?),
+                ("data", ctors) => appended.push_str(&e.declare(&xs[1], ctors)?),
                 ("def", [ty, t]) => {
                     e.fresh(&name)?;
                     let ty = e.term(ty, &empty)?;
@@ -422,7 +478,7 @@ pub fn run(source: &str) -> Result<Script> {
                             let fail = |err| format!("eval {name}: {err}");
                             let (ty, _) = e.p.infer(0, &nil, &top, &t).map_err(fail)?;
                             let (universe, _) = e.p.infer(0, &nil, &top, &ty).map_err(fail)?;
-                            e.p.whnf(0, &nil, &top, &ty, &universe, FUEL).map_err(fail)?.0
+                            e.p.value(0, &nil, &top, &ty, &universe, FUEL).map_err(fail)?.0
                         }
                     };
                     let (value, id) = e

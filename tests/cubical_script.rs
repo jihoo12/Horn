@@ -156,3 +156,42 @@ fn malformed_data_declarations_and_eliminations_fail() {
         assert!(cubical::script::run(&format!("{color}\n{bad}")).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn parameterized_lists_compute_and_move_along_ua() {
+    let script = cubical::script::run(include_str!("../examples/cubical/script/list.hcs")).unwrap();
+    let shown: Vec<_> = script
+        .evaluations
+        .iter()
+        .map(|e| format!("{} = {} : {}", e.name, e.value, e.ty))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            "len = 2 : nat",
+            "mapped = (cons bool bfalse (cons bool btrue (nil bool))) : (list bool)",
+            "moved = (cons bool bfalse (cons bool bfalse (nil bool))) : (list bool)"
+        ]
+    );
+    let theory = &script.certified.theory;
+    // Transport rules only: no rule returns the base of a composition in a
+    // parameterized type.
+    assert!(theory.contains("(rule req.comp-ty/list.ctor/list/cons "));
+    assert!(!theory.contains("(rule req.comp-ty/list ("));
+}
+
+#[test]
+fn malformed_parameterized_declarations_fail() {
+    for bad in [
+        // Non-uniform recursion and unknown parameters.
+        "(data (list A) (nil) (cons A (list bool)))",
+        "(data (list A) (nil) (cons B (list A)))",
+        "(data (pair A A) (mk A A))",
+        // Parameters must be given.
+        "(data (list A) (nil) (cons A (list A))) (eval x nil)",
+        "(data (list A) (nil) (cons A (list A))) (check x (nil) (list bool))",
+        "(data (list A) (nil) (cons A (list A))) (check x (cons bool btrue (nil nat)) (list bool))",
+    ] {
+        assert!(cubical::script::run(bad).is_err(), "{bad}");
+    }
+}

@@ -74,12 +74,31 @@ They are appended to the bundled theory, written by `--emit` to
 reader sees exactly which rules a script introduced. Nothing about the
 declaration is built into the engine or the kernel.
 
-Constructor arguments may only be `bool`, `nat`, earlier data types or the
-type itself. All of these are discrete (constant presheaves in the
-cubical-set model), so the new type is discrete and composition in it may
-return its base; without function or universe arguments, strict positivity
-is immediate. Parameters, indices, function-typed fields and higher
-constructors are not supported.
+Type parameters are declared as `(data (list A) (nil) (cons A (list A)))`
+([list.hcs](../examples/cubical/script/list.hcs), about 8 s). Constructors and
+eliminators take the parameters first: `(cons bool btrue (nil bool))`,
+`(elim list (bool) k P (METHODS...) x)`. Moving a list along `ua not` runs
+`not` on every element:
+
+```text
+(eval moved (transport i (list (papp not-path i)) (cons bool btrue (cons bool btrue (nil bool)))))
+; moved = (cons bool bfalse (cons bool bfalse (nil bool))) : (list bool)
+```
+
+Fields may be `bool`, `nat`, a parameter, earlier closed data types, or the
+type itself at its own parameters. Without function or universe fields,
+strict positivity is immediate. Composition rules depend on parameters:
+
+- A closed type has only discrete fields, so it is discrete (a constant
+  presheaf in the cubical-set model) and composition returns its base.
+- A parameterized type gets one transport rule per constructor, for the
+  empty face: `transp (T A) (c a…) = c (transp A a)…`, as in the standard
+  models of inductive families. Compositions with other faces have no rule
+  and stay unevaluated; the transports that ua needs all use the empty face.
+
+The type, its constructors and its eliminator also get congruence rules,
+including conversion of parameters. Indices, function-typed fields and
+higher constructors are not supported.
 
 ## What this language is for
 
@@ -95,7 +114,8 @@ It is not meant to become Lean 4. Its distinguishing commitments are:
 
 ## Forms
 
-- `(data NAME (CTOR ARG-TYPE...) ...)`: a closed data type (above). Constructors
+- `(data NAME (CTOR FIELD-TYPE...) ...)` or `(data (NAME PARAM...) ...)`: a data
+  type (above). Constructors
   apply like functions; `(elim NAME k P (METHODS...) x)` eliminates `x` into
   the motive `P` over `k : NAME`, with one method per constructor taking its
   arguments and then one induction hypothesis per recursive argument.
@@ -129,6 +149,6 @@ cubical type theory is still a separate obligation; see [CUBICAL.md](CUBICAL.md)
 ## Limits
 
 Evaluation is weak-head and bounded by 100,000 steps. Universe levels are
-fixed at 0 for the prelude. Data types are bool, nat and closed declared types; there are no type parameters,
-no implicit arguments and no modules. This format and the `.hcu` core files
+fixed at 0 for the prelude. Data types are bool, nat and declared types with parameters but no indices;
+there are no implicit arguments and no modules. This format and the `.hcu` core files
 and `.hn` programs are still separate frontends.

@@ -1,0 +1,25 @@
+; A parameterized data type. Composition in (list A) transports
+; constructorwise, so lists move along a path of element types.
+(data (list A) (nil) (cons A (list A)))
+
+(def length (pi A (u 0) (pi xs (list A) nat))
+  (lam A (u 0) (lam xs (list A)
+    (elim list (A) k nat (0 (lam a A (lam t (list A) (lam r nat (suc r))))) xs))))
+
+(def not (pi b bool bool) (lam b bool (bif c bool bfalse btrue b)))
+(def map-not (pi xs (list bool) (list bool))
+  (lam xs (list bool)
+    (elim list (bool) k (list bool)
+      ((nil bool) (lam a bool (lam t (list bool) (lam r (list bool) (cons bool (app not a) r)))))
+      xs)))
+
+(eval len (app length bool (cons bool btrue (cons bool bfalse (nil bool)))))
+(eval mapped (app map-not (cons bool btrue (cons bool bfalse (nil bool)))))
+
+; Moving a list along ua not runs not on every element.
+(def not-not (pi b bool (path bool (app not (app not b)) b))
+  (lam b bool
+    (bif c (path bool (app not (app not c)) c) (plam i btrue) (plam i bfalse) b)))
+(def not-path (path (u 0) bool bool)
+  (app ua bool bool (pair not (app iso-equiv bool bool not not not-not not-not))))
+(eval moved (transport i (list (papp not-path i)) (cons bool btrue (cons bool btrue (nil bool)))))

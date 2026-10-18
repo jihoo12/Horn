@@ -1,32 +1,59 @@
-//! User-declared data types. A declaration generates an explicit theory
-//! fragment (formation, constructors, a dependent eliminator, computation,
-//! congruence and composition) that is appended to the selected theory and
-//! shipped with every certificate that uses it; nothing is built in.
+//! User-declared data types, possibly with type parameters. A declaration
+//! generates an explicit theory fragment (formation, constructors, a
+//! dependent eliminator, computation, congruence, structure and
+//! composition) that is appended to the selected theory and shipped with
+//! every certificate that uses it; nothing is built in.
 //!
-//! Constructor arguments may only be bool, nat, earlier data types, or the
-//! type itself. Every such type is discrete (a constant presheaf in the
-//! cubical-set model), so the declared type is discrete too and composition
-//! in it may return its base. Without function or universe arguments the
-//! declaration is trivially strictly positive.
+//! The typing rules are produced from premise plans (`Plan`). The same plan
+//! is printed as rule text and interpreted by the engine when it infers a
+//! type, so the emitted steps state the rule's premises in its order by
+//! construction.
+//!
+//! Field types are bool, nat, earlier closed data types, a parameter, or the
+//! type itself at the same parameters. Without function or universe fields,
+//! strict positivity is immediate. Composition:
+//! - a closed type (no parameters) has only discrete fields, so it is
+//!   discrete (a constant presheaf in the cubical-set model) and composition
+//!   returns its base;
+//! - a parameterized type gets transport rules (empty face) that compute
+//!   constructorwise, `transp (T A) (c a…) = c (transp A a)…`, which holds in
+//!   the standard models of inductive families. Other compositions in a
+//!   parameterized type are left without a rule.
+use super::path_frontend::v;
 use super::term::{Sexp, atom, call};
 use std::cell::RefCell;
 use std::fmt::Write;
 use std::rc::Rc;
 
+#[derive(Clone)]
+pub enum ArgTy {
+    /// A closed discrete type: bool, nat or an earlier closed data type.
+    Closed(Sexp),
+    /// The parameter with this index.
+    Param(usize),
+    /// The declared type at its own parameters.
+    Rec,
+}
+
 pub struct Ctor {
-    /// The user's name and the theory symbol.
     pub name: String,
     pub symbol: String,
-    /// Argument types as core terms (constants such as `nat` or `ty/T`).
-    pub args: Vec<Sexp>,
-    /// Indices of the arguments whose type is the declared type itself.
-    pub recursive: Vec<usize>,
+    pub args: Vec<ArgTy>,
+}
+
+impl Ctor {
+    pub fn recursive(&self) -> Vec<usize> {
+        (0..self.args.len())
+            .filter(|&k| matches!(self.args[k], ArgTy::Rec))
+            .collect()
+    }
 }
 
 pub struct Data {
     pub name: String,
     pub ty: String,
     pub elim: String,
+    pub params: usize,
     pub ctors: Vec<Ctor>,
 }
 
@@ -71,216 +98,398 @@ pub fn by_ctor_name(name: &str) -> Option<(Rc<Data>, usize)> {
 pub fn is_declared(symbol: &str) -> bool {
     by_type(symbol).is_some() || by_elim(symbol).is_some() || by_ctor(symbol).is_some()
 }
+/// The argument position of an eliminator's motive, which binds one variable.
+pub fn motive_index(symbol: &str) -> Option<usize> {
+    by_elim(symbol).map(|d| d.params)
+}
 
-fn unary(n: usize) -> String {
-    let mut s = "z".to_owned();
-    for _ in 0..n {
-        s = format!("(s {s})");
+/// `head` applied to `args`, or the atom when there are none.
+pub fn apply(head: &str, args: Vec<Sexp>) -> Sexp {
+    if args.is_empty() { atom(head) } else { call(head, args) }
+}
+
+/// A rule template: `?`-variables, ground terms and applications.
+#[derive(Clone)]
+pub enum Tpl {
+    Var(String),
+    Ground(Sexp),
+    App(String, Vec<Tpl>),
+}
+
+impl Tpl {
+    fn app(head: &str, args: Vec<Tpl>) -> Tpl {
+        if args.is_empty() {
+            Tpl::Ground(atom(head))
+        } else {
+            Tpl::App(head.to_owned(), args)
+        }
     }
-    s
+    pub fn text(&self) -> String {
+        match self {
+            Tpl::Var(v) => format!("?{v}"),
+            Tpl::Ground(s) => s.to_string(),
+            Tpl::App(h, xs) => {
+                let xs: Vec<_> = xs.iter().map(Tpl::text).collect();
+                format!("({h} {})", xs.join(" "))
+            }
+        }
+    }
+}
+
+/// One premise of a typing rule, in order.
+pub enum Prem {
+    /// `(rctx ?d ?g ?phi)`
+    Ctx,
+    /// `(rhas ?d Γ ?phi term ty)`, with Γ = `(cons ext ?g)` when extended.
+    Has { ext: Option<Tpl>, term: Tpl, ty: Tpl },
+    /// `(shift from cutoff to)`, cutoff 0 or 1.
+    Shift { from: String, cutoff: usize, to: String },
+    /// `(subst from z by to)`
+    Subst { from: String, by: Tpl, to: String },
+}
+
+pub struct Plan {
+    pub prems: Vec<Prem>,
+    pub term: Tpl,
+    pub ty: Tpl,
+    fresh: usize,
+}
+
+impl Plan {
+    fn new() -> Self {
+        Plan {
+            prems: Vec::new(),
+            term: Tpl::Var(String::new()),
+            ty: Tpl::Var(String::new()),
+            fresh: 0,
+        }
+    }
+    fn var(&mut self) -> String {
+        self.fresh += 1;
+        format!("t{}", self.fresh)
+    }
+    /// Shift `from` `times` times at `cutoff`; the name of the result.
+    fn chain(&mut self, from: &str, cutoff: usize, times: usize) -> String {
+        let mut cur = from.to_owned();
+        for _ in 0..times {
+            let to = self.var();
+            self.prems.push(Prem::Shift { from: cur, cutoff, to: to.clone() });
+            cur = to;
+        }
+        cur
+    }
+    fn has(&mut self, term: Tpl, ty: Tpl) {
+        self.prems.push(Prem::Has { ext: None, term, ty });
+    }
+    pub fn text(&self, name: &str) -> String {
+        let prems: Vec<String> = self
+            .prems
+            .iter()
+            .map(|p| match p {
+                Prem::Ctx => "(rctx ?d ?g ?phi)".to_owned(),
+                Prem::Has { ext, term, ty } => {
+                    let g = match ext {
+                        Some(e) => format!("(cons {} ?g)", e.text()),
+                        None => "?g".to_owned(),
+                    };
+                    format!("(rhas ?d {g} ?phi {} {})", term.text(), ty.text())
+                }
+                Prem::Shift { from, cutoff, to } => {
+                    let c = if *cutoff == 0 { "z" } else { "(s z)" };
+                    format!("(shift ?{from} {c} ?{to})")
+                }
+                Prem::Subst { from, by, to } => format!("(subst ?{from} z {} ?{to})", by.text()),
+            })
+            .collect();
+        format!(
+            "(rule {name} ({}) (rhas ?d ?g ?phi {} {}))\n",
+            prems.join(" "),
+            self.term.text(),
+            self.ty.text()
+        )
+    }
+}
+
+fn var(name: String) -> Tpl {
+    Tpl::Var(name)
 }
 
 impl Data {
-    /// The method types' shape: for constructor `i`, how many shifts each
-    /// induction hypothesis and the codomain need, and the variable they
-    /// substitute for the motive's variable. Shared by the rule text and the
-    /// engine's inference so that both state the same premises in order.
-    pub fn method_plan(&self, i: usize) -> (Vec<(usize, usize)>, usize, Vec<usize>) {
+    fn params_tpl(&self) -> Vec<Tpl> {
+        (0..self.params).map(|j| var(format!("A{j}"))).collect()
+    }
+    fn type_tpl(&self, params: Vec<Tpl>) -> Tpl {
+        Tpl::app(&self.ty, params)
+    }
+    fn field_ty(&self, a: &ArgTy, params: &[Tpl]) -> Tpl {
+        match a {
+            ArgTy::Closed(s) => Tpl::Ground(s.clone()),
+            ArgTy::Param(j) => params[*j].clone(),
+            ArgTy::Rec => self.type_tpl(params.to_vec()),
+        }
+    }
+    /// The type of a field as a ground term, given the actual parameters.
+    pub fn field_type(&self, a: &ArgTy, params: &[Sexp]) -> Sexp {
+        match a {
+            ArgTy::Closed(s) => s.clone(),
+            ArgTy::Param(j) => params[*j].clone(),
+            ArgTy::Rec => apply(&self.ty, params.to_vec()),
+        }
+    }
+
+    pub fn formation_plan(&self) -> Plan {
+        let mut p = Plan::new();
+        p.prems.push(Prem::Ctx);
+        for a in self.params_tpl() {
+            p.has(a, Tpl::Ground(call("u", [atom("z")])));
+        }
+        p.term = self.type_tpl(self.params_tpl());
+        p.ty = Tpl::Ground(call("u", [atom("z")]));
+        p
+    }
+
+    pub fn ctor_plan(&self, i: usize) -> Plan {
         let c = &self.ctors[i];
-        let (n, r) = (c.args.len(), c.recursive.len());
-        let ihs = c
-            .recursive
-            .iter()
-            .enumerate()
-            .map(|(q, &j)| (n + q, n - 1 - j + q))
-            .collect();
-        let codomain_args = (0..n).map(|k| n - 1 - k + r).collect();
-        (ihs, n + r, codomain_args)
+        let params = self.params_tpl();
+        let mut p = Plan::new();
+        p.prems.push(Prem::Ctx);
+        for a in &params {
+            p.has(a.clone(), Tpl::Ground(call("u", [atom("z")])));
+        }
+        let fields: Vec<Tpl> = (0..c.args.len()).map(|k| var(format!("a{k}"))).collect();
+        for (f, a) in fields.iter().zip(&c.args) {
+            let ty = self.field_ty(a, &params);
+            p.has(f.clone(), ty);
+        }
+        p.term = Tpl::app(&c.symbol, params.iter().cloned().chain(fields).collect());
+        p.ty = self.type_tpl(params);
+        p
+    }
+
+    /// The eliminator's typing. Method types are spelled out with shifts and
+    /// substitutions: a field type sits under the earlier fields' binders; an
+    /// induction hypothesis and the codomain instantiate the motive, which
+    /// lives over `(x, Γ)`, after shifting at cutoff 1 to make room.
+    pub fn elim_plan(&self) -> Plan {
+        let params = self.params_tpl();
+        let level = Tpl::App("u".into(), vec![var("l".into())]);
+        let u0 = Tpl::Ground(call("u", [atom("z")]));
+        let mut p = Plan::new();
+        for a in &params {
+            p.has(a.clone(), u0.clone());
+        }
+        p.prems.push(Prem::Has {
+            ext: Some(self.type_tpl(params.clone())),
+            term: var("p".into()),
+            ty: level.clone(),
+        });
+        let shifted = |p: &mut Plan, times: usize| -> Vec<Tpl> {
+            (0..self.params).map(|j| var(p.chain(&format!("A{j}"), 0, times))).collect()
+        };
+        for (i, c) in self.ctors.iter().enumerate() {
+            let (n, rec) = (c.args.len(), c.recursive());
+            let r = rec.len();
+            let mut domains = Vec::new();
+            for (k, a) in c.args.iter().enumerate() {
+                let here = shifted(&mut p, k);
+                domains.push(self.field_ty(a, &here));
+            }
+            let mut ihs = Vec::new();
+            for (q, &j) in rec.iter().enumerate() {
+                let base = p.chain("p", 1, n + q);
+                let to = p.var();
+                p.prems.push(Prem::Subst {
+                    from: base,
+                    by: Tpl::Ground(v(n - 1 - j + q)),
+                    to: to.clone(),
+                });
+                ihs.push(var(to));
+            }
+            let base = p.chain("p", 1, n + r);
+            let params_there = shifted(&mut p, n + r);
+            let fields = (0..n).map(|k| Tpl::Ground(v(n - 1 - k + r)));
+            let applied = Tpl::app(&c.symbol, params_there.into_iter().chain(fields).collect());
+            let cod = p.var();
+            p.prems.push(Prem::Subst { from: base, by: applied, to: cod.clone() });
+            let mut ty = var(cod);
+            for ih in ihs.into_iter().rev() {
+                ty = Tpl::App("pi".into(), vec![ih, ty]);
+            }
+            for dom in domains.into_iter().rev() {
+                ty = Tpl::App("pi".into(), vec![dom, ty]);
+            }
+            p.has(var(format!("m{i}")), ty);
+        }
+        p.has(var("x".into()), self.type_tpl(params.clone()));
+        p.prems.push(Prem::Subst { from: "p".into(), by: var("x".into()), to: "px".into() });
+        p.has(var("px".into()), level);
+        let mut args = params;
+        args.push(var("p".into()));
+        args.extend((0..self.ctors.len()).map(|i| var(format!("m{i}"))));
+        args.push(var("x".into()));
+        p.term = Tpl::App(self.elim.clone(), args);
+        p.ty = var("px".into());
+        p
     }
 
     /// The generated theory fragment.
     pub fn theory(&self) -> String {
-        let (t, e) = (&self.ty, &self.elim);
+        let (t, e, np) = (&self.ty, &self.elim, self.params);
         let mut out = String::new();
         let w = &mut out;
         let k = self.ctors.len();
-        let methods: Vec<String> = (0..k).map(|i| format!("?m{i}")).collect();
-        let ms = methods.join(" ");
         let _ = writeln!(w, "; data {} (generated)", self.name);
-        let _ = writeln!(w, "(ctor {t} () Tm)");
+        let tm = |n: usize| vec!["Tm"; n].join(" ");
+        let _ = writeln!(w, "(ctor {t} ({}) Tm)", tm(np));
         for c in &self.ctors {
-            let sorts = vec!["Tm"; c.args.len()].join(" ");
-            let _ = writeln!(w, "(ctor {} ({sorts}) Tm)", c.symbol);
+            let _ = writeln!(w, "(ctor {} ({}) Tm)", c.symbol, tm(np + c.args.len()));
         }
-        let _ = writeln!(w, "(ctor {e} ({}) Tm)", vec!["Tm"; k + 2].join(" "));
-        // Structure: scope, shifts and substitutions.
-        let _ = writeln!(w, "(rule scope.{t} () (scoped ?d ?n {t}))");
-        for op in ["shift", "dshift"] {
-            let _ = writeln!(w, "(rule {op}.{t} () ({op} {t} ?k {t}))");
-        }
-        for op in ["subst", "dsubst"] {
-            let _ = writeln!(w, "(rule {op}.{t} () ({op} {t} ?k ?r {t}))");
-        }
-        for c in &self.ctors {
-            let s = &c.symbol;
-            let a: Vec<String> = (0..c.args.len()).map(|j| format!("?a{j}")).collect();
-            let b: Vec<String> = (0..c.args.len()).map(|j| format!("?b{j}")).collect();
-            let term = |xs: &[String]| {
-                if xs.is_empty() {
-                    s.clone()
-                } else {
-                    format!("({s} {})", xs.join(" "))
+        let _ = writeln!(w, "(ctor {e} ({}) Tm)", tm(np + k + 2));
+        // Structure: argumentwise, except the eliminator's motive binder.
+        let structural = |w: &mut String, head: &str, arity: usize, binder: Option<usize>| {
+            let xs: Vec<String> = (0..arity).map(|i| format!("?x{i}")).collect();
+            let ys: Vec<String> = (0..arity).map(|i| format!("?y{i}")).collect();
+            let term = |zs: &[String]| {
+                if zs.is_empty() { head.to_owned() } else { format!("({head} {})", zs.join(" ")) }
+            };
+            let scope: Vec<String> = (0..arity)
+                .map(|i| {
+                    let n = if Some(i) == binder { "(s ?n)" } else { "?n" };
+                    format!("(scoped ?d {n} ?x{i})")
+                })
+                .collect();
+            let _ = writeln!(w, "(rule scope.{head} ({}) (scoped ?d ?n {}))", scope.join(" "), term(&xs));
+            for op in ["shift", "subst", "dshift", "dsubst"] {
+                let r = if op.ends_with("subst") { " ?r" } else { "" };
+                let mut prems = Vec::new();
+                for i in 0..arity {
+                    let ordinary = !op.starts_with('d') && Some(i) == binder;
+                    if ordinary && op == "subst" {
+                        prems.push("(shift ?r z ?r2)".to_owned());
+                        prems.push(format!("(subst ?x{i} (s ?k) ?r2 ?y{i})"));
+                    } else if ordinary {
+                        prems.push(format!("(shift ?x{i} (s ?k) ?y{i})"));
+                    } else {
+                        prems.push(format!("({op} ?x{i} ?k{r} ?y{i})"));
+                    }
                 }
-            };
-            let prem = |f: &dyn Fn(&str, &str) -> String| -> String {
-                a.iter().zip(&b).map(|(x, y)| f(x, y)).collect::<Vec<_>>().join(" ")
-            };
+                let _ = writeln!(
+                    w,
+                    "(rule {op}.{head} ({}) ({op} {} ?k{r} {}))",
+                    prems.join(" "),
+                    term(&xs),
+                    term(&ys)
+                );
+            }
+        };
+        structural(w, t, np, None);
+        for c in &self.ctors {
+            structural(w, &c.symbol, np + c.args.len(), None);
+        }
+        structural(w, e, np + k + 2, Some(np));
+        // Typing, from the shared plans.
+        w.push_str(&self.formation_plan().text(&format!("rhas.{t}")));
+        for (i, c) in self.ctors.iter().enumerate() {
+            w.push_str(&self.ctor_plan(i).text(&format!("rhas.{}", c.symbol)));
+        }
+        w.push_str(&self.elim_plan().text(&format!("rhas.{e}")));
+        let params: Vec<String> = (0..np).map(|j| format!("?A{j}")).collect();
+        let params_tpl = self.params_tpl();
+        let ty_text = self.type_tpl(params_tpl.clone()).text();
+        let methods: Vec<String> = (0..k).map(|i| format!("?m{i}")).collect();
+        let head_args = |extra: &str| -> String {
+            let mut xs = params.clone();
+            xs.push("?p".into());
+            xs.extend(methods.iter().cloned());
+            xs.push(extra.to_owned());
+            format!("({e} {})", xs.join(" "))
+        };
+        // Constructor congruence: equal parameters (as types) and fields.
+        let params2: Vec<String> = (0..np).map(|j| format!("?C{j}")).collect();
+        if np > 0 {
+            let prems: Vec<String> = params
+                .iter()
+                .zip(&params2)
+                .map(|(x, y)| format!("(req ?d ?g ?phi {x} {y} (u z))"))
+                .collect();
             let _ = writeln!(
                 w,
-                "(rule scope.{s} ({}) (scoped ?d ?n {}))",
-                a.iter().map(|x| format!("(scoped ?d ?n {x})")).collect::<Vec<_>>().join(" "),
-                term(&a)
+                "(rule req.{t}-cong ({}) (req ?d ?g ?phi ({t} {}) ({t} {}) (u z)))",
+                prems.join(" "),
+                params.join(" "),
+                params2.join(" ")
             );
-            for op in ["shift", "dshift"] {
-                let _ = writeln!(
-                    w,
-                    "(rule {op}.{s} ({}) ({op} {} ?k {}))",
-                    prem(&|x, y| format!("({op} {x} ?k {y})")),
-                    term(&a),
-                    term(&b)
-                );
-            }
-            for op in ["subst", "dsubst"] {
-                let _ = writeln!(
-                    w,
-                    "(rule {op}.{s} ({}) ({op} {} ?k ?r {}))",
-                    prem(&|x, y| format!("({op} {x} ?k ?r {y})")),
-                    term(&a),
-                    term(&b)
-                );
-            }
         }
-        let shifted_methods = |op: &str, extra: &str| -> String {
-            (0..k)
-                .map(|i| format!("({op} ?m{i} ?k{extra} ?n{i})"))
-                .collect::<Vec<_>>()
-                .join(" ")
-        };
-        let new_methods: String = (0..k).map(|i| format!(" ?n{i}")).collect();
-        let _ = writeln!(w, "(rule scope.{e} ((scoped ?d (s ?n) ?p) {} (scoped ?d ?n ?x)) (scoped ?d ?n ({e} ?p {ms} ?x)))",
-            methods.iter().map(|m| format!("(scoped ?d ?n {m})")).collect::<Vec<_>>().join(" "));
-        let _ = writeln!(w, "(rule shift.{e} ((shift ?p (s ?k) ?p2) {} (shift ?x ?k ?x2)) (shift ({e} ?p {ms} ?x) ?k ({e} ?p2{new_methods} ?x2)))",
-            shifted_methods("shift", ""));
-        let _ = writeln!(w, "(rule subst.{e} ((shift ?r z ?r2) (subst ?p (s ?k) ?r2 ?p2) {} (subst ?x ?k ?r ?x2)) (subst ({e} ?p {ms} ?x) ?k ?r ({e} ?p2{new_methods} ?x2)))",
-            shifted_methods("subst", " ?r"));
-        let _ = writeln!(w, "(rule dshift.{e} ((dshift ?p ?k ?p2) {} (dshift ?x ?k ?x2)) (dshift ({e} ?p {ms} ?x) ?k ({e} ?p2{new_methods} ?x2)))",
-            shifted_methods("dshift", ""));
-        let _ = writeln!(w, "(rule dsubst.{e} ((dsubst ?p ?k ?r ?p2) {} (dsubst ?x ?k ?r ?x2)) (dsubst ({e} ?p {ms} ?x) ?k ?r ({e} ?p2{new_methods} ?x2)))",
-            shifted_methods("dsubst", " ?r"));
-        // Typing.
-        let _ = writeln!(w, "(rule rhas.{t} ((rctx ?d ?g ?phi)) (rhas ?d ?g ?phi {t} (u z)))");
         for c in &self.ctors {
-            let s = &c.symbol;
+            if c.args.is_empty() && np == 0 {
+                continue;
+            }
             let a: Vec<String> = (0..c.args.len()).map(|j| format!("?a{j}")).collect();
-            let term = if a.is_empty() { s.clone() } else { format!("({s} {})", a.join(" ")) };
-            let prems: String = a
+            let b: Vec<String> = (0..c.args.len()).map(|j| format!("?b{j}")).collect();
+            let mut prems: Vec<String> = params
                 .iter()
-                .zip(&c.args)
-                .map(|(x, ty)| format!(" (rhas ?d ?g ?phi {x} {ty})"))
+                .zip(&params2)
+                .map(|(x, y)| format!("(req ?d ?g ?phi {x} {y} (u z))"))
                 .collect();
-            let _ = writeln!(w, "(rule rhas.{s} ((rctx ?d ?g ?phi){prems}) (rhas ?d ?g ?phi {term} {t}))");
-            if !a.is_empty() {
-                let b: Vec<String> = (0..c.args.len()).map(|j| format!("?b{j}")).collect();
-                let prems: String = a
-                    .iter()
-                    .zip(&b)
-                    .zip(&c.args)
-                    .map(|((x, y), ty)| format!(" (req ?d ?g ?phi {x} {y} {ty})"))
-                    .collect();
-                let _ = writeln!(
-                    w,
-                    "(rule req.{s}-cong ({}) (req ?d ?g ?phi {term} ({s} {}) {t}))",
-                    prems.trim_start(),
-                    b.join(" ")
-                );
-            }
+            prems.extend(a.iter().zip(&b).zip(&c.args).map(|((x, y), ty)| {
+                format!("(req ?d ?g ?phi {x} {y} {})", self.field_ty(ty, &params_tpl).text())
+            }));
+            let lhs = format!("({} {})", c.symbol, params.iter().chain(&a).cloned().collect::<Vec<_>>().join(" "));
+            let rhs = format!("({} {})", c.symbol, params2.iter().chain(&b).cloned().collect::<Vec<_>>().join(" "));
+            let _ = writeln!(w, "(rule req.{}-cong ({}) (req ?d ?g ?phi {lhs} {rhs} {ty_text}))", c.symbol, prems.join(" "));
         }
-        // Eliminator typing: every method type is spelled out with certified
-        // shifts and substitutions, as for natrec.
-        let mut prems = format!("(rhas ?d (cons {t} ?g) ?phi ?p (u ?l))");
-        for (i, c) in self.ctors.iter().enumerate() {
-            let (ihs, depth, codomain_args) = self.method_plan(i);
-            let chain = |label: String, shifts: usize, prems: &mut String| -> String {
-                let mut cur = "?p".to_owned();
-                for step in 0..shifts {
-                    let next = format!("?p{label}s{step}");
-                    let _ = write!(prems, " (shift {cur} (s z) {next})");
-                    cur = next;
-                }
-                cur
-            };
-            let mut ih_types = Vec::new();
-            for (q, &(shifts, var)) in ihs.iter().enumerate() {
-                let base = chain(format!("{i}i{q}"), shifts, &mut prems);
-                let out = format!("?ih{i}x{q}");
-                let _ = write!(prems, " (subst {base} z (v {}) {out})", unary(var));
-                ih_types.push(out);
-            }
-            let base = chain(format!("{i}c"), depth, &mut prems);
-            let applied = if c.args.is_empty() {
-                c.symbol.clone()
-            } else {
-                format!(
-                    "({} {})",
-                    c.symbol,
-                    codomain_args.iter().map(|&v| format!("(v {})", unary(v))).collect::<Vec<_>>().join(" ")
-                )
-            };
-            let cod = format!("?cod{i}");
-            let _ = write!(prems, " (subst {base} z {applied} {cod})");
-            let mut method_ty = cod;
-            for ih in ih_types.iter().rev() {
-                method_ty = format!("(pi {ih} {method_ty})");
-            }
-            for ty in c.args.iter().rev() {
-                method_ty = format!("(pi {ty} {method_ty})");
-            }
-            let _ = write!(prems, " (rhas ?d ?g ?phi ?m{i} {method_ty})");
-        }
-        let _ = write!(prems, " (rhas ?d ?g ?phi ?x {t}) (subst ?p z ?x ?px) (rhas ?d ?g ?phi ?px (u ?l))");
-        let _ = writeln!(w, "(rule rhas.{e} ({prems}) (rhas ?d ?g ?phi ({e} ?p {ms} ?x) ?px))");
-        // Computation, congruence, composition.
+        // Computation: one rule per constructor.
         for (i, c) in self.ctors.iter().enumerate() {
             let a: Vec<String> = (0..c.args.len()).map(|j| format!("?a{j}")).collect();
-            let scrutinee = if a.is_empty() { c.symbol.clone() } else { format!("({} {})", c.symbol, a.join(" ")) };
+            let b: Vec<String> = (0..np).map(|j| format!("?B{j}")).collect();
+            let fields: Vec<String> = b.iter().chain(&a).cloned().collect();
+            let scrutinee = if fields.is_empty() { c.symbol.clone() } else { format!("({} {})", c.symbol, fields.join(" ")) };
             let mut rhs = format!("?m{i}");
             for x in &a {
                 rhs = format!("(app {rhs} {x})");
             }
-            for &j in &c.recursive {
-                rhs = format!("(app {rhs} ({e} ?p {ms} ?a{j}))");
+            for j in c.recursive() {
+                rhs = format!("(app {rhs} {})", head_args(&format!("?a{j}")));
             }
-            let lhs = format!("({e} ?p {ms} {scrutinee})");
+            let lhs = head_args(&scrutinee);
             let _ = writeln!(
                 w,
                 "(rule req.{e}.{} ((rhas ?d ?g ?phi {lhs} ?ty) (rhas ?d ?g ?phi {rhs} ?ty)) (req ?d ?g ?phi {lhs} {rhs} ?ty))",
                 c.symbol
             );
         }
-        let _ = writeln!(w, "(rule req.{e}-cong ((rhas ?d ?g ?phi ({e} ?p {ms} ?x) ?ty) (rhas ?d ?g ?phi ({e} ?p {ms} ?x2) ?ty) (req ?d ?g ?phi ?x ?x2 {t})) (req ?d ?g ?phi ({e} ?p {ms} ?x) ({e} ?p {ms} ?x2) ?ty))");
-        let _ = writeln!(w, "(rule req.comp-{t} ((rhas ?d ?g ?psi (comp {t} ?phi ?t ?b) {t})) (req ?d ?g ?psi (comp {t} ?phi ?t ?b) ?b {t}))");
+        let _ = writeln!(
+            w,
+            "(rule req.{e}-cong ((rhas ?d ?g ?phi {} ?ty) (rhas ?d ?g ?phi {} ?ty) (req ?d ?g ?phi ?x ?x2 {ty_text})) (req ?d ?g ?phi {} {} ?ty))",
+            head_args("?x"),
+            head_args("?x2"),
+            head_args("?x"),
+            head_args("?x2")
+        );
+        // Composition.
+        if np == 0 {
+            let _ = writeln!(w, "(rule req.comp-{t} ((rhas ?d ?g ?psi (comp {t} ?phi ?t ?b) {t})) (req ?d ?g ?psi (comp {t} ?phi ?t ?b) ?b {t}))");
+        } else {
+            for c in &self.ctors {
+                let a: Vec<String> = (0..c.args.len()).map(|j| format!("?a{j}")).collect();
+                let b: Vec<String> = (0..np).map(|j| format!("?B{j}")).collect();
+                let base = format!("({} {})", c.symbol, b.iter().chain(&a).cloned().collect::<Vec<_>>().join(" "));
+                let lhs = format!("(comp {ty_text} ff ?t {base})");
+                let ends: Vec<String> = (0..np).map(|j| format!("?E{j}")).collect();
+                let mut parts = ends.clone();
+                for (x, ty) in a.iter().zip(&c.args) {
+                    let line = self.field_ty(ty, &params_tpl).text();
+                    parts.push(format!("(comp {line} ff zero {x})"));
+                }
+                let rhs = format!("({} {})", c.symbol, parts.join(" "));
+                let ends_prems: String = (0..np).map(|j| format!(" (dsubst ?A{j} z i1 ?E{j})")).collect();
+                let _ = writeln!(
+                    w,
+                    "(rule req.comp-{t}.{} ((rhas ?d ?g ?psi {lhs} ?out){ends_prems} (rhas ?d ?g ?psi {rhs} ?out)) (req ?d ?g ?psi {lhs} {rhs} ?out))",
+                    c.symbol
+                );
+            }
+        }
         out
-    }
-}
-
-/// The core term of a declared type, constructor application or eliminator.
-pub fn type_term(data: &Data) -> Sexp {
-    atom(&data.ty)
-}
-pub fn ctor_term(c: &Ctor, args: Vec<Sexp>) -> Sexp {
-    if args.is_empty() {
-        atom(&c.symbol)
-    } else {
-        call(&c.symbol, args)
     }
 }

@@ -372,10 +372,10 @@ impl RestrictedProducer {
                 self.scope(d, n, base)?,
             ],
             (h, xs) if crate::cubical::engine::data::is_declared(h) => {
-                let binds = crate::cubical::engine::data::by_elim(h).is_some();
+                let motive = crate::cubical::engine::data::motive_index(h);
                 let mut refs = Vec::new();
                 for (i, x) in xs.iter().enumerate() {
-                    let depth = if binds && i == 0 { n + 1 } else { n };
+                    let depth = if Some(i) == motive { n + 1 } else { n };
                     refs.push(self.scope(d, depth, x)?);
                 }
                 refs
