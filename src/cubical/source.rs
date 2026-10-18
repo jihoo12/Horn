@@ -45,7 +45,7 @@ fn binder(s: &Sexp) -> Result<String> {
     }
     if [
         "nat", "zero", "i0", "i1", "u", "v", "dim", "pi", "lam", "app", "path", "plam", "papp",
-        "neg", "meet", "join", "scope", "ff", "ft", "at0", "at1", "fand", "for",
+        "neg", "meet", "join", "scope", "ff", "ft", "at0", "at1", "fand", "for", "system",
     ]
     .contains(&name)
     {
@@ -205,6 +205,20 @@ fn term(s: &Sexp, depth: usize, names: &Names) -> Result<Term> {
         ("plam", [a, b]) => path_binder(None, a, b, depth, names)?,
         ("plam", [name, a, b]) => path_binder(Some(name), a, b, depth, names)?,
         ("papp", [p, r]) => Term::PathApp(t(p)?, interval(r, depth + 1, names)?),
+        ("system", [ty, sides]) => {
+            let sides = sides.list()?;
+            if sides.len() > 16 {
+                return Err("system exceeds 16 branches".into());
+            }
+            let mut branches = Vec::new();
+            for side in sides {
+                let [phi, value] = side.list()? else {
+                    return Err("system branch requires (FACE TERM)".into());
+                };
+                branches.push((face(phi, depth + 1, names)?, term(value, depth + 1, names)?));
+            }
+            Term::System(t(ty)?, branches)
+        }
         _ => return Err(format!("invalid term expression {s}")),
     })
 }
@@ -302,9 +316,11 @@ pub fn parse(src: &str) -> Result<Vec<Request>> {
                         left: interval(r, 0, &names)?,
                         right: interval(s, 0, &names)?,
                     },
+                    ("check-on", [phi,t,ty]) => Judgment::RestrictedHas { face: face(phi,0,&names)?, term: term(t,0,&names)?, ty: term(ty,0,&names)? },
+                    ("equal-on", [phi,a,b,ty]) => Judgment::RestrictedEqual { face: face(phi,0,&names)?, left: term(a,0,&names)?, right: term(b,0,&names)?, ty: term(ty,0,&names)? },
                     _ => {
                         return Err(
-                            "expected check/equal/entails/local assertion with optional scope"
+                            "expected check/equal/entails/local/check-on/equal-on assertion with optional scope"
                                 .into(),
                         );
                     }

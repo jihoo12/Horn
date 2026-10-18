@@ -45,6 +45,7 @@ pub enum Term {
     Path(Box<Term>, Box<Term>, Box<Term>),
     PathLam(Box<Term>, Box<Term>),
     PathApp(Box<Term>, Interval),
+    System(Box<Term>, Vec<(Face, Term)>),
 }
 
 pub(super) fn number(n: usize) -> Sexp {
@@ -77,6 +78,7 @@ impl Term {
             Self::Path(a, b, c) => call("path", [a.quote(), b.quote(), c.quote()]),
             Self::PathLam(_, body) => call("plam", [body.quote()]),
             Self::PathApp(p, r) => call("papp", [p.quote(), r.quote()]),
+            Self::System(_, sides) => call("system", [system(sides)]),
         }
     }
 }
@@ -90,4 +92,24 @@ pub(super) fn extend(g: &[Term], a: &Term) -> Vec<Term> {
     let mut out = g.to_vec();
     out.push(a.clone());
     out
+}
+
+pub(super) fn system(sides: &[(Face, Term)]) -> Sexp {
+    sides.iter().rev().fold(atom("snil"), |tail, (f, t)| {
+        call("side", [f.quote(), t.quote(), tail])
+    })
+}
+
+impl Term {
+    pub(super) fn has_system(&self) -> bool {
+        match self {
+            Self::System(..) => true,
+            Self::Pi(a, b) | Self::Lam(a, b) | Self::App(a, b) | Self::PathLam(a, b) => {
+                a.has_system() || b.has_system()
+            }
+            Self::Path(a, b, c) => a.has_system() || b.has_system() || c.has_system(),
+            Self::PathApp(p, _) => p.has_system(),
+            _ => false,
+        }
+    }
 }

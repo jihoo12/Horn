@@ -3,7 +3,8 @@
 `cubical::producer::produce` constructs new certificates from typed requests.
 It does not load the frozen univalence oracles or use kamo3 at runtime. It
 uses the existing scoped-path fragment by default. Face assertions select
-the fixed path-plus-faces profile; see [face evidence](CUBICAL_FACES_SYSTEMS.md).
+the fixed path-plus-faces profile, while systems/restricted assertions select
+the five-fragment systems profile; see [face and system evidence](CUBICAL_FACES_SYSTEMS.md).
 No rules or kernel code are changed. Replay fresh output with its returned
 `Generated.theory`, which is also written by CLI export.
 
@@ -113,5 +114,6 @@ computations, scoped endpoint laws, substitutions under both binder kinds
 and dimension-dependent contexts. They independently replay emitted evidence
 and reject wrong types, free variables/dimensions, bad context entries,
 changed goals and invented rule names. This is not a complete cubical
-elaborator or a proof of semantic soundness. Face systems, composition, Glue
-and fresh univalence generation remain later migration stages.
+elaborator or a proof of semantic soundness. A bounded face/system generator is described in [its guide](CUBICAL_FACES_SYSTEMS.md).
+General restricted inference, composition, Glue and fresh univalence generation
+remain later migration stages.

@@ -1,0 +1,20 @@
+; Both branches are globally typed, and agree on their certified overlap.
+(check full-system (scope (i) ((p (path nat zero zero))))
+  (system nat ((ft zero) ((at0 i) (papp p i)))) nat)
+(equal full-system-value (scope (i) ((p (path nat zero zero))))
+  (system nat ((ft zero) ((at0 i) (papp p i)))) zero nat)
+
+; Endpoint faces do not cover the whole interval. The result stays restricted.
+(check-on partial-system (scope (i) ()) (for (at0 i) (at1 i))
+  (system nat (((at0 i) zero) ((at1 i) zero))) nat)
+(equal-on partial-system-value (scope (i) ()) (for (at0 i) (at1 i))
+  (system nat (((at0 i) zero) ((at1 i) zero))) zero nat)
+
+(equal-on local-path-value (scope (i) ((p (path nat zero zero))))
+  (at0 i) (papp p i) zero nat)
+
+; System syntax participates in certified ordinary/dimension substitution.
+(equal beta-system (app (lam x nat (system nat ((ft x)))) zero) zero nat)
+(equal path-system
+  (papp (plam i nat (system nat ((ft zero) ((at0 i) zero)))) i0)
+  zero nat)

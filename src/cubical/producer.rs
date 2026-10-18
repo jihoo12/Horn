@@ -1,6 +1,7 @@
 //! Small, untrusted producer for the existing scoped path theory. Every
 //! substitution and typing operation emits evidence for the ground kernel.
 mod faces;
+mod systems;
 
 use super::ast::{Face, Interval, Term, context, extend, number};
 use crate::sexp::{Result, Sexp, call};
@@ -14,6 +15,7 @@ const MAX_STEPS: usize = 50_000;
 pub enum Profile {
     Path,
     Faces,
+    Systems,
 }
 
 impl Profile {
@@ -21,6 +23,7 @@ impl Profile {
         let count = match self {
             Self::Path => 1,
             Self::Faces => 2,
+            Self::Systems => 5,
         };
         super::FRAGMENTS[..count]
             .iter()
@@ -62,6 +65,7 @@ struct Producer {
     inferred: BTreeMap<InferenceKey, (Term, usize)>,
     conversion_depth: usize,
     face_work: usize,
+    restricted_depth: usize,
 }
 
 impl Producer {
@@ -253,6 +257,12 @@ impl Producer {
                 let (body, id) = self.transform(body, &inner)?;
                 refs.push(id);
                 (PathLam(Box::new(a), Box::new(body)), "plam")
+            }
+            System(ty, sides) => {
+                let (ty, _) = self.transform(ty, op)?;
+                let (sides, id) = self.transform_system(sides, op)?;
+                refs.push(id);
+                (System(Box::new(ty), sides), "system")
             }
             PathApp(p, r) => {
                 let (p, id) = self.transform(p, op)?;
@@ -552,6 +562,10 @@ impl Producer {
                     "type.plam",
                 )
             }
+            System(ty, sides) => {
+                let restricted = self.system_has(d, g, &Face::True, sides, ty)?;
+                (*ty.clone(), vec![restricted], "rhas.export")
+            }
             PathApp(p, r) => {
                 let (mut pty, mut x) = self.infer(d, g, p)?;
                 if !matches!(pty, Path(..)) {
@@ -594,6 +608,7 @@ impl Producer {
     fn reduce(&mut self, d: usize, g: &[Term], t: &Term) -> Result<Option<(Term, usize)>> {
         use Term::*;
         match t {
+            System(ty, sides) => self.reduce_system(d, g, sides, ty),
             App(f, r) if matches!(f.as_ref(), Lam(..)) => {
                 let Lam(a, body) = f.as_ref() else {
                     unreachable!()
@@ -739,6 +754,17 @@ pub enum Judgment {
         left: Interval,
         right: Interval,
     },
+    RestrictedHas {
+        face: Face,
+        term: Term,
+        ty: Term,
+    },
+    RestrictedEqual {
+        face: Face,
+        left: Term,
+        right: Term,
+        ty: Term,
+    },
 }
 
 pub struct Generated {
@@ -803,6 +829,16 @@ fn validate(request: &Request) -> Result<()> {
                 term(p, depth + 1, nodes)?;
                 interval(r, depth + 1, nodes)?;
             }
+            Term::System(ty, sides) => {
+                if sides.len() > 16 {
+                    return Err("system exceeds 16 branches".into());
+                }
+                term(ty, depth + 1, nodes)?;
+                for (f, t) in sides {
+                    face(f, depth + 1, nodes)?;
+                    term(t, depth + 1, nodes)?;
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -848,8 +884,46 @@ fn validate(request: &Request) -> Result<()> {
             interval(left, 0, &mut nodes)?;
             interval(right, 0, &mut nodes)?;
         }
+        Judgment::RestrictedHas { .. } | Judgment::RestrictedEqual { .. } => {}
+    }
+    match &request.judgment {
+        Judgment::RestrictedHas {
+            face: phi,
+            term: t,
+            ty,
+        } => {
+            face(phi, 0, &mut nodes)?;
+            term(t, 0, &mut nodes)?;
+            term(ty, 0, &mut nodes)?;
+        }
+        Judgment::RestrictedEqual {
+            face: phi,
+            left,
+            right,
+            ty,
+        } => {
+            face(phi, 0, &mut nodes)?;
+            term(left, 0, &mut nodes)?;
+            term(right, 0, &mut nodes)?;
+            term(ty, 0, &mut nodes)?;
+        }
+        _ => {}
     }
     Ok(())
+}
+
+fn needs_systems(request: &Request) -> bool {
+    if request.context.iter().any(Term::has_system) {
+        return true;
+    }
+    match &request.judgment {
+        Judgment::RestrictedHas { .. } | Judgment::RestrictedEqual { .. } => true,
+        Judgment::Has { term, ty } => term.has_system() || ty.has_system(),
+        Judgment::Equal { left, right, ty } => {
+            left.has_system() || right.has_system() || ty.has_system()
+        }
+        _ => false,
+    }
 }
 
 /// Generate fresh evidence, fix goals from the requests (not from inferred
@@ -861,7 +935,9 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
     for request in requests {
         validate(request).map_err(|e| format!("{}: {e}", request.name))?;
     }
-    let profile = if requests.iter().any(|r| {
+    let profile = if requests.iter().any(needs_systems) {
+        Profile::Systems
+    } else if requests.iter().any(|r| {
         matches!(
             r.judgment,
             Judgment::Entails { .. } | Judgment::Local { .. }
@@ -902,6 +978,44 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
                         call(
                             "local",
                             [number(d), face.quote(), left.quote(), right.quote()],
+                        ),
+                    ));
+                }
+                Judgment::RestrictedHas { face, term, ty } => {
+                    let id = p.restricted_check(d, g, face, term, ty)?;
+                    return Ok((
+                        id,
+                        call(
+                            "rhas",
+                            [
+                                number(d),
+                                context(g),
+                                face.quote(),
+                                term.quote(),
+                                ty.quote(),
+                            ],
+                        ),
+                    ));
+                }
+                Judgment::RestrictedEqual {
+                    face,
+                    left,
+                    right,
+                    ty,
+                } => {
+                    let id = p.restricted_equal((d, g), face, left, right, ty)?;
+                    return Ok((
+                        id,
+                        call(
+                            "req",
+                            [
+                                number(d),
+                                context(g),
+                                face.quote(),
+                                left.quote(),
+                                right.quote(),
+                                ty.quote(),
+                            ],
                         ),
                     ));
                 }
