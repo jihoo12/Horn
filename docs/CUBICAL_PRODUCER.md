@@ -116,5 +116,7 @@ and dimension-dependent contexts. They independently replay emitted evidence
 and reject wrong types, free variables/dimensions, bad context entries,
 changed goals and invented rule names. This is not a complete cubical
 elaborator or a proof of semantic soundness. A bounded face/system generator is described in [its guide](CUBICAL_FACES_SYSTEMS.md).
-General restricted inference, composition, Glue and fresh univalence generation
-remain later migration stages.
+Native restricted inference and local type/equality conversion now use the
+existing restricted rules; see the face/system guide and restricted.hcu.
+General congruence, composition, Glue and fresh univalence generation remain
+later migration stages.

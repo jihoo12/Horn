@@ -1,0 +1,33 @@
+; A type-valued path is Nat at i=0. Its generic value is not globally Nat.
+(check-on local-conversion (scope (i) ((P (path (u 0) nat nat)) (x (papp P i))))
+  (at0 i) x nat)
+
+; Function heads can also become Pi types only on a face.
+(check-on local-function (scope (i)
+    ((P (path (u 0) (pi nat nat) (pi nat nat))) (f (papp P i))))
+  (at0 i) (app f zero) nat)
+
+; This context is well formed on i=0; its last declaration is invalid globally.
+(check-on local-context (scope (i)
+    ((P (path (u 1) (u 0) (u 0))) (A (papp P i)) (x A)))
+  (at0 i) x A)
+
+; The lambda and its beta equation use that same local context.
+(equal-on local-beta (scope (i)
+    ((P (path (u 1) (u 0) (u 0))) (A (papp P i)) (x A)))
+  (at0 i) (app (lam y A y) x) x A)
+
+; A coherent branch is typed under its face, with no global cast of x.
+(check-on local-system (scope (i) ((P (path (u 0) nat nat)) (x (papp P i))))
+  (at0 i) (system nat (((at0 i) x))) nat)
+
+(check-on local-path (scope (i)
+    ((P (path (u 1) (u 0) (u 0))) (A (papp P i)) (x A)))
+  (at0 i) (plam j A x) (path j A x x))
+(equal-on local-path-beta (scope (i)
+    ((P (path (u 1) (u 0) (u 0))) (A (papp P i)) (x A)))
+  (at0 i) (papp (plam j A x) i) x A)
+
+; Transport the beta EQUALITY itself to Nat with req.conv.
+(equal-on converted-beta (scope (i) ((P (path (u 0) nat nat)) (x (papp P i))))
+  (at0 i) (app (lam y (papp P i) y) x) x nat)

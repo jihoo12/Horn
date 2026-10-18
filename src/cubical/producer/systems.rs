@@ -1,11 +1,11 @@
 //! Untrusted construction of restricted evidence and coherent systems.
-//! This first subset embeds globally typed branch terms and certifies every
-//! overlap and cover; partial systems retain rhas/req goals.
+//! Branch terms may use native restricted typing and local type conversion;
+//! every overlap and cover is certified, and partial goals retain their face.
 use super::{Face, Interval, Op, Producer, Result, Term, call, context, number};
 use crate::cubical::ast::system;
 
 impl Producer {
-    fn transform_face(&mut self, f: &Face, op: &Op) -> Result<(Face, usize)> {
+    pub(super) fn transform_face(&mut self, f: &Face, op: &Op) -> Result<(Face, usize)> {
         let mut refs = Vec::new();
         let (out, suffix) = match f {
             Face::False => (Face::False, "ff"),
@@ -102,7 +102,7 @@ impl Producer {
         Ok((out, id))
     }
 
-    fn restricted_evidence(
+    pub(super) fn restricted_evidence(
         &mut self,
         rule: &str,
         refs: Vec<usize>,
@@ -135,24 +135,33 @@ impl Producer {
         t: &Term,
         ty: &Term,
     ) -> Result<usize> {
-        let face = self.face(d, phi)?;
-        self.universe(d, g, ty)?;
+        self.face(d, phi)?;
+        self.restricted_universe(d, g, phi, ty)?;
         if let Term::System(annotation, sides) = t {
             if annotation.quote() != ty.quote() {
                 return Err("system annotation must match the requested type".into());
             }
             return self.system_has(d, g, phi, sides, ty);
         }
-        let typed = self.check(d, g, t, ty)?;
-        self.fact(
-            "rhas.global",
-            vec![face, typed],
-            "rhas",
-            vec![number(d), context(g), phi.quote(), t.quote(), ty.quote()],
-        )
+        let (actual, typed) = self.restricted_infer(d, g, phi, t)?;
+        if actual.quote() == ty.quote() {
+            return Ok(typed);
+        }
+        self.converting(|p| {
+            let (i, _) = p.restricted_universe(d, g, phi, &actual)?;
+            let (j, wf) = p.restricted_universe(d, g, phi, ty)?;
+            if i != j {
+                return Err(
+                    "restricted type conversion requires the same universe level; no cumulativity"
+                        .into(),
+                );
+            }
+            let eq = p.restricted_equal((d, g), phi, &actual, ty, &Term::Universe(i))?;
+            p.rhas("rhas.conv", vec![typed, eq, wf], (d, g), phi, t, ty)
+        })
     }
 
-    fn local_path(
+    pub(super) fn local_path(
         &mut self,
         scope: (usize, &[Term]),
         phi: &Face,
@@ -162,9 +171,10 @@ impl Producer {
         ty: &Term,
     ) -> Result<usize> {
         let (d, g) = scope;
-        let (mut pty, mut typed) = self.infer(d, g, p)?;
+        let (mut pty, mut typed) = self.restricted_infer(d, g, phi, p)?;
         if !matches!(pty, Term::Path(..)) {
-            (pty, typed) = self.converting(|producer| producer.expose(d, g, p, &pty, typed))?;
+            (pty, typed) = self
+                .converting(|producer| producer.restricted_expose((d, g), phi, p, &pty, typed))?;
         }
         let Term::Path(a, _, _) = pty else {
             return Err("expected a path".into());
@@ -175,11 +185,11 @@ impl Producer {
             return Err("restricted path congruence requires syntactically identical family instances and requested type".into());
         }
         let local = self.local(d, phi, r, s)?;
-        let (_, kind) = self.universe(d, g, &ar)?;
+        let (_, kind) = self.restricted_universe(d, g, phi, &ar)?;
         let left = Term::PathApp(Box::new(p.clone()), r.clone());
         let right = Term::PathApp(Box::new(p.clone()), s.clone());
         self.restricted_evidence(
-            "req.pdim",
+            "req.pdim-r",
             vec![typed, local, x, y, kind],
             scope,
             phi,
@@ -240,6 +250,27 @@ impl Producer {
                 ty,
             );
         }
+        if let Some((out, actual, step)) = self.restricted_reduce(scope, phi, a)? {
+            let step =
+                self.restricted_convert_equality(scope, phi, (a, &out), (&actual, ty), step)?;
+            let tail = self.restricted_equal(scope, phi, &out, b, ty)?;
+            return self.restricted_evidence("req.trans", vec![step, tail], scope, phi, (a, b), ty);
+        }
+        if let Some((out, actual, step)) = self.restricted_reduce(scope, phi, b)? {
+            let step =
+                self.restricted_convert_equality(scope, phi, (b, &out), (&actual, ty), step)?;
+            let reverse =
+                self.restricted_evidence("req.sym", vec![step], scope, phi, (&out, b), ty)?;
+            let head = self.restricted_equal(scope, phi, a, &out, ty)?;
+            return self.restricted_evidence(
+                "req.trans",
+                vec![head, reverse],
+                scope,
+                phi,
+                (a, b),
+                ty,
+            );
+        }
         if let Term::System(_, sides) = a {
             let agrees = self.agrees(scope, phi, sides, b, ty)?;
             return self.restricted_evidence(
@@ -262,10 +293,10 @@ impl Producer {
             return Ok(local);
         }
         if let Term::PathApp(p, r) = a {
-            let (mut pty, typed) = self.infer(d, g, p)?;
+            let (mut pty, typed) = self.restricted_infer(d, g, phi, p)?;
             if !matches!(pty, Term::Path(..)) {
                 pty = self
-                    .converting(|producer| producer.expose(d, g, p, &pty, typed))?
+                    .converting(|producer| producer.restricted_expose((d, g), phi, p, &pty, typed))?
                     .0;
             }
             if let Term::Path(_, zero, one) = pty {
@@ -276,16 +307,8 @@ impl Producer {
                     let attempt = |producer: &mut Self| -> Result<usize> {
                         let local = producer.local_path(scope, phi, p, r, &endpoint, ty)?;
                         let middle = Term::PathApp(p.clone(), endpoint);
-                        let global = producer.equal(d, g, &middle, &value, ty)?;
-                        let face = producer.face(d, phi)?;
-                        let restricted = producer.restricted_evidence(
-                            "req.global",
-                            vec![face, global],
-                            scope,
-                            phi,
-                            (&middle, &value),
-                            ty,
-                        )?;
+                        let restricted =
+                            producer.restricted_equal(scope, phi, &middle, &value, ty)?;
                         let head = producer.restricted_evidence(
                             "req.trans",
                             vec![local, restricted],
@@ -408,14 +431,7 @@ impl Producer {
         let (d, g) = scope;
         let (dom, rule, refs) = match sides.split_first() {
             None => {
-                let face = self.face(d, base)?;
-                let ctx = self.ctx(d, g)?;
-                let restricted = self.fact(
-                    "rctx.global",
-                    vec![face, ctx],
-                    "rctx",
-                    vec![number(d), context(g), base.quote()],
-                )?;
+                let restricted = self.restricted_ctx(d, g, base)?;
                 (Face::False, "coherent.nil", vec![restricted])
             }
             Some(((phi, t), rest)) => {
@@ -455,7 +471,7 @@ impl Producer {
         sides: &[(Face, Term)],
         ty: &Term,
     ) -> Result<usize> {
-        let (level, _) = self.universe(d, g, ty)?;
+        let (level, _) = self.restricted_universe(d, g, base, ty)?;
         let kind = self.restricted_check(d, g, base, ty, &Term::Universe(level))?;
         let (domain, coherent) = self.coherent((d, g), base, sides, ty)?;
         let cover = self.entails(d, base, &domain)?;
@@ -473,7 +489,7 @@ impl Producer {
         )
     }
 
-    fn branch(&mut self, sides: &[(Face, Term)], i: usize) -> Result<usize> {
+    pub(super) fn branch(&mut self, sides: &[(Face, Term)], i: usize) -> Result<usize> {
         let (rule, refs) = if i == 0 {
             ("branch.here", vec![])
         } else {

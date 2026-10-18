@@ -76,17 +76,25 @@ branches would be insufficient; a three-branch rejection test targets that
 mistake. Disjoint branches may differ because their contradictory overlap is
 certified with `req.false`, after both terms have been typed.
 
-The first supported subset uses globally typed contexts/types/branch terms,
-plus recursively checked system branches. It embeds those typings with
-`rhas.global`. It does not implement general restricted type inference or
-face-dependent type conversion. Direct restricted system checking requires
-the annotation to match the requested type syntactically, and does not use
-false elimination to admit
-ill-typed or unscoped branch terms. Matching path applications can be related
-by certified local interval equality when the family instances and requested
-type are syntactically identical. Path endpoint equations then yield local
-branch agreement. Reflexivity, supported global equations, false overlaps,
-cases and system agreement are explicit rule applications.
+Native restricted inference now supports universes, variables, dependent
+functions, paths and recursively checked systems. A context may be well formed
+only under its face. Global evidence remains a fast path; local obligations
+use `rctx.cons`, `rhas.*` and explicit `rhas.conv`. For example a value of
+`(papp P i)` can be checked as Nat on `i=0` when `P` is a type-valued path with
+Nat at its zero endpoint; it cannot be cast globally. Function, path and
+universe heads can be exposed by bounded root reduction under the face.
+See [restricted.hcu](../examples/cubical/source/restricted.hcu).
+
+Restricted beta/path beta/endpoint steps and equality transport use the
+existing `req.*` rules, including `req.conv`. Direct restricted system
+checking still requires its annotation to match the requested type
+syntactically. False elimination is deliberately not used to admit ill-typed
+or unscoped branch terms. Local path congruence requires syntactically equal
+family instances and requested type; general dependent transport and
+congruence search remain unsupported. All conversions require matching
+universe levels; no cumulativity is assumed. Reflexivity checks both annotated
+operands, and false overlaps still check both terms. Cases and system
+agreement are explicit rule applications.
 
 A partial result remains an `rhas` or `req` goal with its face. No global
 export is performed unless the existing `ft` export rule is applicable.
@@ -109,5 +117,4 @@ selection is based on the requested constructs before evidence generation;
 a certificate cannot install rules. `Generated.theory` and CLI export expose
 the actual specification used. Input systems have at most 16 branches each;
 restricted equality search has a depth limit of 64 in addition to shared
-source, face-search and emitted-step limits. General conversion, composition
-and Glue generation remain later steps.
+source, face-search and emitted-step limits. General congruence, composition and Glue generation remain later steps.

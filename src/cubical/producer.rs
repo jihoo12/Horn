@@ -1,6 +1,7 @@
 //! Small, untrusted producer for the existing scoped path theory. Every
 //! substitution and typing operation emits evidence for the ground kernel.
 mod faces;
+mod restricted;
 mod systems;
 
 use super::ast::{Face, Interval, Term, context, extend, number};
@@ -57,12 +58,14 @@ impl Op {
 }
 
 type InferenceKey = (usize, Vec<Term>, Term);
+type RestrictedInferenceKey = (usize, Vec<Term>, Face, Term);
 
 #[derive(Default)]
 struct Producer {
     steps: Vec<(String, Vec<usize>, Sexp)>,
     known: BTreeMap<Sexp, usize>,
     inferred: BTreeMap<InferenceKey, (Term, usize)>,
+    restricted_inferred: BTreeMap<RestrictedInferenceKey, (Term, usize)>,
     conversion_depth: usize,
     face_work: usize,
     restricted_depth: usize,
