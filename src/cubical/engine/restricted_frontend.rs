@@ -840,6 +840,10 @@ impl RestrictedProducer {
             self.remember(d, g, phi, t, expected, id);
             return Ok(id);
         }
+        if let Some(id) = self.check_declared(d, g, phi, t, expected)? {
+            self.remember(d, g, phi, t, expected, id);
+            return Ok(id);
+        }
         if let ("lam", [body]) = shape(t)? {
             let ("pi", [a, b]) = shape(expected)? else {
                 return Err("lambda expects Pi annotation".into());

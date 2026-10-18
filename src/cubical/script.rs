@@ -171,10 +171,10 @@ impl Elaborator {
                     }
                 } else if let Some((d, i)) = data::by_ctor_name(a) {
                     let c = &d.ctors[i];
-                    if c.args.is_empty() && d.params == 0 {
+                    if c.args.is_empty() {
                         Ok(atom(&c.symbol))
                     } else {
-                        Err(format!("constructor {a} needs {} arguments", d.params + c.args.len()))
+                        Err(format!("constructor {a} needs {} arguments", c.args.len()))
                     }
                 } else if let Some(t) = self.defs.get(&**a) {
                     Ok(t.clone())
@@ -262,14 +262,12 @@ impl Elaborator {
                 call(&d.elim, items)
             }
             (c, args) if data::by_ctor_name(c).is_some() => {
-                // Parameters are written first: `(cons bool btrue (nil bool))`.
+                // Parameters are not written: `(cons btrue nil)`. They come
+                // from the fields or from the expected type.
                 let (d, i) = data::by_ctor_name(c).unwrap();
                 let ctor = &d.ctors[i];
-                if args.len() != d.params + ctor.args.len() {
-                    return Err(format!(
-                        "constructor {c} needs {} arguments",
-                        d.params + ctor.args.len()
-                    ));
+                if args.len() != ctor.args.len() {
+                    return Err(format!("constructor {c} needs {} arguments", ctor.args.len()));
                 }
                 let args = args.iter().map(|a| self.term(a, names)).collect::<Result<Vec<_>>>()?;
                 data::apply(&ctor.symbol, args)

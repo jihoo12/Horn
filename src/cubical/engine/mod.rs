@@ -3,6 +3,9 @@
 //! derivations; nothing here is trusted. Each module is one construction.
 #![allow(dead_code, clippy::all)]
 
+/// Step bound for normalizing an expected type during checking.
+pub const FUEL_TYPES: usize = 10_000;
+
 pub mod term;
 pub mod data;
 pub mod canonical_code_frontend;

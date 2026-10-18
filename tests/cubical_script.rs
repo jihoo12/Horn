@@ -169,8 +169,8 @@ fn parameterized_lists_compute_and_move_along_ua() {
         shown,
         [
             "len = 2 : nat",
-            "mapped = (cons bool bfalse (cons bool btrue (nil bool))) : (list bool)",
-            "moved = (cons bool bfalse (cons bool bfalse (nil bool))) : (list bool)"
+            "mapped = (cons bfalse (cons btrue nil)) : (list bool)",
+            "moved = (cons bfalse (cons bfalse nil)) : (list bool)"
         ]
     );
     let theory = &script.certified.theory;
@@ -187,10 +187,12 @@ fn malformed_parameterized_declarations_fail() {
         "(data (list A) (nil) (cons A (list bool)))",
         "(data (list A) (nil) (cons B (list A)))",
         "(data (pair A A) (mk A A))",
-        // Parameters must be given.
+        // A bare nil has no type to read its parameter from.
         "(data (list A) (nil) (cons A (list A))) (eval x nil)",
-        "(data (list A) (nil) (cons A (list A))) (check x (nil) (list bool))",
-        "(data (list A) (nil) (cons A (list A))) (check x (cons bool btrue (nil nat)) (list bool))",
+        "(data (list A) (nil) (cons A (list A))) (check x (nil bool) (list bool))",
+        // Fields must agree with the expected parameter.
+        "(data (list A) (nil) (cons A (list A))) (check x (cons zero nil) (list bool))",
+        "(data (list A) (nil) (cons A (list A))) (check x (cons btrue (cons zero nil)) (list bool))",
     ] {
         assert!(cubical::script::run(bad).is_err(), "{bad}");
     }

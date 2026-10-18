@@ -75,14 +75,16 @@ reader sees exactly which rules a script introduced. Nothing about the
 declaration is built into the engine or the kernel.
 
 Type parameters are declared as `(data (list A) (nil) (cons A (list A)))`
-([list.hcs](../examples/cubical/script/list.hcs), about 8 s). Constructors and
-eliminators take the parameters first: `(cons bool btrue (nil bool))`,
+([list.hcs](../examples/cubical/script/list.hcs), about 8 s). Constructor
+terms do not carry the parameters, `(cons btrue nil)`: the engine reads them
+off a field at a parameter or, as for an unannotated lambda, off the expected
+type; a lone `nil` needs one. The eliminator takes them explicitly,
 `(elim list (bool) k P (METHODS...) x)`. Moving a list along `ua not` runs
 `not` on every element:
 
 ```text
-(eval moved (transport i (list (papp not-path i)) (cons bool btrue (cons bool btrue (nil bool)))))
-; moved = (cons bool bfalse (cons bool bfalse (nil bool))) : (list bool)
+(eval moved (transport i (list (papp not-path i)) (cons btrue (cons btrue nil))))
+; moved = (cons bfalse (cons bfalse nil)) : (list bool)
 ```
 
 Fields may be `bool`, `nat`, a parameter, earlier closed data types, or the
@@ -96,8 +98,8 @@ strict positivity is immediate. Composition rules depend on parameters:
   models of inductive families. Compositions with other faces have no rule
   and stay unevaluated; the transports that ua needs all use the empty face.
 
-The type, its constructors and its eliminator also get congruence rules,
-including conversion of parameters. Indices, function-typed fields and
+The type (in its parameters), its constructors and its eliminator also get
+congruence rules. Indices, function-typed fields and
 higher constructors are not supported.
 
 ## What this language is for

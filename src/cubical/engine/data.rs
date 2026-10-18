@@ -19,6 +19,9 @@
 //!   constructorwise, `transp (T A) (c a…) = c (transp A a)…`, which holds in
 //!   the standard models of inductive families. Other compositions in a
 //!   parameterized type are left without a rule.
+//!
+//! Constructor terms do not carry the parameters: they are read off the
+//! fields or the expected type, as for unannotated lambdas.
 use super::path_frontend::v;
 use super::term::{Sexp, atom, call};
 use std::cell::RefCell;
@@ -261,7 +264,7 @@ impl Data {
             let ty = self.field_ty(a, &params);
             p.has(f.clone(), ty);
         }
-        p.term = Tpl::app(&c.symbol, params.iter().cloned().chain(fields).collect());
+        p.term = Tpl::app(&c.symbol, fields);
         p.ty = self.type_tpl(params);
         p
     }
@@ -306,9 +309,8 @@ impl Data {
                 ihs.push(var(to));
             }
             let base = p.chain("p", 1, n + r);
-            let params_there = shifted(&mut p, n + r);
             let fields = (0..n).map(|k| Tpl::Ground(v(n - 1 - k + r)));
-            let applied = Tpl::app(&c.symbol, params_there.into_iter().chain(fields).collect());
+            let applied = Tpl::app(&c.symbol, fields.collect());
             let cod = p.var();
             p.prems.push(Prem::Subst { from: base, by: applied, to: cod.clone() });
             let mut ty = var(cod);
@@ -342,7 +344,7 @@ impl Data {
         let tm = |n: usize| vec!["Tm"; n].join(" ");
         let _ = writeln!(w, "(ctor {t} ({}) Tm)", tm(np));
         for c in &self.ctors {
-            let _ = writeln!(w, "(ctor {} ({}) Tm)", c.symbol, tm(np + c.args.len()));
+            let _ = writeln!(w, "(ctor {} ({}) Tm)", c.symbol, tm(c.args.len()));
         }
         let _ = writeln!(w, "(ctor {e} ({}) Tm)", tm(np + k + 2));
         // Structure: argumentwise, except the eliminator's motive binder.
@@ -384,7 +386,7 @@ impl Data {
         };
         structural(w, t, np, None);
         for c in &self.ctors {
-            structural(w, &c.symbol, np + c.args.len(), None);
+            structural(w, &c.symbol, c.args.len(), None);
         }
         structural(w, e, np + k + 2, Some(np));
         // Typing, from the shared plans.
@@ -404,7 +406,7 @@ impl Data {
             xs.push(extra.to_owned());
             format!("({e} {})", xs.join(" "))
         };
-        // Constructor congruence: equal parameters (as types) and fields.
+        // Type congruence (parameters as types), then constructor congruence.
         let params2: Vec<String> = (0..np).map(|j| format!("?C{j}")).collect();
         if np > 0 {
             let prems: Vec<String> = params
@@ -421,29 +423,27 @@ impl Data {
             );
         }
         for c in &self.ctors {
-            if c.args.is_empty() && np == 0 {
+            if c.args.is_empty() {
                 continue;
             }
             let a: Vec<String> = (0..c.args.len()).map(|j| format!("?a{j}")).collect();
             let b: Vec<String> = (0..c.args.len()).map(|j| format!("?b{j}")).collect();
-            let mut prems: Vec<String> = params
+            let prems: Vec<String> = a
                 .iter()
-                .zip(&params2)
-                .map(|(x, y)| format!("(req ?d ?g ?phi {x} {y} (u z))"))
+                .zip(&b)
+                .zip(&c.args)
+                .map(|((x, y), ty)| {
+                    format!("(req ?d ?g ?phi {x} {y} {})", self.field_ty(ty, &params_tpl).text())
+                })
                 .collect();
-            prems.extend(a.iter().zip(&b).zip(&c.args).map(|((x, y), ty)| {
-                format!("(req ?d ?g ?phi {x} {y} {})", self.field_ty(ty, &params_tpl).text())
-            }));
-            let lhs = format!("({} {})", c.symbol, params.iter().chain(&a).cloned().collect::<Vec<_>>().join(" "));
-            let rhs = format!("({} {})", c.symbol, params2.iter().chain(&b).cloned().collect::<Vec<_>>().join(" "));
+            let lhs = format!("({} {})", c.symbol, a.join(" "));
+            let rhs = format!("({} {})", c.symbol, b.join(" "));
             let _ = writeln!(w, "(rule req.{}-cong ({}) (req ?d ?g ?phi {lhs} {rhs} {ty_text}))", c.symbol, prems.join(" "));
         }
         // Computation: one rule per constructor.
         for (i, c) in self.ctors.iter().enumerate() {
             let a: Vec<String> = (0..c.args.len()).map(|j| format!("?a{j}")).collect();
-            let b: Vec<String> = (0..np).map(|j| format!("?B{j}")).collect();
-            let fields: Vec<String> = b.iter().chain(&a).cloned().collect();
-            let scrutinee = if fields.is_empty() { c.symbol.clone() } else { format!("({} {})", c.symbol, fields.join(" ")) };
+            let scrutinee = if a.is_empty() { c.symbol.clone() } else { format!("({} {})", c.symbol, a.join(" ")) };
             let mut rhs = format!("?m{i}");
             for x in &a {
                 rhs = format!("(app {rhs} {x})");
@@ -472,20 +472,19 @@ impl Data {
         } else {
             for c in &self.ctors {
                 let a: Vec<String> = (0..c.args.len()).map(|j| format!("?a{j}")).collect();
-                let b: Vec<String> = (0..np).map(|j| format!("?B{j}")).collect();
-                let base = format!("({} {})", c.symbol, b.iter().chain(&a).cloned().collect::<Vec<_>>().join(" "));
-                let lhs = format!("(comp {ty_text} ff ?t {base})");
-                let ends: Vec<String> = (0..np).map(|j| format!("?E{j}")).collect();
-                let mut parts = ends.clone();
-                for (x, ty) in a.iter().zip(&c.args) {
-                    let line = self.field_ty(ty, &params_tpl).text();
-                    parts.push(format!("(comp {line} ff zero {x})"));
-                }
-                let rhs = format!("({} {})", c.symbol, parts.join(" "));
-                let ends_prems: String = (0..np).map(|j| format!(" (dsubst ?A{j} z i1 ?E{j})")).collect();
+                let wrap = |xs: &[String]| {
+                    if xs.is_empty() { c.symbol.clone() } else { format!("({} {})", c.symbol, xs.join(" ")) }
+                };
+                let lhs = format!("(comp {ty_text} ff ?t {})", wrap(&a));
+                let parts: Vec<String> = a
+                    .iter()
+                    .zip(&c.args)
+                    .map(|(x, ty)| format!("(comp {} ff zero {x})", self.field_ty(ty, &params_tpl).text()))
+                    .collect();
+                let rhs = wrap(&parts);
                 let _ = writeln!(
                     w,
-                    "(rule req.comp-{t}.{} ((rhas ?d ?g ?psi {lhs} ?out){ends_prems} (rhas ?d ?g ?psi {rhs} ?out)) (req ?d ?g ?psi {lhs} {rhs} ?out))",
+                    "(rule req.comp-{t}.{} ((rhas ?d ?g ?psi {lhs} ?out) (rhas ?d ?g ?psi {rhs} ?out)) (req ?d ?g ?psi {lhs} {rhs} ?out))",
                     c.symbol
                 );
             }

@@ -95,15 +95,22 @@ impl RestrictedProducer {
             (data.formation_plan(), format!("rhas.{}", data.ty))
         } else if let Some((data, i)) = data::by_ctor(head) {
             let c = &data.ctors[i];
-            if args.len() != data.params + c.args.len() {
-                return Err(format!(
-                    "constructor {} expects {} arguments",
-                    c.name,
-                    data.params + c.args.len()
-                ));
+            if args.len() != c.args.len() {
+                return Err(format!("constructor {} expects {} fields", c.name, c.args.len()));
             }
-            bind_params(&mut env, &data);
-            for (k, a) in args[data.params..].iter().enumerate() {
+            // Parameters come from the types of fields at a parameter.
+            for (a, arg_ty) in args.iter().zip(&c.args) {
+                if let data::ArgTy::Param(j) = arg_ty
+                    && !env.contains_key(&format!("A{j}"))
+                {
+                    let (ty, _) = self.infer(d, g, phi, a)?;
+                    env.insert(format!("A{j}"), ty);
+                }
+            }
+            if (0..data.params).any(|j| !env.contains_key(&format!("A{j}"))) {
+                return Err(format!("constructor {} needs an expected type", c.name));
+            }
+            for (k, a) in args.iter().enumerate() {
                 env.insert(format!("a{k}"), a.clone());
             }
             (data.ctor_plan(i), format!("rhas.{}", c.symbol))
@@ -125,6 +132,50 @@ impl RestrictedProducer {
         };
         let refs = self.run_plan(d, g, phi, &plan, &mut env)?;
         Ok(Some((inst(&plan.ty, &env)?, rule, refs)))
+    }
+
+    /// Check a constructor of a parameterized type against an expected type,
+    /// whose weak-head normal form supplies the parameters.
+    pub(super) fn check_declared(
+        &mut self,
+        d: usize,
+        g: &Sexp,
+        phi: &Face,
+        t: &Sexp,
+        expected: &Sexp,
+    ) -> Result<Option<usize>> {
+        let (head, args) = shape(t)?;
+        let Some((data, i)) = data::by_ctor(head) else {
+            return Ok(None);
+        };
+        if data.params == 0 {
+            return Ok(None);
+        }
+        let target = if shape(expected)?.0 == data.ty {
+            expected.clone()
+        } else {
+            let (universe, _) = self.infer(d, g, phi, expected)?;
+            self.whnf(d, g, phi, expected, &universe, super::super::FUEL_TYPES)?.0
+        };
+        let (th, params) = shape(&target)?;
+        if th != data.ty {
+            return Err(format!("constructor {} checked against {expected}", data.ctors[i].name));
+        }
+        let c = &data.ctors[i];
+        if args.len() != c.args.len() {
+            return Err(format!("constructor {} expects {} fields", c.name, c.args.len()));
+        }
+        let mut env = HashMap::new();
+        for (j, a) in params.iter().enumerate() {
+            env.insert(format!("A{j}"), a.clone());
+        }
+        for (k, a) in args.iter().enumerate() {
+            env.insert(format!("a{k}"), a.clone());
+        }
+        let plan = data.ctor_plan(i);
+        let refs = self.run_plan(d, g, phi, &plan, &mut env)?;
+        let id = self.has(d, g, phi, t, &target, &format!("rhas.{}", c.symbol), refs);
+        Ok(Some(self.retype_has(d, g, phi, t, &target, expected, id)?))
     }
 
     /// One computation or congruence step of a declared eliminator.
@@ -150,7 +201,7 @@ impl RestrictedProducer {
             && owner.elim == data.elim
         {
             let c = &data.ctors[i];
-            let fields = &xargs[np.min(xargs.len())..];
+            let fields = xargs;
             let mut out = methods[i].clone();
             for a in fields {
                 out = call("app", [out, a.clone()]);
@@ -218,12 +269,7 @@ impl RestrictedProducer {
         let c = &data.ctors[i];
         let mut refs = vec![self.check(d, g, psi, t, ty)?];
         let mut parts = Vec::new();
-        for a in params {
-            let (end, id) = self.f.path.transform(a, &Op::DSubst(0, atom("i1")))?;
-            refs.push(id);
-            parts.push(end);
-        }
-        for (a, arg_ty) in bargs[data.params..].iter().zip(&c.args) {
+        for (a, arg_ty) in bargs.iter().zip(&c.args) {
             let line = data.field_type(arg_ty, params);
             parts.push(call("comp", [line, atom("ff"), atom("zero"), a.clone()]));
         }
@@ -260,19 +306,18 @@ impl RestrictedProducer {
             return Ok(Some(self.retype_eq(d, g, phi, a, b, &u(0), ty, eq)?));
         }
         if let Some((data, i)) = data::by_ctor(ah) {
-            let (np, c) = (data.params, &data.ctors[i]);
-            if c.args.is_empty() && np == 0 {
+            let c = &data.ctors[i];
+            // The parameters come from the type the equation is stated at.
+            let (th, params) = shape(ty)?;
+            if c.args.is_empty() || th != data.ty {
                 return Ok(None);
             }
             let mut refs = Vec::new();
-            for (x, y) in ax[..np].iter().zip(&bx[..np]) {
-                refs.push(self.equality(d, g, phi, x, y, &u(0))?);
-            }
-            for ((x, y), arg_ty) in ax[np..].iter().zip(&bx[np..]).zip(&c.args) {
-                let field_ty = data.field_type(arg_ty, &ax[..np]);
+            for ((x, y), arg_ty) in ax.iter().zip(bx).zip(&c.args) {
+                let field_ty = data.field_type(arg_ty, params);
                 refs.push(self.equality(d, g, phi, x, y, &field_ty)?);
             }
-            let dty = data::apply(&data.ty, ax[..np].to_vec());
+            let dty = ty.clone();
             let eq = self.eq(d, g, phi, a, b, &dty, &format!("req.{}-cong", c.symbol), refs);
             return Ok(Some(self.retype_eq(d, g, phi, a, b, &dty, ty, eq)?));
         }
@@ -323,26 +368,17 @@ impl RestrictedProducer {
             let eq = self.retype_eq(d, g, phi, w, &out, &u(0), ty, eq)?;
             return Ok(Some((out, eq)));
         }
-        let Some(_) = data::by_type(shape(ty)?.0) else {
-            return Ok(None);
-        };
+        let (th, params) = shape(ty)?;
         let Some((data, i)) = data::by_ctor(head) else {
             return Ok(None);
         };
-        let (np, c) = (data.params, &data.ctors[i]);
-        if c.args.is_empty() && np == 0 {
+        let c = &data.ctors[i];
+        if c.args.is_empty() || th != data.ty {
             return Ok(None);
         }
-        // Parameters are types; normalize them too, for readable values.
         let (mut out, mut refs, mut changed) = (Vec::new(), Vec::new(), false);
-        for a in &args[..np] {
-            let (av, ea) = self.whnf(d, g, phi, a, &u(0), fuel)?;
-            changed |= av != *a;
-            out.push(av);
-            refs.push(ea);
-        }
-        for (a, arg_ty) in args[np..].iter().zip(&c.args) {
-            let field_ty = data.field_type(arg_ty, &args[..np]);
+        for (a, arg_ty) in args.iter().zip(&c.args) {
+            let field_ty = data.field_type(arg_ty, params);
             let (av, ea) = self.value(d, g, phi, a, &field_ty, fuel)?;
             changed |= av != *a;
             out.push(av);
@@ -352,9 +388,7 @@ impl RestrictedProducer {
             return Ok(None);
         }
         let out = call(head, out);
-        let dty = data::apply(&data.ty, args[..np].to_vec());
-        let eq = self.eq(d, g, phi, w, &out, &dty, &format!("req.{}-cong", c.symbol), refs);
-        let eq = self.retype_eq(d, g, phi, w, &out, &dty, ty, eq)?;
+        let eq = self.eq(d, g, phi, w, &out, ty, &format!("req.{}-cong", c.symbol), refs);
         Ok(Some((out, eq)))
     }
 }
