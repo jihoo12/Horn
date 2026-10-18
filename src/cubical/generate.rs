@@ -41,6 +41,16 @@ pub fn certify<T: Send>(
                     .iter()
                     .map(|(name, id)| format!("(goal {name} {})\n", steps.judgment(*id)))
                     .collect();
+                // Debugging aid: also write the compact certificate to a file.
+                if let Ok(path) = std::env::var("HORN_DUMP_PROOF") {
+                    let file = std::fs::File::create(&path).map_err(|e| format!("{path}: {e}"))?;
+                    let mut file = BufWriter::new(file);
+                    steps
+                        .write_reachable(&mut file)
+                        .and_then(|_| file.flush())
+                        .map_err(|e| e.to_string())?;
+                    std::fs::write(format!("{path}.goals"), &goals).map_err(|e| e.to_string())?;
+                }
                 let (reader, writer) = std::io::pipe().map_err(|e| e.to_string())?;
                 let oracle = std::thread::scope(|inner| -> Result<Vec<u8>> {
                     let encoder = inner.spawn(|| {
@@ -53,8 +63,10 @@ pub fn certify<T: Send>(
                         .map_err(|e| e.to_string());
                     drop(writer);
                     let encoded = encoder.join().map_err(|_| "encoder panicked")?;
+                    // An encoder failure closes the pipe; report its cause.
+                    let encoded = encoded?;
                     written?;
-                    Ok(encoded?.0)
+                    Ok(encoded.0)
                 })?;
                 Ok((goals, oracle, extra))
             })

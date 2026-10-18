@@ -94,3 +94,19 @@ fn natural_number_programs_evaluate_and_induction_checks() {
         assert!(cubical::script::run(&format!("{add}\n{bad}")).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn a_function_transported_along_ua_computes() {
+    let script =
+        cubical::script::run(include_str!("../examples/cubical/script/function.hcs")).unwrap();
+    let shown: Vec<_> = script
+        .evaluations
+        .iter()
+        .map(|e| format!("{} = {} : {}", e.name, e.value, e.ty))
+        .collect();
+    // not conjugated by not is not again.
+    assert_eq!(
+        shown,
+        ["moved-true = bfalse : bool", "moved-false = btrue : bool"]
+    );
+}

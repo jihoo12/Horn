@@ -46,6 +46,12 @@ programs by recursion and proofs by induction, in 0.1 s:
       n)))
 ```
 
+Functions move along ua too ([function.hcs](../examples/cubical/script/function.hcs),
+about 22 s): transporting `not` along the line `i ↦ (ua not i → ua not i)`
+gives a function that maps `btrue` to `bfalse` and `bfalse` to `btrue`, as
+conjugating `not` by `not` should. This goes through composition in Pi types,
+then Glue, then bool.
+
 ## Forms
 
 - `(def NAME TYPE TERM)`: a closed, transparent definition. Its typing is a goal.

@@ -1301,19 +1301,22 @@ impl RestrictedProducer {
             && let ("pair", [a, b]) = shape(pair)?
         {
             let (pty, pi) = self.infer(d, g, phi, pair)?;
-            let ("sigma", [_, cod]) = shape(&pty)? else {
+            let ("sigma", [dom, cod]) = shape(&pty)? else {
                 return Err("projection expects Sigma".into());
             };
             let out = if head == "fst" { a } else { b };
-            let oi = self.check(d, g, phi, out, &ty)?;
-            let refs = if head == "fst" {
-                vec![pi, oi]
+            // The rules state the projection at the Sigma's own component
+            // type; the caller's type is reached by conversion afterwards.
+            let (rule_ty, refs) = if head == "fst" {
+                let oi = self.check(d, g, phi, out, dom)?;
+                (dom.clone(), vec![pi, oi])
             } else {
-                let (_, si) = self
+                let (bt, si) = self
                     .f
                     .path
                     .transform(cod, &Op::Subst(0, call("fst", [pair.clone()])))?;
-                vec![pi, si, oi]
+                let oi = self.check(d, g, phi, out, &bt)?;
+                (bt, vec![pi, si, oi])
             };
             let eq = self.eq(
                 d,
@@ -1321,7 +1324,7 @@ impl RestrictedProducer {
                 phi,
                 t,
                 out,
-                &ty,
+                &rule_ty,
                 if head == "fst" {
                     "req.fst-beta"
                 } else {
@@ -1329,6 +1332,7 @@ impl RestrictedProducer {
                 },
                 refs,
             );
+            let eq = self.retype_eq(d, g, phi, t, out, &rule_ty, &ty, eq)?;
             return Ok((out.clone(), ty, eq));
         }
         if let ("papp", [p, r]) = shape(t)? {
