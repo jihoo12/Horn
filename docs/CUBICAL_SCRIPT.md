@@ -195,7 +195,10 @@ axiom, and neither adds a rule.
 ## Trust
 
 The elaborator, the engine's search and the oracle encoder are untrusted.
-Acceptance means the fixed goals are derivable from the bundled rules,
+Scripts are checked against the core theory (366 rules: the bundled theory
+without its unrestricted judgment layer and one subsumed rule; see
+[TRUST.md](TRUST.md)) plus the rules of their data declarations. Acceptance
+means the fixed goals are derivable from those rules,
 including [bool.horn](../theories/cubical/bool.horn). The rules' adequacy for
 cubical type theory is still a separate obligation; see [CUBICAL.md](CUBICAL.md).
 

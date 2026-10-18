@@ -576,7 +576,7 @@ fn show(s: &Sexp) -> String {
 pub fn run(source: &str) -> Result<Script> {
     let source = source.to_owned();
     // Terms are interned per thread, so parsing happens on the worker.
-    let (certified, evaluations) = certify(move || {
+    let (certified, evaluations) = certify(super::core_theory(), move || {
         let forms = parse(&source)?;
         data::clear();
         let mut appended = String::new();
@@ -618,7 +618,7 @@ pub fn run(source: &str) -> Result<Script> {
                     // The statement for every level, with L an eigenvariable.
                     let (tl, tyl) = e.instance(&param, atom("L"), ty, t)?;
                     let expected = call("rhas", [atom("z"), nil.clone(), atom("ft"), tl, tyl]);
-                    let theory = super::theory() + &appended;
+                    let theory = super::core_theory() + &appended;
                     polymorphic.push(
                         generalize_definition(&name, &t0, &ty0, &expected, &theory)
                             .map_err(|err| format!("def-poly {name}: {err}"))?,

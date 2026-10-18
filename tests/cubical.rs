@@ -128,3 +128,26 @@ fn the_cli_exports_independently_checkable_data_without_overwriting() {
             .success()
     );
 }
+
+#[test]
+fn the_core_theory_drops_the_unrestricted_layer_and_subsumed_rules() {
+    let core = cubical::core_theory();
+    let full = cubical::theory();
+    let count = |t: &str| cubical::generate::rule_count(t);
+    assert_eq!((count(&full), count(&core)), (396, 366));
+    for form in horn::sexp::parse(&core).unwrap() {
+        let text = form.to_string();
+        for p in cubical::UNRESTRICTED {
+            assert!(!text.contains(&format!("({p} ")), "{text}");
+        }
+    }
+    assert!(!core.contains("(rule req.comp-nat-zero "));
+    assert!(core.contains("(rule req.comp-nat "));
+    // The core theory is a subset of the bundled one, rule by rule.
+    let full_forms: std::collections::HashSet<String> =
+        horn::sexp::parse(&full).unwrap().iter().map(|f| f.to_string()).collect();
+    for form in horn::sexp::parse(&core).unwrap() {
+        assert!(full_forms.contains(&form.to_string()), "{form}");
+    }
+    horn::kernel::Theory::parse(&core).unwrap();
+}

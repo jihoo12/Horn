@@ -34,6 +34,7 @@ pub struct Regenerated {
 /// returns theory text to append to the bundled theory (generated data
 /// declarations); the certificate is checked against the combined theory.
 pub fn certify<T: Send>(
+    base: String,
     produce: impl FnOnce() -> Result<(RestrictedProducer, T, String)> + Send,
 ) -> Result<(Regenerated, T)> {
     let (goals, oracle, extra, theory) = std::thread::scope(|scope| {
@@ -41,7 +42,7 @@ pub fn certify<T: Send>(
             .stack_size(STACK_BYTES)
             .spawn_scoped(scope, || -> Result<(String, Vec<u8>, T, String)> {
                 let (p, extra, appended) = produce()?;
-                let theory = super::theory() + &appended;
+                let theory = base.clone() + &appended;
                 let steps = &p.f.path.p;
                 let goals: String = steps
                     .results()
@@ -128,5 +129,5 @@ pub fn regenerate(name: &str) -> Result<Regenerated> {
         .find(|(n, _)| *n == name)
         .ok_or_else(|| format!("no generator for cubical example {name}"))?;
     let produce = *produce;
-    Ok(certify(|| Ok((produce()?, (), String::new())))?.0)
+    Ok(certify(super::theory(), || Ok((produce()?, (), String::new())))?.0)
 }

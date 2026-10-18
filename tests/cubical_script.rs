@@ -37,12 +37,12 @@ fn evaluation_is_certified_and_reported() {
     );
     let c = &script.certified;
     assert_eq!(c.checked.goals, 6);
-    oracle::check(&cubical::theory(), &c.goals, &c.oracle).unwrap();
+    oracle::check(&c.theory, &c.goals, &c.oracle).unwrap();
     // The goal states the computed value; another value is rejected.
     let forged = c.goals.replace("(app (ann (lam (bif bool bfalse btrue (v z))) (pi bool bool)) btrue) bfalse bool)",
         "(app (ann (lam (bif bool bfalse btrue (v z))) (pi bool bool)) btrue) btrue bool)");
     assert_ne!(forged, c.goals);
-    assert!(oracle::check(&cubical::theory(), &forged, &c.oracle).is_err());
+    assert!(oracle::check(&c.theory, &forged, &c.oracle).is_err());
 }
 
 #[test]
