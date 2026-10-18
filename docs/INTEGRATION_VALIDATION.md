@@ -99,3 +99,42 @@ root reduction and syntactic type matching, not general conversion or the
 final named-binder surface syntax. Face/composition/Glue/univalence generation,
 the semantic soundness of the theory and source elaboration correctness remain
 separate obligations. This does not claim to fix kamo3's large-producer OOM.
+
+## Named binders and certified type conversion
+
+Validated 2026-10-18 (Asia/Seoul) in the same pinned development environment.
+
+- `cargo test --release --locked --offline`: **81 passed, 0 failed**.
+- Formatting and `cargo clippy --locked --offline --all-targets -- -D warnings`
+  passed.
+- Named and explicitly indexed forms produce exactly the same fixed goals
+  and evidence. Tests cover local shadowing, anonymous/named binder mixing,
+  independent namespaces, binding-site context dependencies, duplicate scope
+  names and out-of-scope references.
+- Type-conversion tests independently replay explicit `type.conv` evidence
+  for reducible expected/inferred types and function/path/universe heads.
+  They reject corrupted goals, removed conversion steps, false types,
+  universe cumulativity and unsupported equality transport. Both annotated
+  operands are checked even when their erased terms are identical.
+- No checker, object-theory, Agda model, dependency or flake pin changes were
+  needed. This remains untrusted generation of evidence for the existing rules.
+
+Actual release CLI runs and independent replay:
+
+```text
+horn cubical run examples/cubical/source/named.hcu
+ACCEPT (generated cubical): 6 goals, 148 proof steps
+
+horn cubical run examples/cubical/source/conversion.hcu --emit NEW_DIR
+ACCEPT (generated cubical): 9 goals, 234 proof steps
+
+kernel NEW_DIR/theory.horn NEW_DIR/goals NEW_DIR/proof
+ACCEPT: 9 goals, 234 proof steps, 19677 bytes, 286 distinct terms
+```
+
+Conversion is bounded root beta/path computation in a common universe, not
+full normalization under binders/constructors. The path fragment has no general
+`eq.conv`; non-reflexive reductions whose equality type would need transport
+are reported as unsupported before an invalid transitivity step is emitted.
+Nested conversion obligations are bounded at 32. Source/semantic soundness and
+the later face/system/composition/Glue migration remain separate work.

@@ -52,18 +52,21 @@ reads an explicit annotated core source file, fixes its requested judgments,
 generates new evidence and asks the ground kernel to check it. Exported data
 can be replayed independently. See [CUBICAL_PRODUCER.md](CUBICAL_PRODUCER.md).
 
-This is a new generation route, not just frozen replay. It is still bounded,
-uses de Bruijn indices rather than a named-binder surface syntax, and requires
-syntactically matching types. New face/composition/Glue/univalence producers,
-general conversion and connection to the `.hn` programming frontend remain
-open. The theories, ground/schematic checkers and Agda models are unchanged.
+The prefix core source now accepts named ordinary/dimension binders and named
+contexts, elaborating them to the same de Bruijn core. Bounded root beta/path
+type conversion emits explicit equality and `type.conv` evidence; reducible
+function/path/universe heads are exposed with checked typing transport.
+General congruence, equality transport across converted types, fresh
+face/composition/Glue/univalence producers and connection to the `.hn`
+programming frontend remain open. The theories, ground/schematic checkers and Agda models are unchanged.
 
 ## Following increments
 
 1. Move cubical certificate producers behind a Horn-owned library API, one
    feature at a time. The bounded contexts/universes/functions/substitution/path
    generator is implemented; continue with faces, systems, composition, Glue
-   and ua after strengthening conversion and source elaboration.
+   and ua. Named binders and bounded root conversion are implemented; stronger
+   conversion still requires explicit congruence/equality-transport evidence.
    Keep imported snapshot replay as an independent migration oracle. Do not
    copy the entire research frontend without checking its assumptions.
 2. Add source modules/imports, dependent binders and diagnostics; elaborate

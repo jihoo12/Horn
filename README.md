@@ -20,8 +20,9 @@ execution, not yet Lean's dependent, total-function language.
 judgmental ua-transport certificates, with no kamo3 checkout. Their cubical
 rules are explicit theory data; the generic kernel has no new primitives.
 Fresh dependent-function and path proofs can also be generated from explicit
-core files with `horn cubical run examples/cubical/source/basics.hcu`; see the
-[producer guide](docs/CUBICAL_PRODUCER.md). Glue and univalence are currently
+core files. Try `horn cubical run examples/cubical/source/named.hcu` for named
+binders, and `conversion.hcu` in the same directory for certified root type
+conversion; see the [producer guide](docs/CUBICAL_PRODUCER.md). Glue and univalence are currently
 available through bundled replay, while their fresh producers remain future work. See [CUBICAL.md](docs/CUBICAL.md) and the staged
 [integration plan](docs/INTEGRATION.md).
 
