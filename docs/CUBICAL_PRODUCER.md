@@ -5,6 +5,47 @@ It does not load the frozen univalence oracles or use kamo3 at runtime. It
 uses only the existing `theories/cubical/path.horn` fragment, an explicit
 subset of the full cubical package, and changes no rules or kernel code.
 
+
+## Core source files
+
+```sh
+cargo run --release --locked --offline --bin horn -- cubical run examples/cubical/source/basics.hcu
+cargo run --release --locked --offline --bin horn -- cubical run examples/cubical/source/binders.hcu --emit /tmp/horn-fresh
+cargo run --release --locked --offline --bin kernel -- /tmp/horn-fresh/theory.horn /tmp/horn-fresh/goals /tmp/horn-fresh/proof
+```
+
+`--emit` requires a new directory and writes only after successful generation
+and kernel checking. Exported data can be replayed independently. The generated
+certificate contains ordinary steps, not a reference to a frozen demonstration.
+
+```text
+(check identity (lam nat (v 0)) (pi nat nat))
+(equal beta (app (lam nat (v 0)) zero) zero nat)
+(check constant-path (plam nat zero) (path nat zero zero))
+(equal path-beta (scope 1 ()) (papp (plam nat zero) (dim 0)) zero nat)
+```
+
+Assertions are `(check NAME [SCOPE] TERM TYPE)` and
+`(equal NAME [SCOPE] LEFT RIGHT TYPE)`. The optional scope is
+`(scope DIMENSIONS (CONTEXT-TYPES...))`; its default is `(scope 0 ())`.
+Each name must be unique. Contexts are oldest first. `;` begins a comment.
+Levels and indices are written as decimal naturals and elaborated to the
+existing unary object syntax. `v 0` denotes the latest ordinary binder and
+`dim 0` the latest dimension binder. Explicit annotations make the core small:
+`(lam DOMAIN BODY)` binds an ordinary variable, `(pi DOMAIN CODOMAIN)` binds
+one in its codomain, `(plam FAMILY BODY)` binds a dimension in both family and
+body, and `(path FAMILY LEFT RIGHT)` binds a dimension in its family only.
+`(papp PATH INTERVAL)` applies a path. Intervals are `i0`, `i1`, `(dim N)`,
+`(neg R)`, `(meet R S)` and `(join R S)`.
+
+This is an explicit core input format, not the final named-binder surface
+language. Source files cannot declare rules, axioms or theories. The `.hn`
+programming frontend and `.hcu` cubical frontend are not yet one source language.
+The source-to-core translation has no formal correctness proof; generic checking
+establishes the fixed elaborated judgments relative to the selected rules.
+
+## Producer API and supported reasoning
+
 The annotated `Term` API supports universes, variables, Nat/zero, dependent
 products, annotated lambdas, application, dependent paths, annotated path
 lambdas and path application. Lambda domain and path-lambda family annotations

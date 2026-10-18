@@ -3,6 +3,7 @@
 
 pub mod ast;
 pub mod producer;
+pub mod source;
 
 /// Order matters: later fragments use declarations from earlier fragments.
 pub const FRAGMENTS: &[(&str, &str)] = &[

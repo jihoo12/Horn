@@ -1,0 +1,16 @@
+; Fresh assertions, with no rules or certificate snapshots in this file.
+(check nat-is-type nat (u 0))
+(check universe-hierarchy (u 1) (u 2))
+(check identity (lam nat (v 0)) (pi nat nat))
+(check polymorphic-identity
+  (lam (u 0) (lam (v 0) (v 0)))
+  (pi (u 0) (pi (v 0) (v 1))))
+(check applied-polymorphic-identity
+  (app (app (lam (u 0) (lam (v 0) (v 0))) nat) zero)
+  nat)
+(equal identity-beta (app (lam nat (v 0)) zero) zero nat)
+(check constant-path (plam nat zero) (path nat zero zero))
+(equal path-beta (scope 1 ())
+  (papp (plam nat zero) (dim 0)) zero nat)
+(equal open-path-endpoint (scope 0 ((path nat zero zero)))
+  (papp (v 0) i1) zero nat)

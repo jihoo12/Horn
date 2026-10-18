@@ -48,7 +48,7 @@ fn run() -> Result<(), String> {
 }
 
 fn run_cubical(args: &[String]) -> Result<(), String> {
-    let usage = "usage: horn cubical list\n       horn cubical check NAME|all\n       horn cubical export NAME DIR";
+    let usage = "usage: horn cubical list\n       horn cubical check NAME|all\n       horn cubical export NAME DIR\n       horn cubical run FILE [--emit NEW_DIR]";
     let args: Vec<_> = args.iter().map(String::as_str).collect();
     if args == ["list"] {
         for example in cubical::EXAMPLES {
@@ -57,6 +57,26 @@ fn run_cubical(args: &[String]) -> Result<(), String> {
         return Ok(());
     }
     match args.as_slice() {
+        ["run", path] | ["run", path, "--emit", _] => {
+            let source = fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+            let generated = cubical::source::run(&source).map_err(|e| format!("{path}: {e}"))?;
+            if let [_, _, _, dir] = args.as_slice() {
+                fs::create_dir(dir)
+                    .map_err(|e| format!("cannot create new directory {dir}: {e}"))?;
+                let dir = std::path::Path::new(dir);
+                for (name, contents) in [
+                    ("theory.horn", cubical::producer::THEORY),
+                    ("goals", generated.goals.as_str()),
+                    ("proof", generated.proof.as_str()),
+                ] {
+                    fs::write(dir.join(name), contents).map_err(|e| e.to_string())?;
+                }
+            }
+            println!(
+                "ACCEPT (generated cubical): {} goals, {} proof steps",
+                generated.checked.goals, generated.checked.steps
+            );
+        }
         ["check", name] => {
             let selected: Vec<_> = cubical::EXAMPLES
                 .iter()

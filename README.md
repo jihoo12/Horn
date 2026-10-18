@@ -19,8 +19,10 @@ execution, not yet Lean's dependent, total-function language.
 `horn cubical check all` independently checks bundled deep U0 univalence and
 judgmental ua-transport certificates, with no kamo3 checkout. Their cubical
 rules are explicit theory data; the generic kernel has no new primitives.
-This migrates replay of real research results, not yet the construction of new
-cubical source proofs. See [CUBICAL.md](docs/CUBICAL.md) and the staged
+Fresh dependent-function and path proofs can also be generated from explicit
+core files with `horn cubical run examples/cubical/source/basics.hcu`; see the
+[producer guide](docs/CUBICAL_PRODUCER.md). Glue and univalence are currently
+available through bundled replay, while their fresh producers remain future work. See [CUBICAL.md](docs/CUBICAL.md) and the staged
 [integration plan](docs/INTEGRATION.md).
 
 ## What 0.3 adds: oracle certificates

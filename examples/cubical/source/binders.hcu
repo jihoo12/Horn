@@ -1,0 +1,17 @@
+; Context entries are oldest first, written at their binding site.
+; Ordinary variables and dimensions use separate de Bruijn indices.
+(equal ordinary-capture (scope 0 (nat))
+  (app (lam nat (lam nat (v 1))) (v 0))
+  (lam nat (v 1))
+  (pi nat nat))
+
+; Substitution of p @ i across <j> must lift the free dimension i.
+(equal mixed-binders (scope 1 ((path nat zero zero)))
+  (app (lam nat (plam nat (v 0))) (papp (v 0) (dim 0)))
+  (plam nat (papp (v 0) (dim 1)))
+  (path nat (papp (v 0) (dim 0)) (papp (v 0) (dim 0))))
+
+; A dependent context itself must be lifted under a path binder.
+(check dependent-context (scope 1 ((path (u 0) nat nat) (papp (v 0) (dim 0))))
+  (plam (papp (v 1) (dim 1)) (v 0))
+  (path (papp (v 1) (dim 1)) (v 0) (v 0)))
