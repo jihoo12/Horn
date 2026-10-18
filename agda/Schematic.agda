@@ -145,6 +145,18 @@ concat : {A : Set} → List (List A) → List A
 concat []         = []
 concat (xs ∷ xss) = xs ++ concat xss
 
+-- A stream of naturals, the compact form of an exported certificate. It
+-- has no implicit arguments, so Agda elaborates long literals quickly.
+data Code : Set where
+  ε   : Code
+  _▸_ : ℕ → Code → Code
+infixr 5 _▸_
+
+_⊕_ : Code → Code → Code
+ε       ⊕ d = d
+(n ▸ c) ⊕ d = n ▸ (c ⊕ d)
+infixr 4 _⊕_
+
 data All {A : Set} (P : A → Set) : List A → Set where
   []  : All P []
   _∷_ : {x : A} {xs : List A} → P x → All P xs → All P (x ∷ xs)
@@ -1532,6 +1544,92 @@ module Calculus (Sg : Signature) (R : List Rule) where
     accepts-sound goals forms results e with bind-inv (checkSteps leaf 0 forms) _ e
     ... | fs , e₁ , e₂ =
           all-map closed (goals-ok fs (allT-map fst (steps-ok leaf leaf 0 forms e₁)) goals results e₂)
+
+    --------------------------------------------------------------------
+    -- Decoding compact certificates. Nothing here needs to be trusted:
+    -- whatever certificate decoding yields, `accepts` still has to accept
+    -- it for the stated goals.
+    --
+    --   CODE  = N ENTRY^N  M FORM^M  K REF^K
+    --   ENTRY = 0 x | 1 f k TERM^k        (TERM: index of an earlier entry)
+    --   FORM  = 0 TERM | 1 r n REF^n b (y TERM)^b STATED | 2 X TERM k CASE^k
+    --   REF   = 0 n | 1 n b (x TERM)^b ;  STATED = 0 | 1 TERM ;  CASE = m k y^k
+
+    Parser : Set → Set
+    Parser A = Code → Maybe (A × Code)
+
+    pureₚ : {A : Set} → A → Parser A
+    pureₚ a c = just (a , c)
+
+    _>>=ₚ_ : {A B : Set} → Parser A → (A → Parser B) → Parser B
+    (p >>=ₚ f) c = p c >>= λ r → f (fst r) (snd r)
+    infixl 1 _>>=ₚ_
+
+    liftₚ : {A : Set} → Maybe A → Parser A
+    liftₚ nothing  c = nothing
+    liftₚ (just a) c = just (a , c)
+
+    num : Parser ℕ
+    num ε       = nothing
+    num (n ▸ c) = just (n , c)
+
+    many : {A : Set} → ℕ → Parser A → Parser (List A)
+    many zero    p = pureₚ []
+    many (suc k) p = p >>=ₚ λ a → many k p >>=ₚ λ as → pureₚ (a ∷ as)
+
+    Table : Set
+    Table = Tree Tm
+
+    tm : Table → Parser Tm
+    tm T = num >>=ₚ λ i → liftₚ (lookupT T i)
+
+    entry : Table → ℕ → Parser Tm
+    entry T zero    = num >>=ₚ λ x → pureₚ (var x)
+    entry T (suc _) = num >>=ₚ λ f → num >>=ₚ λ k → many k (tm T) >>=ₚ λ ts → pureₚ (node f ts)
+
+    table : ℕ → ℕ → Table → Parser Table
+    table zero    i T = pureₚ T
+    table (suc n) i T = num >>=ₚ entry T >>=ₚ λ t → table n (suc i) (insertT T i t)
+
+    binding : Table → Parser (ℕ × Tm)
+    binding T = num >>=ₚ λ x → tm T >>=ₚ λ t → pureₚ (x , t)
+
+    refTag : Table → ℕ → Parser Ref
+    refTag T zero    = num >>=ₚ λ n → pureₚ (ref n)
+    refTag T (suc _) = num >>=ₚ λ n → num >>=ₚ λ b → many b (binding T) >>=ₚ λ bs → pureₚ (at n bs)
+
+    refP : Table → Parser Ref
+    refP T = num >>=ₚ refTag T
+
+    statedTag : Table → ℕ → Parser (Maybe Tm)
+    statedTag T zero    = pureₚ nothing
+    statedTag T (suc _) = tm T >>=ₚ λ j → pureₚ (just j)
+
+    caseP : Parser (ℕ × List ℕ)
+    caseP = num >>=ₚ λ m → num >>=ₚ λ k → many k num >>=ₚ λ ys → pureₚ (m , ys)
+
+    formTag : Table → ℕ → Parser Form
+    formTag T zero          = tm T >>=ₚ λ j → pureₚ (hypF j)
+    formTag T (suc zero)    =
+      num >>=ₚ λ r → num >>=ₚ λ n → many n (refP T) >>=ₚ λ refs →
+      num >>=ₚ λ b → many b (binding T) >>=ₚ λ bs →
+      num >>=ₚ statedTag T >>=ₚ λ st → pureₚ (ruleF r refs bs st)
+    formTag T (suc (suc _)) =
+      num >>=ₚ λ X → tm T >>=ₚ λ J → num >>=ₚ λ k → many k caseP >>=ₚ λ cs → pureₚ (inductF X J cs)
+
+    certificateP : Parser (List Form × List Ref)
+    certificateP =
+      num >>=ₚ λ n → table n 0 leaf >>=ₚ λ T →
+      num >>=ₚ λ m → many m (num >>=ₚ formTag T) >>=ₚ λ forms →
+      num >>=ₚ λ k → many k (refP T) >>=ₚ λ results → pureₚ (forms , results)
+
+    acceptsCode : List Tm → Code → Maybe ⊤
+    acceptsCode goals c = certificateP c >>= λ r → accepts goals (fst (fst r)) (snd (fst r))
+
+    acceptsCode-sound : (goals : List Tm) (c : Code) → acceptsCode goals c ≡ just tt
+                      → All (λ g → ∀ γ → GW γ (λ x → Occ x g) → Der (sub γ g)) goals
+    acceptsCode-sound goals c e with bind-inv (certificateP c) _ e
+    ... | ((forms , results) , _) , _ , e₁ = accepts-sound goals forms results e₁
 
 ------------------------------------------------------------------------
 -- Signatures given by tables, as in certificates exported from the Rust

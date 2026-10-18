@@ -230,13 +230,15 @@ the model.
 
 No proof connects the Rust code to the model, but a certificate the Rust
 checker accepted can be checked by the model too.
-`schematic-kernel --agda MODULE THEORY GOALS PROOF OUT.agda` writes it as an
-Agda module that states `accepts goals certificate results ≡ just tt` and
-proves it by `refl`. The model's `accepts` is the algorithm proved sound
-above, so Agda accepting the module gives the soundness theorem for that
-certificate without trusting `src/schematic.rs`. The exporter is untrusted:
-a wrong translation can only make the module state a different theorem,
-which its goals list shows. Rule well-formedness and constructor
+`schematic-kernel --agda MODULE THEORY GOALS PROOF OUT.agda` writes an Agda
+module with the theory as tables, the goals as explicit terms, and the
+certificate as a stream of naturals (`Code`). Its last line,
+`theorem = acceptsCode-sound goals code refl`, makes Agda decode the
+certificate and run the modelled checker on it; the model is the algorithm
+proved sound above, so this gives the soundness theorem for those goals
+without trusting `src/schematic.rs`. The exporter and the decoder are
+untrusted: whatever certificate decoding yields must still be accepted for
+the goals the module states. Rule well-formedness and constructor
 completeness are decided inside Agda too.
 
 [agda/LevelsCertificate.agda](../agda/LevelsCertificate.agda) is the export
@@ -244,19 +246,35 @@ of the levels example; `nix flake check` checks it, and a test keeps it in
 sync with the Rust output. Changing the goal in it makes Agda reject it
 (`nothing != just tt`).
 
-On kamo3's level-generalized certificates, with its 412-rule theory:
+On kamo3's level-generalized certificates, with its 412-rule theory (the
+first version of the model, before the changes below, in parentheses):
 
 | Certificate | Steps | Agda module | Agda check |
 | --- | ---: | ---: | ---: |
-| constant-transport | 318 | 180 kB | 5 s |
-| transport | 588 | 215 kB | 7.6 s |
-| to-pathp | 1,564 | 354 kB | 20 s |
-| homotopy | 4,038 | 708 kB | 117 s |
-| contr-prop | 4,579 | 785 kB | 162 s |
+| constant-transport | 318 | 178 kB | 6.4 s (5 s) |
+| transport | 588 | 212 kB | 7.5 s (7.6 s) |
+| to-pathp | 1,564 | 341 kB | 12 s (20 s) |
+| homotopy | 4,038 | 675 kB | 33 s (117 s) |
+| contr-prop | 4,579 | 739 kB | 26 s (162 s) |
+| ua-beta | 36,797 | 5.3 MB | 284 s, 12 GB |
 
-The time grows roughly quadratically: the model looks facts up by unary
-index in a list it extends at the end. Certificates of tens of thousands of
-steps would need a model with cheaper fact access.
+The first version grew quadratically. Four changes made it linear:
+
+- Facts are kept in a Braun tree, with builtin halving and parity, rather
+  than a list extended at the end and searched by unary index.
+- The rule step checks only what is not already implied: sorts of bindings
+  of conclusion-only variables, and the variables of bindings of
+  premise-only variables. The proof derives the rest.
+- The certificate is a stream of naturals with no implicit arguments, so
+  Agda elaborates it quickly.
+- `refl` is passed straight to the soundness lemma; a separate
+  `accepted` lemma made Agda run the checker twice.
+
+About half of the remaining time is evaluation, much of it comparing
+large terms structurally where Rust compares hash-consed indices. Memory
+grows with the certificate: ua-beta needs 12 GB, so univalence (185,682
+steps) does not fit in 30 GB. Hash-consing terms inside the model would
+address both.
 
 ## What this does and does not establish
 
@@ -278,8 +296,8 @@ steps would need a model with cheaper fact access.
 1. Decide whether the kernel adopts schematic checking. Connecting either
    Agda model to the Rust code (by verifying the Rust, or by differential
    testing on a broad corpus) remains open for both kernels.
-2. Make the model's fact access cheap enough to re-check the large kamo3
-   certificates in Agda.
+2. Hash-cons terms in the model, so that the large kamo3 certificates,
+   univalence included, can be re-checked in Agda within memory.
 3. Let kamo3 producers build at a symbolic level directly, instead of
    generalizing a level-0 proof afterwards.
 4. Several eigenvariables, with lemmas such as `max i j k → max j i k`

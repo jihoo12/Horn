@@ -19,74 +19,35 @@ rules = rule ([]) (node 2 (node 0 ([]) ∷ var 0 ∷ var 0 ∷ [])) (λ y → nt
 open Tables outT insT varT 8 rules
 open Algorithm (witness (all? ruleWF? rules) tt) ctors (complete-from (witness junk? tt))
 
-t0 : Tm
-t0 = node 0 ([])
+g0 : Tm
+g0 = var 0
 
-t1 : Tm
-t1 = node 2 (t0 ∷ t0 ∷ t0 ∷ [])
+g1 : Tm
+g1 = node 3 (g0 ∷ [])
 
-t2 : Tm
-t2 = node 1 (t0 ∷ [])
+g2 : Tm
+g2 = node 4 (g1 ∷ g1 ∷ [])
 
-t3 : Tm
-t3 = node 2 (t2 ∷ t2 ∷ t2 ∷ [])
+g3 : Tm
+g3 = node 4 (g1 ∷ g2 ∷ [])
 
-t4 : Tm
-t4 = var 1
+g4 : Tm
+g4 = node 1 (g0 ∷ [])
 
-t5 : Tm
-t5 = node 1 (t4 ∷ [])
-
-t6 : Tm
-t6 = node 2 (t5 ∷ t5 ∷ t5 ∷ [])
-
-t7 : Tm
-t7 = node 1 (t5 ∷ [])
-
-t8 : Tm
-t8 = node 2 (t7 ∷ t7 ∷ t7 ∷ [])
-
-t9 : Tm
-t9 = var 0
-
-t10 : Tm
-t10 = node 1 (t9 ∷ [])
-
-t11 : Tm
-t11 = node 2 (t10 ∷ t10 ∷ t10 ∷ [])
-
-t12 : Tm
-t12 = node 3 (t9 ∷ [])
-
-t13 : Tm
-t13 = node 5 (t12 ∷ t10 ∷ [])
-
-t14 : Tm
-t14 = node 4 (t12 ∷ t12 ∷ [])
-
-t15 : Tm
-t15 = node 5 (t14 ∷ t10 ∷ [])
-
-t16 : Tm
-t16 = node 4 (t12 ∷ t14 ∷ [])
-
-t17 : Tm
-t17 = node 5 (t16 ∷ t10 ∷ [])
+g5 : Tm
+g5 = node 5 (g3 ∷ g4 ∷ [])
 
 goals : List Tm
-goals = t17 ∷ []
+goals = g5 ∷ []
 
-steps0 : List Form
-steps0 = ruleF 0 ([]) ([]) (just t1) ∷ ruleF 2 (ref 0 ∷ []) ([]) (just t3) ∷ hypF t6 ∷ ruleF 2 (ref 2 ∷ []) ([]) (just t8) ∷ inductF 0 t11 ((1 , []) ∷ (3 , 1 ∷ []) ∷ []) ∷ ruleF 3 ([]) ([]) (just t13) ∷ ruleF 4 (ref 5 ∷ ref 5 ∷ ref 4 ∷ []) ([]) (just t15) ∷ ruleF 4 (ref 5 ∷ ref 6 ∷ ref 4 ∷ []) ([]) (just t17) ∷ []
+code0 : Code
+code0 = 18 ▸ 1 ▸ 0 ▸ 0 ▸ 1 ▸ 2 ▸ 3 ▸ 0 ▸ 0 ▸ 0 ▸ 1 ▸ 1 ▸ 1 ▸ 0 ▸ 1 ▸ 2 ▸ 3 ▸ 2 ▸ 2 ▸ 2 ▸ 0 ▸ 1 ▸ 1 ▸ 1 ▸ 1 ▸ 4 ▸ 1 ▸ 2 ▸ 3 ▸ 5 ▸ 5 ▸ 5 ▸ 1 ▸ 1 ▸ 1 ▸ 5 ▸ 1 ▸ 2 ▸ 3 ▸ 7 ▸ 7 ▸ 7 ▸ 0 ▸ 0 ▸ 1 ▸ 1 ▸ 1 ▸ 9 ▸ 1 ▸ 2 ▸ 3 ▸ 10 ▸ 10 ▸ 10 ▸ 1 ▸ 3 ▸ 1 ▸ 9 ▸ 1 ▸ 5 ▸ 2 ▸ 12 ▸ 10 ▸ 1 ▸ 4 ▸ 2 ▸ 12 ▸ 12 ▸ 1 ▸ 5 ▸ 2 ▸ 14 ▸ 10 ▸ 1 ▸ 4 ▸ 2 ▸ 12 ▸ 14 ▸ 1 ▸ 5 ▸ 2 ▸ 16 ▸ 10 ▸ 8 ▸ 1 ▸ 0 ▸ 0 ▸ 0 ▸ 1 ▸ 1 ▸ 1 ▸ 2 ▸ 1 ▸ 0 ▸ 0 ▸ 0 ▸ 1 ▸ 3 ▸ 0 ▸ 6 ▸ 1 ▸ 2 ▸ 1 ▸ 0 ▸ 2 ▸ 0 ▸ 1 ▸ 8 ▸ 2 ▸ 0 ▸ 11 ▸ 2 ▸ 1 ▸ 0 ▸ 3 ▸ 1 ▸ 1 ▸ 1 ▸ 3 ▸ 0 ▸ 0 ▸ 1 ▸ 13 ▸ 1 ▸ 4 ▸ 3 ▸ 0 ▸ 5 ▸ 0 ▸ 5 ▸ 0 ▸ 4 ▸ 0 ▸ 1 ▸ 15 ▸ 1 ▸ 4 ▸ 3 ▸ 0 ▸ 5 ▸ 0 ▸ 6 ▸ 0 ▸ 4 ▸ 0 ▸ 1 ▸ 17 ▸ 1 ▸ 0 ▸ 7 ▸ ε
 
-certificate : List Form
-certificate = concat (steps0 ∷ [])
-
-results : List Ref
-results = ref 7 ∷ []
+code : Code
+code = code0 ⊕ ε
 
 -- Every well-sorted ground instance of every goal is derivable. Agda
--- checks `refl : accepts goals certificate results ≡ just tt` here by
--- running the modelled checker on the certificate.
+-- checks `refl : acceptsCode goals code ≡ just tt` here by decoding
+-- the certificate and running the modelled checker on it.
 theorem : All (λ g → ∀ γ → GW γ (λ x → Occ x g) → Der (sub γ g)) goals
-theorem = accepts-sound goals certificate results refl
+theorem = acceptsCode-sound goals code refl
