@@ -1,0 +1,23 @@
+; Transporting a function along ua: the structure moves with the type.
+; Every def/check/eval is a goal of one certificate checked by the kernel.
+(def not (pi b bool bool)
+  (lam b bool (bif c bool bfalse btrue b)))
+
+
+; not is its own inverse, by the dependent eliminator.
+(def not-not (pi b bool (path bool (app not (app not b)) b))
+  (lam b bool
+    (bif c (path bool (app not (app not c)) c) (plam i btrue) (plam i bfalse) b)))
+
+(def not-equiv (equiv bool bool)
+  (pair not (app iso-equiv bool bool not not not-not not-not)))
+
+; The path of types obtained from the equivalence.
+(def not-path (path (u 0) bool bool) (app ua bool bool not-equiv))
+
+; Transport along it computes, through Glue, to a boolean.
+; Transport a function along ua: the structure moves with the type.
+(def not-on-path (pi b bool bool)
+  (transport i (pi b (papp not-path i) (papp not-path i)) not))
+(eval moved-true (app not-on-path btrue))
+(eval moved-false (app not-on-path bfalse))

@@ -8,6 +8,21 @@ The checker implements generic sorting and schema matching. Predicate names
 have no built-in meaning. It does not search for proofs or implement a native
 type theory, substitution engine, equality solver, or univalence primitive.
 
+## Certified evaluation through univalence
+
+In [binary.hcs](examples/cubical/script/binary.hcs), addition written once on
+unary naturals is transported along `ua (nat ≃ bin)` and evaluated on binary
+numbers: `3 + 2` computes to the binary numeral for 5, and the whole run,
+including the proof of the equivalence, is one kernel-checked certificate.
+
+`horn cubical eval FILE.hcs` elaborates definitions and evaluations to the
+cubical core and certifies them; a value is printed only after the kernel
+accepts the oracle. In [bool.hcs](examples/cubical/script/bool.hcs), `not`
+becomes an equivalence and a path `ua not : Path U0 bool bool`; transporting
+`btrue` along it evaluates to `bfalse`. See [CUBICAL_SCRIPT.md](docs/CUBICAL_SCRIPT.md).
+The certificate engine now lives in Horn (`horn cubical generate NAME`
+regenerates the univalence certificate in about five seconds), so kamo3 is not needed.
+
 ## Standalone language and cubical integration
 
 Ground forward `#eval` calls now execute pattern-matching clauses, including
@@ -32,8 +47,9 @@ also produce independently replayable certificates.
 [certified equivalence definitions](docs/CUBICAL_EQUIVALENCE.md) are supported
 in fresh source. [Glue typing and beta/face/eta evidence](docs/CUBICAL_GLUE.md)
 can also be generated. Opt into [checked inner computation](docs/CUBICAL_CONGRUENCE.md)
-with `--profile equality`. Univalence and ua-transport remain available through
-bundled replay; fresh ua/univalence generation is future work. See [CUBICAL.md](docs/CUBICAL.md) and the staged
+with `--profile equality`. The `.hcu` producer does not build ua or univalence;
+the certificate engine moved from kamo3 does (`horn cubical generate`, and
+`horn cubical eval` scripts, above). See [CUBICAL.md](docs/CUBICAL.md) and the staged
 [integration plan](docs/INTEGRATION.md).
 
 ## What 0.3 adds: oracle certificates

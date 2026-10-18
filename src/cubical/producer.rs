@@ -1126,7 +1126,20 @@ pub fn produce_with_profile(requests: &[Request], profile: Profile) -> Result<Ge
     produce_selected(requests, Some(profile))
 }
 
+/// Generation recurses along terms and derivations; run it on a large stack
+/// so that unoptimized builds do not overflow the default one.
 fn produce_selected(requests: &[Request], selected: Option<Profile>) -> Result<Generated> {
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .stack_size(256 << 20)
+            .spawn_scoped(scope, || produce_on_this_stack(requests, selected))
+            .map_err(|e| e.to_string())?
+            .join()
+            .map_err(|_| "cubical producer panicked".to_string())?
+    })
+}
+
+fn produce_on_this_stack(requests: &[Request], selected: Option<Profile>) -> Result<Generated> {
     if requests.is_empty() || requests.len() > 128 {
         return Err("expected 1..128 cubical requests".into());
     }

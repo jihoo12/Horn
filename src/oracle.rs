@@ -24,6 +24,11 @@ use std::io::{BufRead, Write};
 const NONE: u32 = u32::MAX;
 const PROP: u32 = u32::MAX;
 const MAGIC: &[u8] = b"horn-oracle 1\n";
+/// Version 2 records how many rules and constructor/predicate names the
+/// theory had when the oracle was encoded. Decoding against a theory that
+/// appends declarations then considers only that prefix, so extending the
+/// theory does not invalidate existing oracles.
+const MAGIC2: &[u8] = b"horn-oracle 2\n";
 /// Nesting limit for subgoals and witness terms, so a corrupt oracle that
 /// keeps choosing recursive rules stops with an error.
 const MAX_DEPTH: usize = 1 << 16;
@@ -167,6 +172,21 @@ impl Spec {
             }
         }
         Ok(spec)
+    }
+
+    /// Restrict the candidates to the first `rules` rules and `names`
+    /// constructors and predicates, the theory an oracle was encoded against.
+    fn restrict(&mut self, rules: usize, names: usize) -> Result<()> {
+        if rules > self.rules.len() || names > self.names.len() {
+            return Err("oracle was encoded against a larger theory".into());
+        }
+        for list in &mut self.by_pred {
+            list.retain(|&r| (r as usize) < rules);
+        }
+        for list in &mut self.by_sort {
+            list.retain(|&c| (c as usize) < names);
+        }
+        Ok(())
     }
 
     fn pattern(&self, x: &Sexp, sort: u32, vars: &mut Vec<(String, u32)>) -> Result<Pat> {
@@ -1181,7 +1201,9 @@ pub fn encode(theory: &str, goals: &str, proof: impl BufRead + Send) -> Result<(
         let Coder::Encode(encoder) = engine.coder else {
             unreachable!()
         };
-        let mut bytes = MAGIC.to_vec();
+        let mut bytes = MAGIC2.to_vec();
+        bytes.extend((spec.rules.len() as u32).to_le_bytes());
+        bytes.extend((spec.names.len() as u32).to_le_bytes());
         bytes.extend(encoder.finish());
         engine.stats.oracle_bytes = bytes.len();
         Ok((bytes, engine.stats))
@@ -1192,8 +1214,16 @@ pub fn encode(theory: &str, goals: &str, proof: impl BufRead + Send) -> Result<(
 /// The result proves nothing until the kernel has checked it.
 pub fn decode(theory: &str, goals: &str, oracle: &[u8], out: impl Write + Send) -> Result<Stats> {
     deep(|| {
-        let input = oracle.strip_prefix(MAGIC).ok_or("not a Horn oracle")?;
-        let spec = Spec::parse(theory)?;
+        let mut spec = Spec::parse(theory)?;
+        let input = if let Some(input) = oracle.strip_prefix(MAGIC) {
+            input
+        } else {
+            let input = oracle.strip_prefix(MAGIC2).ok_or("not a Horn oracle")?;
+            let (counts, input) = input.split_at_checked(8).ok_or("truncated oracle header")?;
+            let count = |i: usize| u32::from_le_bytes(counts[i..i + 4].try_into().unwrap());
+            spec.restrict(count(0) as usize, count(4) as usize)?;
+            input
+        };
         let mut store = Store::new();
         let goals = read_goals(&spec, &mut store, goals)?;
         let mut decoder = Decoder {

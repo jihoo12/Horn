@@ -226,3 +226,43 @@ fn unbounded_forced_reconstruction_stops_with_an_error() {
         oracle::decode(theory, "(goal g (p z))", b"horn-oracle 1\n", Vec::new()).unwrap_err();
     assert!(error.contains("nesting"), "{error}");
 }
+
+#[test]
+fn oracles_decode_unchanged_after_declarations_are_appended() {
+    // The extension competes with old candidates: a new A constructor for
+    // witnesses and new rules for le and ok, which would change every coded
+    // choice if the decoder considered them.
+    let extended = format!(
+        "{THEORY}
+        (ctor w () A)
+        (rule le.w () (le w ?n))
+        (rule le.back ((le (s ?m) (s ?n))) (le ?m ?n))
+        (rule ok.any ((le ?a ?a)) (ok (pair ?a ?a)))"
+    );
+    let theory = Theory::parse(&extended).unwrap();
+    let mut rng = Rng(0x0e7e_d5ed_0a11);
+    let mut unrestricted_failures = 0;
+    for case in 0..500 {
+        let (goals, proof) = random_certificate(&mut rng);
+        let (bytes, _) = oracle::encode(THEORY, &goals, proof.as_bytes()).unwrap();
+        // The same decisions under a version 1 header, which records no
+        // theory size, are read against the whole extended theory.
+        let mut v1 = b"horn-oracle 1\n".to_vec();
+        v1.extend(&bytes[22..]);
+        unrestricted_failures += usize::from(oracle::check(&extended, &goals, &v1).is_err());
+        let mut out = Vec::new();
+        oracle::decode(&extended, &goals, &bytes, &mut out)
+            .unwrap_or_else(|e| panic!("{case}: {e}\n{proof}"));
+        theory
+            .check(&goals, std::str::from_utf8(&out).unwrap())
+            .unwrap_or_else(|e| panic!("{case}: {e}"));
+        // The full check helper streams the same decoding into the kernel.
+        oracle::check(&extended, &goals, &bytes).unwrap();
+    }
+    assert!(unrestricted_failures > 250, "{unrestricted_failures}");
+    // An oracle names the theory size it needs; a smaller theory is refused.
+    let (goals, proof) = random_certificate(&mut rng);
+    let (bytes, _) = oracle::encode(&extended, &goals, proof.as_bytes()).unwrap();
+    let error = oracle::decode(THEORY, &goals, &bytes, Vec::new()).unwrap_err();
+    assert!(error.contains("larger theory"), "{error}");
+}

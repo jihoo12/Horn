@@ -74,6 +74,23 @@ dependent transport, type-directed composition and fresh ua/univalence producers
 connection to the `.hn` programming frontend remain open. The theories,
 ground/schematic checkers and Agda models are unchanged.
 
+## Engine and scripts
+
+`cubical::engine` is kamo3's certificate producer, moved into Horn, with
+hash-consed terms and shared-subterm certificates (univalence regenerates in
+about five seconds). `horn cubical eval FILE.hcs` elaborates scripts with
+definitions, evaluation, declared data types (with parameters) and
+level-polymorphic definitions; every result is an oracle checked by the
+kernel against the core theory plus generated data rules. Highlights:
+transport along ua computes on booleans, functions, lists and declared types;
+addition moves from unary to binary numbers along ua; the circle's winding
+number computes; univalence holds for every level. See
+[CUBICAL_SCRIPT.md](CUBICAL_SCRIPT.md) and the trust budget in
+[TRUST.md](TRUST.md). Composite loops in the circle need its homogeneous
+composition, which is not merged: the engine's typing of unannotated closed
+terms through a term-keyed cache breaks down inside universe composition,
+and a fully annotated elaboration is the planned fix.
+
 ## Following increments
 
 1. Move cubical certificate producers behind a Horn-owned library API, one
@@ -90,10 +107,10 @@ ground/schematic checkers and Agda models are unchanged.
    coverage, non-overlap, positivity and termination checks before claiming
    Lean-like total-function semantics. Partial runtime computation needs a
    separate, explicit contract.
-3. Generate compact/oracle evidence directly so checking does not require
-   materializing multi-gigabyte intermediate proofs. Track generation memory
-   separately from checker memory; kamo3's deep-univalence test exceeds the
-   current 8 GiB environment even in release mode.
+3. Done for the bundled examples: `horn cubical generate` streams the
+   engine's derivation into the oracle encoder, so no multi-gigabyte proof
+   is materialized (univalence: 4.7 s, 0.24 GB peak). The producer itself still
+   keeps every step in memory.
 4. Export implicational certificates to the Agda model, support multiple
    universe variables and dependent computation, and connect the executable
    checkers to their models. Prove adequacy/soundness of the cubical encoding

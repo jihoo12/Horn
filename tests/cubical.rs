@@ -9,10 +9,50 @@ fn real_univalence_and_transport_certificates_check() {
     for (example, goals, steps) in [
         (&cubical::EXAMPLES[0], 2, 185_673),
         (&cubical::EXAMPLES[1], 1, 18_849),
+        (&cubical::EXAMPLES[2], 3, 231_279),
     ] {
         let report = oracle::check(&theory, example.goals, example.oracle).unwrap();
         assert_eq!((report.goals, report.steps), (goals, steps));
     }
+}
+
+#[test]
+fn transport_along_ua_of_not_computes_to_the_other_boolean() {
+    let example = cubical::EXAMPLES
+        .iter()
+        .find(|e| e.name == "canonicity")
+        .unwrap();
+    let goals: Vec<_> = example.goals.lines().collect();
+    assert_eq!(goals.len(), 3);
+    assert!(goals[0].starts_with("(goal not-is-an-equivalence (rhas z nil ft (pair"));
+    // Closed judgments in the empty context, ending in a boolean literal.
+    assert!(
+        goals[1].starts_with("(goal transport-ua-not-true (req z nil ft (comp (glue-type bool")
+    );
+    assert!(goals[1].ends_with(" ff zero btrue) bfalse bool))"));
+    assert!(goals[2].ends_with(" ff zero bfalse) btrue bool))"));
+    let theory = cubical::theory();
+    for (from, to) in [
+        (
+            " ff zero btrue) bfalse bool))",
+            " ff zero btrue) btrue bool))",
+        ),
+        (
+            " ff zero bfalse) btrue bool))",
+            " ff zero bfalse) bfalse bool))",
+        ),
+    ] {
+        let forged = example.goals.replace(from, to);
+        assert_ne!(forged, example.goals);
+        assert!(oracle::check(&theory, &forged, example.oracle).is_err());
+    }
+    // Without the bool fragment the certificate has no meaning.
+    let without_bool: String = cubical::FRAGMENTS
+        .iter()
+        .filter(|(name, _)| *name != "bool")
+        .map(|(_, source)| format!("{source}\n"))
+        .collect();
+    assert!(oracle::check(&without_bool, example.goals, example.oracle).is_err());
 }
 
 #[test]
@@ -95,4 +135,32 @@ fn the_cli_exports_independently_checkable_data_without_overwriting() {
             .status
             .success()
     );
+}
+
+#[test]
+fn the_core_theory_drops_the_unrestricted_layer_and_subsumed_rules() {
+    let core = cubical::core_theory();
+    let full = cubical::theory();
+    let count = |t: &str| cubical::generate::rule_count(t);
+    // 396 rules from the kamo3 snapshot plus bool and nat, then 30 for the
+    // circle; the core drops 29 unrestricted-layer rules and one subsumed rule.
+    assert_eq!((count(&full), count(&core)), (426, 396));
+    for form in horn::sexp::parse(&core).unwrap() {
+        let text = form.to_string();
+        for p in cubical::UNRESTRICTED {
+            assert!(!text.contains(&format!("({p} ")), "{text}");
+        }
+    }
+    assert!(!core.contains("(rule req.comp-nat-zero "));
+    assert!(core.contains("(rule req.comp-nat "));
+    // The core theory is a subset of the bundled one, rule by rule.
+    let full_forms: std::collections::HashSet<String> = horn::sexp::parse(&full)
+        .unwrap()
+        .iter()
+        .map(|f| f.to_string())
+        .collect();
+    for form in horn::sexp::parse(&core).unwrap() {
+        assert!(full_forms.contains(&form.to_string()), "{form}");
+    }
+    horn::kernel::Theory::parse(&core).unwrap();
 }

@@ -1,0 +1,30 @@
+; Definitions over every universe level. Each def-poly is proved at level 0,
+; the proof is generalized over levels, and the schematic certificate is
+; checked for a level variable L; uses pick a level with (at NAME LEVEL).
+(def-poly id (L) (pi A (u L) (pi x A A))
+  (lam A (u L) (lam x A x)))
+
+(def-poly const (L) (pi A (u L) (pi B (u L) (pi x A (pi y B A))))
+  (lam A (u L) (lam B (u L) (lam x A (lam y B x)))))
+
+; A polymorphic definition may use another at its own level.
+(def-poly twice (L) (pi A (u L) (pi f (pi x A A) (pi x A A)))
+  (lam A (u L) (lam f (pi x A A) (lam x A (app f (app f x))))))
+
+(eval on-bool (app (at id 0) bool btrue))
+(eval on-types (app (at const 1) (u 0) (u 0) bool nat))
+(eval twice-not (app (at twice 0) bool (lam b bool (bif c bool bfalse btrue b)) btrue))
+
+; ua itself is well typed at every level.
+(def-poly ua-poly (L)
+  (pi A (u L) (pi B (u L) (pi e (equiv A B) (path (u L) A B))))
+  (ua-at L))
+
+; Uses of a polymorphic definition at a level variable.
+(def-poly apply-id (L) (pi A (u L) (pi x A A))
+  (lam A (u L) (app (at id L) A)))
+
+; Univalence, Π A B : U_L. Equiv (Path U_L A B) (Equiv A B), for every L.
+(def-poly univalence (L)
+  (pi A (u L) (pi B (u L) (equiv (path (u L) A B) (equiv A B))))
+  (univalence-at L))

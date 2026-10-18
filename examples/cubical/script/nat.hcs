@@ -1,0 +1,24 @@
+; Natural numbers: programs by recursion, evaluation, and proofs by induction.
+(def add (pi m nat (pi n nat nat))
+  (lam m nat (lam n nat (natrec k nat m (lam k nat (lam r nat (suc r))) n))))
+
+(def mul (pi m nat (pi n nat nat))
+  (lam m nat (lam n nat (natrec k nat 0 (lam k nat (lam r nat (app add r m))) n))))
+
+(eval two-plus-three (app add 2 3))
+(eval three-times-four (app mul 3 4))
+
+; n + 0 = n holds by computation.
+(def add-zero (pi n nat (path nat (app add n 0) n))
+  (lam n nat (plam i n)))
+
+; 0 + n = n needs induction: the step maps a path p to (i ↦ suc (p i)).
+(def zero-add (pi n nat (path nat (app add 0 n) n))
+  (lam n nat
+    (natrec k (path nat (app add 0 k) k)
+      (plam i 0)
+      (lam k nat (lam p (path nat (app add 0 k) k) (plam i (suc (papp p i)))))
+      n)))
+
+; Composition in nat is the identity: transport along a constant line.
+(eval transport-nat (transport i nat (app mul 2 3)))

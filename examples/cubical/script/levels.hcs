@@ -1,0 +1,25 @@
+; Univalence one universe up: pairs of types live in U1.
+(def swap (pi p (sigma x (u 0) (u 0)) (sigma x (u 0) (u 0)))
+  (lam p (sigma x (u 0) (u 0)) (pair (snd p) (fst p))))
+
+; swap is its own inverse by pair eta.
+(def swap-swap (pi p (sigma x (u 0) (u 0)) (path (sigma x (u 0) (u 0)) (app swap (app swap p)) p))
+  (lam p (sigma x (u 0) (u 0)) (plam i p)))
+
+(def swap-equiv (equiv (sigma x (u 0) (u 0)) (sigma x (u 0) (u 0)))
+  (pair swap (app (iso-equiv-at 1) (sigma x (u 0) (u 0)) (sigma x (u 0) (u 0)) swap swap swap-swap swap-swap)))
+
+(def swap-path (path (u 1) (sigma x (u 0) (u 0)) (sigma x (u 0) (u 0)))
+  (app (ua-at 1) (sigma x (u 0) (u 0)) (sigma x (u 0) (u 0)) swap-equiv))
+
+; A function out of pairs of types moves along the level-1 path; applying the
+; transported function computes, through composition in Pi types and Glue.
+(def first-is-type (pi p (sigma x (u 0) (u 0)) bool)
+  (lam p (sigma x (u 0) (u 0)) btrue))
+(eval applied
+  (app (transport i (pi p (papp swap-path i) bool) first-is-type) (pair bool nat)))
+
+; Transporting the pair itself type-checks, but its components stay as
+; empty-face Glue types over bool and nat: without regularity, transport
+; along a constant line of types is not the identity, as in CCHM.
+(check moved (transport i (papp swap-path i) (pair bool nat)) (sigma x (u 0) (u 0)))

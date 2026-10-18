@@ -11,8 +11,9 @@ cargo run --release --locked --offline --bin horn -- cubical check all
 
 | Example | Fixed goals | Checked steps | Oracle bytes |
 | --- | ---: | ---: | ---: |
-| `univalence` | 2 | 185,673 | 35,830 |
-| `ua-transport` | 1 | 18,849 | 4,086 |
+| `univalence` | 2 | 185,673 | 35,838 |
+| `ua-transport` | 1 | 18,849 | 4,094 |
+| `canonicity` | 3 | 231,279 | 51,822 |
 
 `univalence` checks univalence at U0,
 `Π A B:U₀. Equiv (Path U₀ A B) (Equiv A B)`, and that its function component
@@ -26,6 +27,23 @@ Glue composition. There is no assumed judgmental regularity eliminating the
 two constant transports. This is evidence for computational behavior in the
 selected rules, not a general implementation of computational univalence at
 all universe levels.
+
+`canonicity` checks, in the empty context, that `not = λb. bif bool bfalse btrue b`
+is an equivalence (by the closed isoToIsEquiv lemma) and that
+`transport (ua not) btrue ≡ bfalse` and `transport (ua not) bfalse ≡ btrue`
+at type `bool`. Transport along ua computes all the way to a boolean literal:
+Glue composition, then bool's composition, which returns its base. That rule
+is sound because bool is discrete (the constant presheaf 2 in the cubical-set
+model). It uses the thirteenth fragment, [bool.horn](../theories/cubical/bool.horn),
+which is new in Horn and not a kamo3 snapshot.
+
+[nat.horn](../theories/cubical/nat.horn), the fourteenth fragment, adds `suc`,
+the dependent recursor `natrec` with its computation rules, and composition in
+nat, which returns its base for the same reason as bool (it subsumes the
+snapshot's `req.comp-nat-zero`).
+
+Oracles use format 2, which records the theory size they were encoded
+against; appending fragments does not change how existing oracles decode.
 
 ## Acceptance and trust
 
@@ -49,8 +67,10 @@ is not formally verified by the Agda model. A separate bounded
 [producer and core source frontend](CUBICAL_PRODUCER.md) now generates fresh
 dependent-function/path, face/system, composition and Sigma certificates, with
 [certified equivalence definitions](CUBICAL_EQUIVALENCE.md). It also generates [Glue typing and beta/face/eta evidence](CUBICAL_GLUE.md),
-but does not yet generate new ua or univalence proofs. The ordinary `.hn` source language and cubical `.hcu`
-core source remain separate frontends. See [INTEGRATION.md](INTEGRATION.md) for
+but does not build ua or univalence proofs; the engine moved from kamo3 does
+(see [Regeneration inside Horn](#regeneration-inside-horn) and
+[cubical scripts](CUBICAL_SCRIPT.md)). The ordinary `.hn` source language,
+the `.hcu` core source and `.hcs` scripts remain separate frontends. See [INTEGRATION.md](INTEGRATION.md) for
 how to connect them without expanding the trusted kernel.
 
 ## Independent inspection
@@ -70,9 +90,34 @@ cargo run --release --locked --offline --bin kernel -- \
 
 The last two commands materialize the full proof and are optional. Normal
 checking streams and does not create the approximately 277 MB original proof.
-That avoids re-running kamo3's producer whose combined generation/checking
-unit test exceeded this environment's 8 GiB limit; this is not a fix for the
-producer's memory consumption.
+kamo3's combined generation/checking unit test exceeded 8 GiB, mostly in
+its older, non-hash-consed kernel; regeneration inside Horn (below) streams
+into the oracle encoder instead.
+
+## Regeneration inside Horn
+
+`cubical::engine` is kamo3's certificate producer, moved into this
+repository (with the bool extension), so every bundled example can be
+regenerated without kamo3 or its older pinned kernel:
+
+```sh
+cargo run --release --locked --offline --bin horn -- cubical generate canonicity
+```
+
+The derivation streams from the producer into the oracle encoder through a
+pipe and is never written out; the oracle is then checked as usual. The
+engine is untrusted: only the kernel's acceptance counts.
+
+| Example | Time | Peak memory |
+| --- | ---: | ---: |
+| `ua-transport` | 0.4 s | 0.03 GB |
+| `univalence` | 4.7 s | 0.24 GB |
+| `canonicity` | 7.9 s | 0.23 GB |
+
+The engine hash-conses its terms (`engine::term`), so equality, hashing and
+memo lookups are constant time, and it writes a compact certificate whose
+`def` forms share every repeated subterm. Before these two changes the same
+runs took 5 s, 60 s and 185 s.
 
 ## Provenance and reproduction
 
@@ -95,8 +140,6 @@ target/release/oracle-kernel THEORY examples/cubical/NAME.goals examples/cubical
 ```
 
 Only reproducing the import needs kamo3. The committed data, CLI, decoding,
-generic verification and tests are standalone. Fresh path, face/system,
-composition and Sigma producers and equivalence-definition lowering are now
-implemented in Horn. Fresh equivalence witnesses, Glue-directed composition, ua generation and
-migration of the cubical Agda reference remain later steps.
-kamo3 should not yet be deleted.
+generic verification and tests are standalone, and `horn cubical generate`
+regenerates all three bundled examples inside Horn. Migration of the
+cubical Agda reference remains a later step, so kamo3 stays as an archive.

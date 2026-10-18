@@ -1,0 +1,64 @@
+; The circle, a higher inductive type, appended after nat.horn: a point base,
+; a path constructor loop with loop i0 = loop i1 = base, and the
+; non-dependent recursor s1rec A b l x : A for b : A and l : Path A b b.
+; Declarative object theory only. There is deliberately no composition rule
+; for s1: the circle is not discrete, so composition cannot return its base,
+; and its homogeneous composition constructor is not included. Compositions
+; in s1 therefore do not compute; transports in families over s1 do.
+(ctor s1 () Tm)
+(ctor base () Tm)
+(ctor loop (I) Tm)
+(ctor s1rec (Tm Tm Tm Tm) Tm)
+
+(rule scope.s1 () (scoped ?d ?n s1))
+(rule scope.base () (scoped ?d ?n base))
+(rule scope.loop ((interval ?d ?r)) (scoped ?d ?n (loop ?r)))
+(rule scope.s1rec ((scoped ?d ?n ?a) (scoped ?d ?n ?b) (scoped ?d ?n ?l) (scoped ?d ?n ?x))
+  (scoped ?d ?n (s1rec ?a ?b ?l ?x)))
+
+(rule shift.s1 () (shift s1 ?k s1))
+(rule shift.base () (shift base ?k base))
+(rule shift.loop () (shift (loop ?r) ?k (loop ?r)))
+(rule shift.s1rec ((shift ?a ?k ?a2) (shift ?b ?k ?b2) (shift ?l ?k ?l2) (shift ?x ?k ?x2))
+  (shift (s1rec ?a ?b ?l ?x) ?k (s1rec ?a2 ?b2 ?l2 ?x2)))
+(rule subst.s1 () (subst s1 ?k ?t s1))
+(rule subst.base () (subst base ?k ?t base))
+(rule subst.loop () (subst (loop ?r) ?k ?t (loop ?r)))
+(rule subst.s1rec ((subst ?a ?k ?t ?a2) (subst ?b ?k ?t ?b2) (subst ?l ?k ?t ?l2) (subst ?x ?k ?t ?x2))
+  (subst (s1rec ?a ?b ?l ?x) ?k ?t (s1rec ?a2 ?b2 ?l2 ?x2)))
+(rule dshift.s1 () (dshift s1 ?k s1))
+(rule dshift.base () (dshift base ?k base))
+(rule dshift.loop ((ishift ?r ?k ?r2)) (dshift (loop ?r) ?k (loop ?r2)))
+(rule dshift.s1rec ((dshift ?a ?k ?a2) (dshift ?b ?k ?b2) (dshift ?l ?k ?l2) (dshift ?x ?k ?x2))
+  (dshift (s1rec ?a ?b ?l ?x) ?k (s1rec ?a2 ?b2 ?l2 ?x2)))
+(rule dsubst.s1 () (dsubst s1 ?k ?s s1))
+(rule dsubst.base () (dsubst base ?k ?s base))
+(rule dsubst.loop ((isubst ?r ?k ?s ?r2)) (dsubst (loop ?r) ?k ?s (loop ?r2)))
+(rule dsubst.s1rec ((dsubst ?a ?k ?s ?a2) (dsubst ?b ?k ?s ?b2) (dsubst ?l ?k ?s ?l2) (dsubst ?x ?k ?s ?x2))
+  (dsubst (s1rec ?a ?b ?l ?x) ?k ?s (s1rec ?a2 ?b2 ?l2 ?x2)))
+
+(rule rhas.s1 ((rctx ?d ?g ?phi)) (rhas ?d ?g ?phi s1 (u z)))
+(rule rhas.base ((rctx ?d ?g ?phi)) (rhas ?d ?g ?phi base s1))
+(rule rhas.loop ((rctx ?d ?g ?phi) (interval ?d ?r)) (rhas ?d ?g ?phi (loop ?r) s1))
+; Boundary: loop is a path from base to base. Under a face where r is an
+; endpoint, (loop r) is base.
+(rule req.loop-0 ((rhas ?d ?g ?phi (loop ?r) s1) (local ?d ?phi ?r i0))
+  (req ?d ?g ?phi (loop ?r) base s1))
+(rule req.loop-1 ((rhas ?d ?g ?phi (loop ?r) s1) (local ?d ?phi ?r i1))
+  (req ?d ?g ?phi (loop ?r) base s1))
+(rule req.loop-cong ((rhas ?d ?g ?phi (loop ?r) s1) (local ?d ?phi ?r ?s) (interval ?d ?s))
+  (req ?d ?g ?phi (loop ?r) (loop ?s) s1))
+
+; The recursor: the motive is a type A not depending on the point; the loop
+; method is a path over the constant family, written with A shifted under
+; the path's dimension binder.
+(rule rhas.s1rec ((rhas ?d ?g ?phi ?a (u ?l)) (rhas ?d ?g ?phi ?b ?a)
+    (dshift ?a z ?a1) (rhas ?d ?g ?phi ?lp (path ?a1 ?b ?b)) (rhas ?d ?g ?phi ?x s1))
+  (rhas ?d ?g ?phi (s1rec ?a ?b ?lp ?x) ?a))
+(rule req.s1rec-base ((rhas ?d ?g ?phi (s1rec ?a ?b ?lp base) ?a) (rhas ?d ?g ?phi ?b ?a))
+  (req ?d ?g ?phi (s1rec ?a ?b ?lp base) ?b ?a))
+(rule req.s1rec-loop ((rhas ?d ?g ?phi (s1rec ?a ?b ?lp (loop ?r)) ?a) (rhas ?d ?g ?phi (papp ?lp ?r) ?a))
+  (req ?d ?g ?phi (s1rec ?a ?b ?lp (loop ?r)) (papp ?lp ?r) ?a))
+(rule req.s1rec-cong ((rhas ?d ?g ?phi (s1rec ?a ?b ?lp ?x) ?a) (rhas ?d ?g ?phi (s1rec ?a ?b ?lp ?x2) ?a)
+    (req ?d ?g ?phi ?x ?x2 s1))
+  (req ?d ?g ?phi (s1rec ?a ?b ?lp ?x) (s1rec ?a ?b ?lp ?x2) ?a))
