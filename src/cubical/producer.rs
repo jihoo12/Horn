@@ -39,6 +39,7 @@ struct Producer {
     steps: Vec<(String, Vec<usize>, Sexp)>,
     known: BTreeMap<Sexp, usize>,
     inferred: BTreeMap<InferenceKey, (Term, usize)>,
+    conversion_depth: usize,
 }
 
 impl Producer {
@@ -368,30 +369,94 @@ impl Producer {
         )
     }
 
+    fn converting<T>(&mut self, f: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        if self.conversion_depth >= 32 {
+            return Err("cubical conversion exceeded its nesting limit of 32".into());
+        }
+        self.conversion_depth += 1;
+        let result = f(self);
+        self.conversion_depth -= 1;
+        result
+    }
+
+    /// Expose a reducible type head and explicitly transport the subject's
+    /// typing judgment with the existing type.conv rule.
+    fn expose(
+        &mut self,
+        d: usize,
+        g: &[Term],
+        t: &Term,
+        ty: &Term,
+        typed: usize,
+    ) -> Result<(Term, usize)> {
+        let (level, _) = self.universe(d, g, ty)?;
+        let kind = Term::Universe(level);
+        let (normal, equality) = self.normalize(d, g, ty, &kind)?;
+        if normal.quote() == ty.quote() {
+            return Ok((normal, typed));
+        }
+        let well_formed = self.check(d, g, &normal, &kind)?;
+        let converted = self.has(
+            "type.conv",
+            vec![typed, equality, well_formed],
+            d,
+            g,
+            t,
+            &normal,
+        )?;
+        Ok((normal, converted))
+    }
+
     fn universe(&mut self, d: usize, g: &[Term], t: &Term) -> Result<(usize, usize)> {
         let (ty, id) = self.infer(d, g, t)?;
         if let Term::Universe(l) = ty {
-            Ok((l, id))
-        } else {
-            Err(format!(
-                "expected a type, got {} : {}",
-                t.quote(),
-                ty.quote()
-            ))
+            return Ok((l, id));
         }
+        self.converting(|p| {
+            let (normal, id) = p.expose(d, g, t, &ty, id)?;
+            if let Term::Universe(l) = normal {
+                Ok((l, id))
+            } else {
+                Err(format!(
+                    "expected a type, got {} : {}",
+                    t.quote(),
+                    normal.quote()
+                ))
+            }
+        })
     }
 
     fn check(&mut self, d: usize, g: &[Term], t: &Term, expected: &Term) -> Result<usize> {
         let (actual, id) = self.infer(d, g, t)?;
         if actual.quote() == expected.quote() {
-            Ok(id)
-        } else {
-            Err(format!(
-                "type mismatch: inferred {}, expected {}",
-                actual.quote(),
-                expected.quote()
-            ))
+            return Ok(id);
         }
+        self.converting(|p| {
+            let (i, _) = p.universe(d, g, &actual)?;
+            let (j, well_formed) = p.universe(d, g, expected)?;
+            if i != j {
+                return Err(
+                    "type conversion requires the same universe level; no cumulativity".into(),
+                );
+            }
+            let equality = p
+                .equal(d, g, &actual, expected, &Term::Universe(i))
+                .map_err(|e| {
+                    format!(
+                        "type mismatch: inferred {}, expected {}; conversion failed: {e}",
+                        actual.quote(),
+                        expected.quote()
+                    )
+                })?;
+            p.has(
+                "type.conv",
+                vec![id, equality, well_formed],
+                d,
+                g,
+                t,
+                expected,
+            )
+        })
     }
 
     fn infer(&mut self, d: usize, g: &[Term], t: &Term) -> Result<(Term, usize)> {
@@ -423,7 +488,10 @@ impl Producer {
                 (Pi(a.clone(), Box::new(b)), vec![x, y, z], "type.lam")
             }
             App(f, a) => {
-                let (fty, x) = self.infer(d, g, f)?;
+                let (mut fty, mut x) = self.infer(d, g, f)?;
+                if !matches!(fty, Pi(..)) {
+                    (fty, x) = self.converting(|p| p.expose(d, g, f, &fty, x))?;
+                }
                 let Pi(domain, codomain) = fty else {
                     return Err("application requires a function".into());
                 };
@@ -463,7 +531,10 @@ impl Producer {
                 )
             }
             PathApp(p, r) => {
-                let (pty, x) = self.infer(d, g, p)?;
+                let (mut pty, mut x) = self.infer(d, g, p)?;
+                if !matches!(pty, Path(..)) {
+                    (pty, x) = self.converting(|producer| producer.expose(d, g, p, &pty, x))?;
+                }
                 let Path(a, _, _) = pty else {
                     return Err("path application requires a path".into());
                 };
@@ -523,7 +594,11 @@ impl Producer {
                 Ok(Some((out, id)))
             }
             PathApp(p, r) => {
-                let (pty, path_id) = self.infer(d, g, p)?;
+                let (mut pty, mut path_id) = self.infer(d, g, p)?;
+                if !matches!(pty, Path(..)) {
+                    (pty, path_id) =
+                        self.converting(|producer| producer.expose(d, g, p, &pty, path_id))?;
+                }
                 let Path(a, b, c) = pty else {
                     return Err("path application requires a path".into());
                 };
@@ -570,18 +645,36 @@ impl Producer {
         let typed = self.check(d, g, t, ty)?;
         let mut evidence = self.equality_step("eq.refl", vec![typed], (d, g), t, t, ty)?;
         let mut current = t.clone();
-        for _ in 0..32 {
+        for reductions in 0..=32 {
             let Some((out, step)) = self.reduce(d, g, &current)? else {
                 return Ok((current, evidence));
             };
+            if reductions == 32 {
+                return Err("cubical equality exceeded its 32 root-reduction limit".into());
+            }
+            // This small theory has type.conv but no general eq.conv. Never
+            // pretend that equalities at convertible types are identical.
+            let step_type = self.steps[step]
+                .2
+                .list()?
+                .last()
+                .ok_or("missing equality type")?;
+            if step_type != &ty.quote() {
+                return Err("equality reduction at a converted type is not supported by the scoped-path producer".into());
+            }
             self.check(d, g, &out, ty)?;
             evidence = self.equality_step("eq.trans", vec![evidence, step], (d, g), t, &out, ty)?;
             current = out;
         }
-        Err("cubical equality exceeded its 32 root-reduction limit".into())
+        unreachable!("bounded reductions return or report their limit")
     }
 
     fn equal(&mut self, d: usize, g: &[Term], a: &Term, b: &Term, ty: &Term) -> Result<usize> {
+        let typed = self.check(d, g, a, ty)?;
+        self.check(d, g, b, ty)?;
+        if a.quote() == b.quote() {
+            return self.equality_step("eq.refl", vec![typed], (d, g), a, b, ty);
+        }
         let (left, l) = self.normalize(d, g, a, ty)?;
         let (right, r) = self.normalize(d, g, b, ty)?;
         if left.quote() != right.quote() {

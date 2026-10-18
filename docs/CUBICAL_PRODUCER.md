@@ -82,16 +82,28 @@ context lookup, shift, substitution and typing step becomes an ordinary Horn
 rule application. Both kinds of substitution respect both kinds of binder.
 The result is returned only after the ground kernel checks all evidence.
 
-Equality generation currently supports reflexivity and chains of root beta,
-path beta and path endpoint reductions, with symmetry and transitivity. Type
-checking requires syntactically matching inferred/expected object types; it
-has no general conversion search. A failure to generate evidence is not a
-proof that the statement is false.
+Equality generation supports reflexivity and chains of root beta, path beta
+and path endpoint reductions, with symmetry and transitivity. Type checking
+first compares inferred/expected types syntactically. If they differ, it now
+constructs equality evidence in their common universe, checks the destination
+type and applies the existing `type.conv` rule. Reducible function, path and
+universe heads are exposed with the same explicit typing conversion. Requested
+goals retain their original types; the producer does not replace them with
+normalized goals. See [conversion.hcu](../examples/cubical/source/conversion.hcu).
+
+This is bounded root conversion, not full definitional equality. There is no
+reduction under arbitrary constructors or binders, no Pi/lambda congruence
+search and no universe cumulativity. The small path theory has `type.conv` but
+no general `eq.conv` rule: a non-reflexive reduction at a converted equality
+type is reported as unsupported rather than silently retyping the equality.
+Reflexivity still checks both annotated operands before emitting evidence.
+A failure to generate evidence is not a proof that the statement is false.
 
 The producer has resource limits: 128 requests, 32 context variables or
 free dimensions, input indices/levels at most 32, syntax depth 32 and 10,000
 nodes per request, 50,000 generated steps per run, and 32 root reductions per
-side of an equality. These bounds describe the implementation, not the theory.
+side of an equality, and 32 nested conversion obligations. These bounds
+describe the implementation, not the theory.
 The public syntax validator checks these before recursive quotation/inference.
 
 Tests construct fresh identities at several universe levels, beta/path

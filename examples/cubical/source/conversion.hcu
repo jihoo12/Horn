@@ -1,0 +1,24 @@
+; Root beta-equivalent expected and inferred types use explicit type.conv.
+(check expected-beta zero (app (lam A (u 0) A) nat))
+(check inferred-beta (scope () ((x (app (lam A (u 0) A) nat)))) x nat)
+(check argument-beta (app (lam x (app (lam A (u 0) A) nat) x) zero) nat)
+
+; A reducible type head may expose a function or a path.
+(check function-head
+  (scope () ((f (app (lam A (u 0) (pi nat nat)) nat))))
+  (app f zero) nat)
+(equal path-head
+  (scope () ((p (app (lam A (u 0) (path nat zero zero)) nat))))
+  (papp p i0) zero nat)
+
+; Universe recognition also carries the conversion proof.
+(check universe-head
+  (scope () ((A (app (lam B (u 1) (u 0)) (u 0))) (x A)))
+  x A)
+
+; Endpoint types are computed along an arbitrary path of types.
+(check dependent-path-type
+  (scope () ((p (path i (u 0) nat nat))))
+  (path i (papp p i) zero zero) (u 0))
+(check path-beta-type zero (papp (plam i (u 0) nat) i0))
+(equal converted-reflexivity zero zero (app (lam A (u 0) A) nat))
