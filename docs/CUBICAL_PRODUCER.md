@@ -1,10 +1,12 @@
-# Fresh path-theory certificate generation
+# Fresh cubical certificate generation
 
 `cubical::producer::produce` constructs new certificates from typed requests.
 It does not load the frozen univalence oracles or use kamo3 at runtime. It
 uses the existing scoped-path fragment by default. Face assertions select
 the fixed path-plus-faces profile, while systems/restricted assertions select
 the five-fragment systems profile; see [face and system evidence](CUBICAL_FACES_SYSTEMS.md).
+Composition anywhere in the input selects the six-fragment composition profile;
+see [composition evidence](CUBICAL_COMPOSITION.md).
 No rules or kernel code are changed. Replay fresh output with its returned
 `Generated.theory`, which is also written by CLI export.
 
@@ -73,7 +75,7 @@ establishes the fixed elaborated judgments relative to the selected rules.
 
 The annotated `Term` API supports universes, variables, Nat/zero, dependent
 products, annotated lambdas, application, dependent paths, annotated path
-lambdas, path application and annotated coherent systems. Lambda domain,
+lambdas, path application, annotated coherent systems and composition. Lambda domain,
 path-lambda family and system type annotations
 are source metadata, erased from object terms. Their typing obligations are
 still derived. Context types are oldest first at their binding sites;

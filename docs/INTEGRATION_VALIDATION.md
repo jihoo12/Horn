@@ -184,3 +184,69 @@ certificate cannot introduce rules. Local search and restricted inference are
 bounded subsets, not complete decision procedures. The new producer does not
 yet construct composition, Glue or univalence proofs, and no semantic/model
 soundness theorem is claimed for the source frontend or imported specification.
+
+## Native restricted typing and composition
+
+Validated implementation commits `b157480` and `1948b94` in the same rootless
+Nix development shell (Rust 1.91.1). These increments add untrusted proof
+search only; no kamo3 process or frozen oracle is used to generate fresh
+`.hcu` evidence.
+
+- `cargo test --release --locked --offline`: **98 passed, 0 failed**.
+- `cargo fmt --all -- --check` and
+  `cargo clippy --release --locked --offline --all-targets -- -D warnings` pass.
+- Native face-restricted inference checks locally well-formed contexts,
+  functions, paths, systems and type/equality conversion. Tests reject casts
+  escaping their face, casts using an unrelated dimension, universe
+  cumulativity and ill-typed/free terms even on false faces. Ordinary path-only
+  requests retain their original profile and conversion limits.
+- Composition certifies the family, partial tube, both endpoint types, base
+  and start compatibility. Active-face computation requires an explicit face
+  implication and a typed one-endpoint tube. Tests reject bad tube/base types,
+  inconsistent starts, insufficient tube coverage, free variables/dimensions,
+  binder escape and unsupported empty-face/global computation.
+- Tests independently replay all four composition shifts/substitutions,
+  including an ordinary argument containing a free dimension shifted under
+  the composition binder, compound face substitution, and source shadowing.
+  Profile selection scans erased annotations and context types too. Forged
+  conversion/composition steps are rejected by the generic kernel.
+- CLI exports contain the exact selected theory. Both new source files were
+  exported and replayed in separate `kernel` processes (results below).
+- Existing bundled univalence and ua-transport replay and the ordinary `.hn`
+  arithmetic/induction example still pass.
+- A direct diff against `120a8d8` confirms no changes to `src/kernel.rs`
+  (still 547 lines), lexer/S-expression parser, schematic checker, any theory
+  file, Agda models, Cargo dependencies or flake pins. No new kernel rule,
+  postulate or univalence primitive was introduced.
+
+Actual CLI results, invoked inside `nix develop`:
+
+```text
+horn cubical run examples/cubical/source/restricted.hcu --emit NEW_DIR
+ACCEPT (generated cubical): 8 goals, 286 proof steps
+kernel NEW_DIR/theory.horn NEW_DIR/goals NEW_DIR/proof
+ACCEPT: 8 goals, 286 proof steps, 34649 bytes, 354 distinct terms
+
+horn cubical run examples/cubical/source/composition.hcu --emit OTHER_NEW_DIR
+ACCEPT (generated cubical): 8 goals, 683 proof steps
+kernel OTHER_NEW_DIR/theory.horn OTHER_NEW_DIR/goals OTHER_NEW_DIR/proof
+ACCEPT: 8 goals, 683 proof steps, 79806 bytes, 795 distinct terms
+
+horn cubical check all
+ACCEPT (cubical univalence): 2 goals, 185673 proof steps, 35830 oracle bytes
+ACCEPT (cubical ua-transport): 1 goals, 18849 proof steps, 4086 oracle bytes
+
+horn examples/lang/program.hn
+square (add 2 3) => 25
+add (square 3) (mul 2 4) => 17
+certificate accepted: 4 goals, 72 steps, 1 inductions
+```
+
+The composition profile contains exactly the existing first six fragments;
+it does not include Sigma, Glue or type-directed computation extensions.
+Composition typing/face computation is not a complete computational
+univalence evaluator. General congruence/dependent transport, type-directed
+composition, fresh Sigma/equivalence/Glue/ua generation and `.hn`/`.hcu`
+frontend integration remain open. Restricted search remains bounded and
+incomplete. These tests do not establish semantic adequacy of the cubical
+specification or executable-to-Agda refinement.
