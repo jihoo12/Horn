@@ -1,0 +1,34 @@
+-- Natural numbers, defined and reasoned about in the surface language.
+
+sort Nat
+ctor zero : Nat
+ctor succ : Nat → Nat
+
+def add : Nat → Nat → Nat
+| zero,   n => n
+| succ m, n => succ (add m n)
+
+def double : Nat → Nat
+| zero   => zero
+| succ n => succ (succ (double n))
+
+pred le : Nat → Nat → Prop
+rule le.zero : le zero n
+rule le.succ : le m n → le (succ m) (succ n)
+
+#eval add 2 3
+#eval double 4
+#eval add ?x 2 = 5
+#check le 2 4
+
+theorem add_zero (n : Nat) : add n zero = n := by induction n
+theorem add_one (n : Nat) : add n 1 = succ n
+theorem le_refl (n : Nat) : le n n
+theorem le_succ (n : Nat) : le n (succ n)
+
+-- `lt` is defined through `le`; proving `lt n (succ n)` uses `le_refl`.
+pred lt : Nat → Nat → Prop
+rule lt.intro : le (succ m) n → lt m n
+
+theorem lt_succ (n : Nat) : lt n (succ n)
+#check lt 3 7

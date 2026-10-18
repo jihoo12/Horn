@@ -1,6 +1,7 @@
 pub mod compress;
 pub mod generalize;
 pub mod kernel;
+pub mod lang;
 pub mod lex;
 pub mod oracle;
 pub mod replay;

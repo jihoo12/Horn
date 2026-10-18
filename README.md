@@ -36,6 +36,17 @@ certificates, including the 4 GB ua-unglue one. Its checking algorithm is
 modelled and proved sound in [agda/Schematic.agda](agda/Schematic.agda), and
 an accepted certificate can be exported for that model to re-check. See
 [SCHEMATIC.md](docs/SCHEMATIC.md).
+Level-generic univalence (185,682 steps) re-checks in the Agda model in
+six minutes.
+
+## Research: a surface language
+
+`horn FILE.hn` reads a small Lean-style language: sorts, constructors,
+predicates and rules, functions by pattern matching, `#eval`, and theorems
+proved by search or induction. Every answer and theorem goes into one
+schematic certificate that is checked before the run succeeds, and that
+can be exported for the Agda model. See [LANGUAGE.md](docs/LANGUAGE.md) and
+[examples/lang/nat.hn](examples/lang/nat.hn).
 
 ## What 0.2 changes
 
@@ -131,7 +142,7 @@ cargo fmt --all -- --check
 cargo clippy --locked --offline --all-targets -- -D warnings
 cargo test --locked --offline
 cargo test --release --locked --offline
-nix flake check   # Rust build and tests, plus both Agda soundness proofs
+nix flake check   # Rust build and tests, plus the Agda proofs and exports
 ```
 
 All commands above run using this repository alone; no kamo3 checkout or
