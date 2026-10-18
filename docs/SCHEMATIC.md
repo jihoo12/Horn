@@ -216,13 +216,15 @@ well-sorted ground instance of every goal derivable. The `max` certificate
 evaluates to accepted, and a circular induction and the empty-sort step
 evaluate to rejected.
 
-The model differs from `src/schematic.rs` in three ways. Hypotheses are
-judgments rather than step indices; every hypothesis in Rust comes from a
-`hyp` step, so this loses nothing. The model checks explicitly that rule
-bindings are well-sorted; the Rust code gets this from its sort discipline
-(facts are well-sorted and rule variables have one sort), which is argued,
-not mechanized. Parsing, names, `def` and hash-consing are not modelled,
-and no proof connects the Rust code to the model.
+The model makes the same checks as `src/schematic.rs`. In particular it
+does not check the sorts of bindings found by matching: given well-formed
+rules (`RuleWF`, judgments well-sorted for the rule variables' sorts, which
+the kernel's theory parser checks) and the invariant that every fact is
+well-sorted, matching is proved to yield well-sorted bindings. The model
+keeps hypotheses as judgments rather than step indices; every hypothesis in
+Rust comes from a `hyp` step, so this loses nothing. Parsing, names, `def`
+and hash-consing are not modelled, and no proof connects the Rust code to
+the model.
 
 ## What this does and does not establish
 
@@ -240,8 +242,7 @@ and no proof connects the Rust code to the model.
 
 ## Next steps
 
-1. Mechanize the sort discipline that makes rule bindings well-sorted, then
-   decide whether the kernel adopts schematic checking. Connecting either
+1. Decide whether the kernel adopts schematic checking. Connecting either
    Agda model to the Rust code (by extraction and differential testing, or
    by verifying the Rust) remains open for both kernels.
 2. Let kamo3 producers build at a symbolic level directly, instead of

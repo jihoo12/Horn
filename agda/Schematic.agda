@@ -25,10 +25,12 @@
 -- instance substitutions are sort-checked, and induction cases are matched
 -- against a list of each sort's constructors. `accepts-sound` proves that an
 -- accepted certificate makes every well-sorted ground instance of every
--- goal derivable. Differences from src/schematic.rs: hypotheses are kept as
--- judgments rather than step indices; the model checks explicitly that rule
--- bindings are well-sorted, which the Rust code obtains from its sort
--- discipline; parsing, names, `def` and hash-consing are not modelled.
+-- goal derivable. It makes the same checks as src/schematic.rs and no
+-- others: that rule bindings are well-sorted is proved from the theory's
+-- well-formedness (`RuleWF`, which the kernel's theory parser checks) and
+-- the invariant that every fact is well-sorted. Differences: hypotheses are
+-- kept as judgments rather than step indices, and parsing, names, `def` and
+-- hash-consing are not modelled.
 -- No library is imported.
 ------------------------------------------------------------------------
 module Schematic where
@@ -495,26 +497,39 @@ open Rule
 module Calculus (Sg : Signature) (R : List Rule) where
   open Signature Sg
 
+  -- Well-sorted terms, given the sorts `srt` of their variables: eigen-
+  -- variables (`WS`) or the variables of a rule.
   mutual
-    data WS : Tm → ℕ → Set where
-      var  : {x : ℕ} → WS (var x) (vs x)
-      node : {f s : ℕ} {ts : List Tm} → out f ≡ s → WSs ts (ins f) → WS (node f ts) s
+    data WSv (srt : ℕ → ℕ) : Tm → ℕ → Set where
+      var  : {x : ℕ} → WSv srt (var x) (srt x)
+      node : {f s : ℕ} {ts : List Tm} → out f ≡ s → WSsv srt ts (ins f) → WSv srt (node f ts) s
 
-    data WSs : List Tm → List ℕ → Set where
-      []  : WSs [] []
+    data WSsv (srt : ℕ → ℕ) : List Tm → List ℕ → Set where
+      []  : WSsv srt [] []
       _∷_ : {t : Tm} {s : ℕ} {ts : List Tm} {ss : List ℕ}
-          → WS t s → WSs ts ss → WSs (t ∷ ts) (s ∷ ss)
+          → WSv srt t s → WSsv srt ts ss → WSsv srt (t ∷ ts) (s ∷ ss)
 
+  WS : Tm → ℕ → Set
+  WS = WSv vs
+
+  WSs : List Tm → List ℕ → Set
+  WSs = WSsv vs
+
+  -- Substituting well-sorted terms for variables of the same sorts.
   mutual
-    ws-sub : (γ : Subst) {t : Tm} {s : ℕ} → WS t s
-           → (∀ x → Occ x t → WS (γ x) (vs x)) → WS (sub γ t) s
-    ws-sub γ var        g = g _ here
-    ws-sub γ (node e w) g = node e (wss-sub γ w (λ x o → g x (arg o)))
+    ws-sub′ : {srt : ℕ → ℕ} (γ : Subst) {t : Tm} {s : ℕ} → WSv srt t s
+            → (∀ x → Occ x t → WS (γ x) (srt x)) → WS (sub γ t) s
+    ws-sub′ γ var        g = g _ here
+    ws-sub′ γ (node e w) g = node e (wss-sub′ γ w (λ x o → g x (arg o)))
 
-    wss-sub : (γ : Subst) {ts : List Tm} {ss : List ℕ} → WSs ts ss
-            → (∀ x → Occs x ts → WS (γ x) (vs x)) → WSs (subs γ ts) ss
-    wss-sub γ []       g = []
-    wss-sub γ (w ∷ ws) g = ws-sub γ w (λ x o → g x (hd o)) ∷ wss-sub γ ws (λ x o → g x (tl o))
+    wss-sub′ : {srt : ℕ → ℕ} (γ : Subst) {ts : List Tm} {ss : List ℕ} → WSsv srt ts ss
+             → (∀ x → Occs x ts → WS (γ x) (srt x)) → WSs (subs γ ts) ss
+    wss-sub′ γ []       g = []
+    wss-sub′ γ (w ∷ ws) g = ws-sub′ γ w (λ x o → g x (hd o)) ∷ wss-sub′ γ ws (λ x o → g x (tl o))
+
+  ws-sub : (γ : Subst) {t : Tm} {s : ℕ} → WS t s
+         → (∀ x → Occ x t → WS (γ x) (vs x)) → WS (sub γ t) s
+  ws-sub = ws-sub′
 
   GroundWS : Tm → ℕ → Set
   GroundWS t s = Ground t × WS t s
@@ -926,9 +941,27 @@ module Calculus (Sg : Signature) (R : List Rule) where
     matchs-ok (p ∷ ps) []       b ()
 
 
+
+  IsNode : Tm → Set
+  IsNode (var _)    = ⊥
+  IsNode (node _ _) = ⊤
+
+  headSort : Tm → ℕ
+  headSort (var x)    = vs x
+  headSort (node f _) = out f
+
+  -- A rule is well-formed when its premises and conclusion are judgments,
+  -- well-sorted for the sorts of its variables. The kernel's theory parser
+  -- checks this.
+  PatWF : Rule → Tm → Set
+  PatWF r p = IsNode p × WSv (rs r) p (headSort p)
+
+  RuleWF : Rule → Set
+  RuleWF r = All (PatWF r) (prem r) × PatWF r (concl r)
+
   -- `ctors s` lists the constructors of sort s; the checker relies on it
   -- naming every one (in Rust it is built from the declarations).
-  module Algorithm (ctors : ℕ → List ℕ) (complete : ∀ c → c ∈ ctors (out c)) where
+  module Algorithm (wf : All RuleWF R) (ctors : ℕ → List ℕ) (complete : ∀ c → c ∈ ctors (out c)) where
 
     Fact : Set
     Fact = List Tm × Tm
@@ -988,13 +1021,14 @@ module Calculus (Sg : Signature) (R : List Rule) where
     ... | f , e₁ , e₂ with bind-inv (resolveAll fs rs) (λ qs → just (f ∷ qs)) e₂
     ...   | qs , e₃ , refl = resolve-ok fs vf r e₁ ∷ resolveAll-ok fs vf rs e₃
 
-    bindFresh : ℕ → Tm → Env → Maybe Tm → Maybe Env
-    bindFresh x t b nothing  = just (b [ x ↦ t ])
-    bindFresh x t b (just _) = nothing
+    -- An explicit binding must be fresh and of the variable's sort.
+    bindFresh : Rule → ℕ → Tm → Env → Maybe Tm → Maybe Env
+    bindFresh r x t b nothing  = when (ws? t (rs r x)) (b [ x ↦ t ])
+    bindFresh r x t b (just _) = nothing
 
-    bindAll : List (ℕ × Tm) → Env → Maybe Env
-    bindAll []             b = just b
-    bindAll ((x , t) ∷ bs) b = bindFresh x t b (b x) >>= bindAll bs
+    bindAll : Rule → List (ℕ × Tm) → Env → Maybe Env
+    bindAll r []             b = just b
+    bindAll r ((x , t) ∷ bs) b = bindFresh r x t b (b x) >>= bindAll r bs
 
     premisesMatch : List Tm → List Fact → Env → Maybe Env
     premisesMatch []       []       b = just b
@@ -1004,7 +1038,7 @@ module Calculus (Sg : Signature) (R : List Rule) where
 
     conclude : Tm → Maybe Tm → Env → Maybe Env
     conclude p nothing  b = just b
-    conclude p (just j) b = match p j b
+    conclude p (just j) b = when (ws? j (headSort j)) tt >>= λ _ → match p j b
 
     answer : Maybe Tm → Maybe Tm → Maybe Tm
     answer (just j) m = just j
@@ -1014,14 +1048,9 @@ module Calculus (Sg : Signature) (R : List Rule) where
     hypsOf []       = []
     hypsOf (f ∷ qs) = fst f ++ hypsOf qs
 
-    ruleVars : Rule → List ℕ
-    ruleVars r = varss (prem r) ++ vars (concl r)
-
-    -- Bindings are well-sorted, and premise variables occur in the
-    -- conclusion or the hypotheses.
+    -- Premise variables occur in the conclusion or the hypotheses.
     finish : Rule → List Fact → Env → Tm → Maybe Fact
     finish r qs b J =
-      when (all? (λ y → ws? (total b y) (rs r y)) (ruleVars r)) tt >>= λ _ →
       when (all? (λ x → x ∈? (vars J ++ varss (hypsOf qs))) (varss (subs (total b) (prem r))))
            (hypsOf qs , J)
 
@@ -1029,7 +1058,7 @@ module Calculus (Sg : Signature) (R : List Rule) where
     checkRule fs n refs binds stated =
       lookup R n >>= λ r →
       resolveAll fs refs >>= λ qs →
-      bindAll binds empty >>= λ b₀ →
+      bindAll r binds empty >>= λ b₀ →
       conclude (concl r) stated b₀ >>= λ b₁ →
       premisesMatch (prem r) qs b₁ >>= λ b₂ →
       answer stated (instE b₂ (concl r)) >>= finish r qs b₂
@@ -1056,10 +1085,11 @@ module Calculus (Sg : Signature) (R : List Rule) where
 
     checkInduct : List Fact → ℕ → Tm → List (ℕ × List ℕ) → Maybe Fact
     checkInduct fs X J ks =
+      when (ws? J (headSort J)) tt >>= λ _ →
       when (X ∈? vars J) tt >>= λ _ → checkCases fs X J (ctors (vs X)) ks >>= λ _ → just ([] , J)
 
     checkStep : List Fact → Form → Maybe Fact
-    checkStep fs (hypF J)                   = just ((J ∷ []) , J)
+    checkStep fs (hypF J)                   = when (ws? J (headSort J)) ((J ∷ []) , J)
     checkStep fs (ruleF n refs binds stated) = checkRule fs n refs binds stated
     checkStep fs (inductF X J ks)           = checkInduct fs X J ks
 
@@ -1084,14 +1114,126 @@ module Calculus (Sg : Signature) (R : List Rule) where
     accepts : List Tm → List Form → List Ref → Maybe ⊤
     accepts goals forms results = checkSteps [] forms >>= λ fs → checkGoals fs goals results
 
-
     --------------------------------------------------------------------
-    -- Soundness of the algorithm
+    -- Soundness of the algorithm.
+    --
+    -- Invariant: every fact is valid and its judgment is well-sorted. With
+    -- well-formed rules, matching then yields well-sorted bindings, so the
+    -- algorithm needs no sort check beyond those the Rust code makes.
+
+    FactWS : Fact → Set
+    FactWS f = Σ ℕ (WS (snd f))
+
+    Good : Fact → Set
+    Good f = ValidF f × FactWS f
+
+    all-map : {A : Set} {P Q : A → Set} → (∀ {x} → P x → Q x) → {xs : List A} → All P xs → All Q xs
+    all-map f []       = []
+    all-map f (p ∷ ps) = f p ∷ all-map f ps
+
+    just-inj : {A : Set} {x y : A} → just x ≡ just y → x ≡ y
+    just-inj refl = refl
+
+    -- Sorts of the bindings in an assignment, for rule r.
+    EnvWS : Rule → Env → Set
+    EnvWS r b = ∀ y u → b y ≡ just u → WS u (rs r y)
+
+    upd-ws : (r : Rule) {b : Env} {x : ℕ} {t : Tm} → EnvWS r b → WS t (rs r x) → EnvWS r (b [ x ↦ t ])
+    upd-ws r {b} {x} {t} eb w y u e with x ≟ y
+    ... | yes refl = transport (λ v → WS v (rs r x)) (just-inj e) w
+    ... | no _     = eb y u e
+
+    bindAll-ws : (r : Rule) (bs : List (ℕ × Tm)) (b : Env) {c : Env}
+               → bindAll r bs b ≡ just c → EnvWS r b → EnvWS r c
+    bindAll-ws r []             b refl eb = eb
+    bindAll-ws r ((x , t) ∷ bs) b e eb with b x | bind-inv (bindFresh r x t b (b x)) (bindAll r bs) e
+    ... | m | b′ , e₁ , e₂ = bindAll-ws r bs b′ e₂ (fresh m e₁)
+      where
+        fresh : (m : Maybe Tm) → bindFresh r x t b m ≡ just b′ → EnvWS r b′
+        fresh nothing  e′ with when-inv (ws? t (rs r x)) e′
+        ... | w , refl = upd-ws r eb w
+        fresh (just _) ()
+
+    bindVar-ws : (r : Rule) (x : ℕ) (t : Tm) (b : Env) (m : Maybe Tm) {c : Env}
+               → bindVar x t b m ≡ just c → WS t (rs r x) → EnvWS r b → EnvWS r c
+    bindVar-ws r x t b nothing  refl w eb = upd-ws r eb w
+    bindVar-ws r x t b (just u) e    w eb with when-inv (u ≟ₜ t) e
+    ... | _ , refl = eb
+
+    mutual
+      match-ws : (r : Rule) (p t : Tm) (b : Env) {c : Env} {s : ℕ}
+               → match p t b ≡ just c → WSv (rs r) p s → WS t s → EnvWS r b → EnvWS r c
+      match-ws r (var x) t b e var w eb = bindVar-ws r x t b (b x) e w eb
+      match-ws r (node f ps) (var _) b () wp w eb
+      match-ws r (node f ps) (node g ts) b e (node _ wps) (node _ wts) eb
+        with bind-inv (when (f ≟ g) b) (matchs ps ts) e
+      ... | b′ , e₁ , e₂ with when-inv (f ≟ g) e₁
+      ...   | refl , refl = matchs-ws r ps ts b e₂ wps wts eb
+
+      matchs-ws : (r : Rule) (ps ts : List Tm) (b : Env) {c : Env} {ss : List ℕ}
+                → matchs ps ts b ≡ just c → WSsv (rs r) ps ss → WSs ts ss → EnvWS r b → EnvWS r c
+      matchs-ws r []       []       b refl wp w eb = eb
+      matchs-ws r (p ∷ ps) (t ∷ ts) b e (wp ∷ wps) (w ∷ ws) eb
+        with bind-inv (match p t b) (matchs ps ts) e
+      ... | c₁ , e₁ , e₂ = matchs-ws r ps ts c₁ e₂ wps ws (match-ws r p t b e₁ wp w eb)
+      matchs-ws r []       (t ∷ ts) b () wp w eb
+      matchs-ws r (p ∷ ps) []       b () wp w eb
+
+    -- A judgment pattern matches only judgments with the same head, so the
+    -- sorts agree even though they are stated separately.
+    match-top-ws : (r : Rule) (p t : Tm) (b : Env) {c : Env} {s₁ s₂ : ℕ} → IsNode p
+                 → match p t b ≡ just c → WSv (rs r) p s₁ → WS t s₂ → EnvWS r b → EnvWS r c
+    match-top-ws r (node f ps) (var _)     b n () wp w eb
+    match-top-ws r (node f ps) (node g ts) b n e (node _ wps) (node _ wts) eb
+      with bind-inv (when (f ≟ g) b) (matchs ps ts) e
+    ... | b′ , e₁ , e₂ with when-inv (f ≟ g) e₁
+    ...   | refl , refl = matchs-ws r ps ts b e₂ wps wts eb
+
+    premisesMatch-ws : (r : Rule) (ps : List Tm) (qs : List Fact) (b : Env) {c : Env}
+                     → All (PatWF r) ps → All FactWS qs
+                     → premisesMatch ps qs b ≡ just c → EnvWS r b → EnvWS r c
+    premisesMatch-ws r []       []       b wp wq refl eb = eb
+    premisesMatch-ws r (p ∷ ps) (f ∷ qs) b ((n , wp) ∷ wps) ((s , w) ∷ wq) e eb
+      with bind-inv (match p (snd f) b) (premisesMatch ps qs) e
+    ... | c₁ , e₁ , e₂ =
+          premisesMatch-ws r ps qs c₁ wps wq e₂ (match-top-ws r p (snd f) b n e₁ wp w eb)
+    premisesMatch-ws r []       (f ∷ qs) b wp wq () eb
+    premisesMatch-ws r (p ∷ ps) []       b wp wq () eb
+
+    conclude-ws : (r : Rule) (st : Maybe Tm) (b₀ : Env) {b₁ : Env}
+                → conclude (concl r) st b₀ ≡ just b₁ → EnvWS r b₀ → PatWF r (concl r) → EnvWS r b₁
+    conclude-ws r nothing  b₀ refl eb wf′ = eb
+    conclude-ws r (just j) b₀ e    eb (n , wp)
+      with bind-inv (when (ws? j (headSort j)) tt) (λ _ → match (concl r) j b₀) e
+    ... | _ , ew , e₁ with when-inv (ws? j (headSort j)) ew
+    ...   | wj , _ = match-top-ws r (concl r) j b₀ n e₁ wp wj eb
+
+    -- Every variable of a pattern that instantiates is bound.
+    mutual
+      inst-bound : (c : Env) (p : Tm) {t : Tm} {y : ℕ} → instE c p ≡ just t → Occ y p
+                 → Σ Tm (λ u → c y ≡ just u)
+      inst-bound c (var x) e here = _ , e
+      inst-bound c (node f ps) e (arg o) with bind-inv (instsE c ps) (λ ts → just (node f ts)) e
+      ... | ts , e₁ , _ = insts-bound c ps e₁ o
+
+      insts-bound : (c : Env) (ps : List Tm) {ts : List Tm} {y : ℕ} → instsE c ps ≡ just ts → Occs y ps
+                  → Σ Tm (λ u → c y ≡ just u)
+      insts-bound c (p ∷ ps) e o
+        with bind-inv (instE c p) (λ t → instsE c ps >>= λ ts → just (t ∷ ts)) e
+      ... | t , e₁ , e₂ with bind-inv (instsE c ps) (λ ts → just (t ∷ ts)) e₂
+      ...   | ts , e₃ , _ with o
+      ...     | hd o′ = inst-bound c p e₁ o′
+      ...     | tl o′ = insts-bound c ps e₃ o′
 
     data PremsAt (c : Env) : List Tm → List Fact → Set where
       []   : PremsAt c [] []
       cons : {p : Tm} {ps : List Tm} {f : Fact} {qs : List Fact}
            → instE c p ≡ just (snd f) → ValidF f → PremsAt c ps qs → PremsAt c (p ∷ ps) (f ∷ qs)
+
+    premsAt-bound : (c : Env) {ps : List Tm} {qs : List Fact} {y : ℕ} → PremsAt c ps qs → Occs y ps
+                  → Σ Tm (λ u → c y ≡ just u)
+    premsAt-bound c {p ∷ ps} (cons e v rest) (hd o) = inst-bound c p e o
+    premsAt-bound c          (cons e v rest) (tl o) = premsAt-bound c rest o
 
     premisesMatch-ok : (ps : List Tm) (qs : List Fact) (b : Env) {c : Env} → All ValidF qs
                      → premisesMatch ps qs b ≡ just c → (b ⊑ c) × PremsAt c ps qs
@@ -1113,48 +1255,87 @@ module Calculus (Sg : Signature) (R : List Rule) where
                   → conclude p st b₀ ≡ just b₁ → b₁ ⊑ b₂
                   → answer st (instE b₂ p) ≡ just t → instE b₂ p ≡ just t
     conclusion-ok p nothing  b₀ b₁ b₂ e ext a = a
-    conclusion-ok p (just j) b₀ b₁ b₂ e ext refl with match-ok p j b₀ e
-    ... | _ , ok = inst-mono ext p ok
+    conclusion-ok p (just j) b₀ b₁ b₂ e ext refl
+      with bind-inv (when (ws? j (headSort j)) tt) (λ _ → match p j b₀) e
+    ... | _ , _ , e₁ with match-ok p j b₀ e₁
+    ...   | _ , ok = inst-mono ext p ok
 
-    rule-ok : (fs : List Fact) → All ValidF fs → (n : ℕ) (refs : List Ref)
+    resolve-ws : (fs : List Fact) → All FactWS fs → (r : Ref) {f : Fact}
+               → resolve fs r ≡ just f → FactWS f
+    resolve-ws fs wf′ (ref n) e = all-lookup n wf′ e
+    resolve-ws fs wf′ (at n bs) e with bind-inv (lookup fs n) (instFact bs) e
+    ... | ([] , J) , e₁ , e₂ with when-inv (all? (λ b → ws? (snd b) (vs (fst b))) bs) e₂
+    ...   | ws , refl with all-lookup n wf′ e₁
+    ...     | s , w = s , ws-sub (substOf bs) w (λ x _ → substOf-ws bs ws x)
+    resolve-ws fs wf′ (at n bs) e | ((h ∷ H) , J) , e₁ , ()
+
+    resolveAll-ws : (fs : List Fact) → All FactWS fs → (rs : List Ref) {qs : List Fact}
+                  → resolveAll fs rs ≡ just qs → All FactWS qs
+    resolveAll-ws fs wf′ []       refl = []
+    resolveAll-ws fs wf′ (r ∷ rs) e
+      with bind-inv (resolve fs r) (λ f → resolveAll fs rs >>= λ qs → just (f ∷ qs)) e
+    ... | f , e₁ , e₂ with bind-inv (resolveAll fs rs) (λ qs → just (f ∷ qs)) e₂
+    ...   | qs , e₃ , refl = resolve-ws fs wf′ r e₁ ∷ resolveAll-ws fs wf′ rs e₃
+
+    rule-ok : (fs : List Fact) → All Good fs → (n : ℕ) (refs : List Ref)
               (binds : List (ℕ × Tm)) (stated : Maybe Tm) {f : Fact}
-            → checkRule fs n refs binds stated ≡ just f → ValidF f
-    rule-ok fs vf n refs binds stated e
+            → checkRule fs n refs binds stated ≡ just f → Good f
+    rule-ok fs gf n refs binds stated e
       with bind-inv (lookup R n) _ e
     ... | r , er , e₁ with bind-inv (resolveAll fs refs) _ e₁
-    ... | qs , eq , e₂ with bind-inv (bindAll binds empty) _ e₂
-    ... | b₀ , _ , e₃ with bind-inv (conclude (concl r) stated b₀) _ e₃
+    ... | qs , eq , e₂ with bind-inv (bindAll r binds empty) _ e₂
+    ... | b₀ , eb , e₃ with bind-inv (conclude (concl r) stated b₀) _ e₃
     ... | b₁ , ec , e₄ with bind-inv (premisesMatch (prem r) qs b₁) _ e₄
     ... | b₂ , ep , e₅ with bind-inv (answer stated (instE b₂ (concl r))) (finish r qs b₂) e₅
-    ... | J , ea , e₆ with bind-inv (when (all? (λ y → ws? (total b₂ y) (rs r y)) (ruleVars r)) tt) _ e₆
-    ... | _ , ew , e₇ with when-inv (all? (λ y → ws? (total b₂ y) (rs r y)) (ruleVars r)) ew
-    ... | wsAll , _ with when-inv (all? (λ x → x ∈? (vars J ++ varss (hypsOf qs)))
-                                        (varss (subs (total b₂) (prem r)))) e₇
-    ... | sideAll , refl =
-          transport (Valid (hypsOf qs)) concl-eq
-            (step-valid (lookup-∈ R n er) θ wθ (premsAt-sem b₂ (snd pm)) side)
+    ... | J , ea , e₆ with when-inv (all? (λ x → x ∈? (vars J ++ varss (hypsOf qs)))
+                                        (varss (subs (total b₂) (prem r)))) e₆
+    ... | sideAll , refl = valid , (headSort (concl r) , transport (λ t → WS t _) concl-eq wsJ)
       where
+        vf : All ValidF fs
+        vf = all-map fst gf
+
+        wfs : All FactWS fs
+        wfs = all-map snd gf
+
+        wfr : RuleWF r
+        wfr = all-lookup n wf er
+
         θ : Subst
         θ = total b₂
 
         pm : (b₁ ⊑ b₂) × PremsAt b₂ (prem r) qs
         pm = premisesMatch-ok (prem r) qs b₁ (resolveAll-ok fs vf refs eq) ep
 
+        concl-inst : instE b₂ (concl r) ≡ just J
+        concl-inst = conclusion-ok (concl r) stated b₀ b₁ b₂ ec (fst pm) ea
+
         concl-eq : sub θ (concl r) ≡ J
-        concl-eq = inst-subst b₂ (concl r) (conclusion-ok (concl r) stated b₀ b₁ b₂ ec (fst pm) ea)
+        concl-eq = inst-subst b₂ (concl r) concl-inst
+
+        -- The bindings are well-sorted: explicit ones are checked, the rest
+        -- come from matching well-sorted facts against well-formed patterns.
+        env : EnvWS r b₂
+        env = premisesMatch-ws r (prem r) qs b₁ (fst wfr) (resolveAll-ws fs wfs refs eq) ep
+                (conclude-ws r stated b₀ ec (bindAll-ws r binds empty eb (λ y u ())) (snd wfr))
+
+        bound-ws : ∀ y → Σ Tm (λ u → b₂ y ≡ just u) → WS (θ y) (rs r y)
+        bound-ws y (u , e′) = transport (λ m → WS (fromMaybe m) (rs r y)) (sym e′) (env y u e′)
 
         wθ : ∀ y → OccR y r → WS (θ y) (rs r y)
-        wθ y (inl o) = all-∈ wsAll (any-++ˡ (occs-varss (prem r) o))
-        wθ y (inr o) = all-∈ wsAll (any-++ʳ (varss (prem r)) (occ-vars (concl r) o))
+        wθ y (inl o) = bound-ws y (premsAt-bound b₂ (snd pm) o)
+        wθ y (inr o) = bound-ws y (inst-bound b₂ (concl r) concl-inst o)
+
+        wsJ : WS (sub θ (concl r)) (headSort (concl r))
+        wsJ = ws-sub′ θ (snd (snd wfr)) (λ y o → wθ y (inr o))
 
         side : ∀ x → Occs x (subs θ (prem r)) → Vars (hypsOf qs) (sub θ (concl r)) x
         side x o with ∈-++⁻ (vars J) (all-∈ sideAll (occs-varss (subs θ (prem r)) o))
         ... | inl m = inl (transport (Occ x) (sym concl-eq) (vars-occ J m))
         ... | inr m = inr (occs-any (varss-occs (hypsOf qs) m))
 
-    all-map : {A : Set} {P Q : A → Set} → (∀ {x} → P x → Q x) → {xs : List A} → All P xs → All Q xs
-    all-map f []       = []
-    all-map f (p ∷ ps) = f p ∷ all-map f ps
+        valid : Valid (hypsOf qs) J
+        valid = transport (Valid (hypsOf qs)) concl-eq
+                  (step-valid (lookup-∈ R n er) θ wθ (premsAt-sem b₂ (snd pm)) side)
 
     any-witness : {P : ℕ → Set} {ys : List ℕ} → Any P ys → Σ ℕ (λ y → (y ∈ ys) × P y)
     any-witness (here p)  = _ , here refl , p
@@ -1181,26 +1362,30 @@ module Calculus (Sg : Signature) (R : List Rule) where
     cases-ok fs vf X J []       (k ∷ ks) ()
     cases-ok fs vf X J (c ∷ cs) []       ()
 
-    induct-ok : (fs : List Fact) → All ValidF fs → (X : ℕ) (J : Tm) (ks : List (ℕ × List ℕ)) {f : Fact}
-              → checkInduct fs X J ks ≡ just f → ValidF f
-    induct-ok fs vf X J ks e with bind-inv (when (X ∈? vars J) tt) _ e
+    induct-ok : (fs : List Fact) → All Good fs → (X : ℕ) (J : Tm) (ks : List (ℕ × List ℕ)) {f : Fact}
+              → checkInduct fs X J ks ≡ just f → Good f
+    induct-ok fs gf X J ks e with bind-inv (when (ws? J (headSort J)) tt) _ e
+    ... | _ , ewj , e₀ with when-inv (ws? J (headSort J)) ewj
+    ... | wJ , _ with bind-inv (when (X ∈? vars J) tt) _ e₀
     ... | _ , em , e₁ with when-inv (X ∈? vars J) em
-    ...   | mX , _ with bind-inv (checkCases fs X J (ctors (vs X)) ks) _ e₁
-    ...     | _ , ec , refl =
-              Induction.induction X J (vars-occ J mX)
-                (λ c ce → all-∈ (cases-ok fs vf X J (ctors (vs X)) ks ec)
-                                (transport (λ s → c ∈ ctors s) ce (complete c)))
+    ... | mX , _ with bind-inv (checkCases fs X J (ctors (vs X)) ks) _ e₁
+    ... | _ , ec , refl =
+          Induction.induction X J (vars-occ J mX)
+            (λ c ce → all-∈ (cases-ok fs (all-map fst gf) X J (ctors (vs X)) ks ec)
+                            (transport (λ s → c ∈ ctors s) ce (complete c)))
+          , (headSort J , wJ)
 
-    step-ok : (fs : List Fact) → All ValidF fs → (s : Form) {f : Fact} → checkStep fs s ≡ just f → ValidF f
-    step-ok fs vf (hypF J)                    refl = hyp-valid J
-    step-ok fs vf (ruleF n refs binds stated) e    = rule-ok fs vf n refs binds stated e
-    step-ok fs vf (inductF X J ks)            e    = induct-ok fs vf X J ks e
+    step-ok : (fs : List Fact) → All Good fs → (s : Form) {f : Fact} → checkStep fs s ≡ just f → Good f
+    step-ok fs gf (hypF J) e with when-inv (ws? J (headSort J)) e
+    ... | w , refl = hyp-valid J , (headSort J , w)
+    step-ok fs gf (ruleF n refs binds stated) e = rule-ok fs gf n refs binds stated e
+    step-ok fs gf (inductF X J ks)            e = induct-ok fs gf X J ks e
 
-    steps-ok : (fs : List Fact) → All ValidF fs → (ss : List Form) {gs : List Fact}
-             → checkSteps fs ss ≡ just gs → All ValidF gs
-    steps-ok fs vf []       refl = vf
-    steps-ok fs vf (s ∷ ss) e with bind-inv (checkStep fs s) _ e
-    ... | f , e₁ , e₂ = steps-ok (fs ++ (f ∷ [])) (all-snoc vf (step-ok fs vf s e₁)) ss e₂
+    steps-ok : (fs : List Fact) → All Good fs → (ss : List Form) {gs : List Fact}
+             → checkSteps fs ss ≡ just gs → All Good gs
+    steps-ok fs gf []       refl = gf
+    steps-ok fs gf (s ∷ ss) e with bind-inv (checkStep fs s) _ e
+    ... | f , e₁ , e₂ = steps-ok (fs ++ (f ∷ [])) (all-snoc gf (step-ok fs gf s e₁)) ss e₂
 
     closed-fact : (f : Fact) {g : Tm} → fst f ≡ [] → snd f ≡ g → ValidF f → Valid [] g
     closed-fact ([] , J) refl refl v = v
@@ -1221,7 +1406,8 @@ module Calculus (Sg : Signature) (R : List Rule) where
                   → accepts goals forms results ≡ just tt
                   → All (λ g → ∀ γ → GW γ (λ x → Occ x g) → Der (sub γ g)) goals
     accepts-sound goals forms results e with bind-inv (checkSteps [] forms) _ e
-    ... | fs , e₁ , e₂ = all-map closed (goals-ok fs (steps-ok [] [] forms e₁) goals results e₂)
+    ... | fs , e₁ , e₂ =
+          all-map closed (goals-ok fs (all-map fst (steps-ok [] [] forms e₁)) goals results e₂)
 
 ------------------------------------------------------------------------
 -- Example: max l l l, admissible but not derivable, by induction on l.
@@ -1321,7 +1507,15 @@ private
     complete 1             = there (here refl)
     complete (suc (suc n)) = here refl
 
-    open Algorithm ctors complete
+    rules-wf : All RuleWF rules
+    rules-wf = ([] , (tt , node refl (node refl [] ∷ var ∷ var ∷ [])))
+             ∷ (((tt , node refl (var ∷ var ∷ var ∷ [])) ∷ []) , (tt , node refl (s′ 0 ∷ s′ 1 ∷ s′ 2 ∷ [])))
+             ∷ []
+      where
+        s′ : (n : ℕ) → WSv (λ _ → 0) (S (var n)) 0
+        s′ n = node refl (var ∷ [])
+
+    open Algorithm rules-wf ctors complete
 
     certificate : List Form
     certificate =
@@ -1410,7 +1604,12 @@ private
     complete : ∀ c → c ∈ ctors (suc c)
     complete c = here refl
 
-    open Algorithm ctors complete
+    rules-wf : All RuleWF (intro ∷ elim ∷ [])
+    rules-wf = ([] , (tt , node refl (var ∷ [])))
+             ∷ (((tt , node refl (var ∷ [])) ∷ []) , (tt , node refl []))
+             ∷ []
+
+    open Algorithm rules-wf ctors complete
 
     -- The checker rejects the elim step from p X.
     elim-step-rejected :
