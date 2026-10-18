@@ -90,10 +90,10 @@ ground/schematic checkers and Agda models are unchanged.
    coverage, non-overlap, positivity and termination checks before claiming
    Lean-like total-function semantics. Partial runtime computation needs a
    separate, explicit contract.
-3. Generate compact/oracle evidence directly so checking does not require
-   materializing multi-gigabyte intermediate proofs. Track generation memory
-   separately from checker memory; kamo3's deep-univalence test exceeds the
-   current 8 GiB environment even in release mode.
+3. Done for the bundled examples: `horn cubical generate` streams the
+   engine's derivation into the oracle encoder, so no multi-gigabyte proof
+   is materialized (univalence: 60 s, 1.1 GB peak). The producer itself still
+   keeps every step in memory.
 4. Export implicational certificates to the Agda model, support multiple
    universe variables and dependent computation, and connect the executable
    checkers to their models. Prove adequacy/soundness of the cubical encoding

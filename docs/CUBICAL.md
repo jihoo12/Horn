@@ -83,9 +83,9 @@ cargo run --release --locked --offline --bin kernel -- \
 
 The last two commands materialize the full proof and are optional. Normal
 checking streams and does not create the approximately 277 MB original proof.
-kamo3's combined generation/checking
-unit test exceeded this environment's 8 GiB limit; this is not a fix for the
-producer's memory consumption.
+kamo3's combined generation/checking unit test exceeded 8 GiB, mostly in
+its older, non-hash-consed kernel; regeneration inside Horn (below) streams
+into the oracle encoder instead.
 
 ## Regeneration inside Horn
 
