@@ -321,3 +321,76 @@ and EXPECTED separately. Stronger congruence/dependent transport,
 type-directed composition, fresh equivalence witnesses and Glue/ua/univalence
 producers, and connection to the ordinary frontend remain open. No semantic
 soundness or executable-to-Agda refinement theorem is claimed here.
+
+## Fresh Glue typing and beta/face/eta evidence
+
+Validated implementation commits `0ac8b0a` and `641e26f` in the rootless Nix
+shell (Rust 1.91.1). Fresh evidence is generated in Horn without kamo3 or any
+frozen oracle. The existing ninth Glue theory fragment is used unchanged.
+
+- `cargo test --release --locked --offline`: **117 passed, 0 failed**.
+- `cargo fmt --all -- --check` and strict all-target release clippy pass.
+- Nine Glue regression tests cover formation, value creation, elimination,
+  beta, type/value/unglue face equations and reconstruction eta, with separate
+  generic-kernel replay. Corrupted typing/face/eta steps are rejected.
+- Every value checks its partial value, ambient base, mapped boundary and
+  their overlap equality. Wrong equivalences, types, universe levels and
+  inconsistent boundaries fail before export. No equivalence axiom or fresh
+  witness proof is substituted for an obligation.
+- Partially typed system equivalences and contexts well formed only on a face
+  work. Covered compound faces compute; unrelated faces and the putative
+  endpoint excluded middle do not give global equations. A forged req.export
+  from a local Glue equation is rejected by the generic checker.
+- All twelve ordinary/dimension operations for glue-type/glue/unglue replay,
+  including free ordinary/dimension references and compound interval
+  substitution in both the attaching face and a computed equivalence.
+- A regression exposed a reducible alias to an active Glue type: normalizing
+  past that head lost the structure required by unglue. Restricted exposure
+  can now stop at the required Glue head, retaining checked rhas.conv evidence
+  at each step. Global and local aliases pass; aliases to Nat still fail.
+- Empty-face systems provide scoped typed partial evidence. Existing req.false
+  and rhas.conv also legitimately retype already typed terms between
+  well-formed types in the same universe on ff. Tests distinguish this valid
+  behavior from unscoped/unsupported terms. No rhas.false step is used or added.
+- Source/macro/annotation selection picks exactly the first nine fragments.
+  The equality/congruence extension and type-directed computation fragments
+  are absent. CLI export includes the exact selected theory, not all rules.
+- Both actual CLI exports replay in separate kernel processes. Existing
+  univalence/ua-transport replay and ordinary arithmetic/induction execution
+  retain their previous results.
+- A direct diff against `6c829e6` confirms no changes to the 547-line kernel,
+  lexer/S-expression parser, schematic checker, any object theory, Agda models,
+  Cargo dependencies or flake pins.
+
+Actual release CLI results, inside `nix develop`:
+
+```text
+horn cubical run examples/cubical/source/glue.hcu --emit NEW_DIR
+ACCEPT (generated cubical): 10 goals, 2005 proof steps
+kernel NEW_DIR/theory.horn NEW_DIR/goals NEW_DIR/proof
+ACCEPT: 10 goals, 2005 proof steps, 678075 bytes, 2161 distinct terms
+
+horn cubical run examples/cubical/source/glue-faces.hcu --emit OTHER_NEW_DIR
+ACCEPT (generated cubical): 6 goals, 5013 proof steps
+kernel OTHER_NEW_DIR/theory.horn OTHER_NEW_DIR/goals OTHER_NEW_DIR/proof
+ACCEPT: 6 goals, 5013 proof steps, 1798515 bytes, 5448 distinct terms
+
+horn cubical check all
+ACCEPT (cubical univalence): 2 goals, 185673 proof steps, 35830 oracle bytes
+ACCEPT (cubical ua-transport): 1 goals, 18849 proof steps, 4086 oracle bytes
+
+horn examples/lang/program.hn
+square (add 2 3) => 25
+add (square 3) (mul 2 4) => 17
+certificate accepted: 4 goals, 72 steps, 1 inductions
+```
+
+The nonempty examples use declared equivalence hypotheses. The closed empty
+example gives only the partial typing needed on ff, not a global equivalence
+inhabitant. General congruence/dependent transport, type-directed composition
+including Glue, fresh equivalence witnesses and ua/univalence generation,
+and the connection to the ordinary language frontend remain open. In
+particular application does not yet reduce a projected pair underneath its
+function head in this profile. This increment is not a full computational
+univalence implementation. Object-theory adequacy, source elaboration
+correctness and executable-to-Agda refinement remain separate obligations.

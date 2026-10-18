@@ -49,4 +49,5 @@ composition reduction and no universe cumulativity. Pair annotation heads
 must elaborate to literal Sigma syntax; arbitrary convertible annotations are not
 inferred. Source, conversion, face-search and proof-size bounds still apply.
 [Equivalence definitions](CUBICAL_EQUIVALENCE.md) are now certified source
-abbreviations; fresh Glue/ua production remains a separate increment.
+abbreviations. [Fresh Glue typing and face evidence](CUBICAL_GLUE.md) use a
+separate profile; type-directed composition and fresh ua remain later steps.

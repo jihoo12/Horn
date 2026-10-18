@@ -119,5 +119,6 @@ selection is based on the requested constructs before evidence generation;
 a certificate cannot install rules. `Generated.theory` and CLI export expose
 the actual specification used. Input systems have at most 16 branches each;
 restricted equality search has a depth limit of 64 in addition to shared
-source, face-search and emitted-step limits. General congruence and Glue
-generation remain later steps.
+source, face-search and emitted-step limits. Fresh Glue typing and equations
+use a [separate nine-fragment profile](CUBICAL_GLUE.md). General congruence and
+Glue-directed composition remain later steps.

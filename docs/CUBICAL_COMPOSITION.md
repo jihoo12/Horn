@@ -45,9 +45,13 @@ and can be checked with the independent generic `kernel` executable.
 This is composition typing and active-face computation, not a complete
 Kan operation evaluator. There is no regularity equation identifying an
 empty-face composition with BASE. Nat/Pi/Sigma/Path/Glue/universe-directed
-composition reduction, general congruence, fresh Glue/ua/univalence evidence
+composition reduction, general congruence, fresh ua/univalence evidence
 and connection to the `.hn` frontend remain future work. Unsupported proof
 search is rejected; it is not a counterexample. All source, face-search,
 conversion, restricted-equality and emitted-step bounds remain in force.
 The unchanged object theory's semantic adequacy is a separate obligation
 from checking certificates against that theory.
+
+[Fresh Glue typing and beta/face/eta evidence](CUBICAL_GLUE.md) now use a
+separate fixed profile; Glue-directed composition is still outside this
+composition subset.
