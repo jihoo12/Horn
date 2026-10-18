@@ -140,10 +140,13 @@ impl RestrictedProducer {
         }
         // A family that is itself a redex (for example a system whose branch
         // holds) is reduced under the composition binder first, by comp-cong.
+        let family_head = shape(family)?.0;
         if matches!(
-            shape(family)?.0,
-            "system" | "ann" | "papp" | "app" | "fst" | "snd" | "bif" | "comp" | "unglue"
-        ) {
+            family_head,
+            "system" | "ann" | "papp" | "app" | "fst" | "snd" | "bif" | "comp" | "unglue" | "natrec"
+                | "s1rec"
+        ) || crate::cubical::engine::data::by_elim(family_head).is_some()
+        {
             let (g2, gi) = self.f.path.dshiftctx(g, 0)?;
             let (psi2, psii) = self.f.path.ftransform(&psi.quote(), &Op::DShift(0))?;
             let psi2 = Face::parse(&psi2)?;

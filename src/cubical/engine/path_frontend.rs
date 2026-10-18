@@ -193,6 +193,25 @@ impl PathProducer {
         let out = match (head, args) {
             ("u", [_]) | ("nat", []) | ("zero", []) => t.clone(),
             ("bool" | "btrue" | "bfalse", []) => t.clone(),
+            ("s1" | "base", []) => t.clone(),
+            ("loop", [r]) => {
+                if op.dimension() {
+                    let (r2, id) = self.itransform(r, op)?;
+                    refs.push(id);
+                    call("loop", [r2])
+                } else {
+                    t.clone()
+                }
+            }
+            ("s1rec", xs) if xs.len() == 4 => {
+                let mut out = Vec::new();
+                for x in xs {
+                    let (x2, id) = self.transform(x, op)?;
+                    refs.push(id);
+                    out.push(x2);
+                }
+                call("s1rec", out)
+            }
             ("suc", [n]) => {
                 let (n2, id) = self.transform(n, op)?;
                 refs.push(id);

@@ -19,6 +19,10 @@ mod equivalence_ops;
 #[allow(dead_code)]
 mod equality_frontend;
 
+#[path = "circle_frontend.rs"]
+#[allow(dead_code)]
+mod circle_frontend;
+
 #[path = "data_frontend.rs"]
 #[allow(dead_code)]
 mod data_frontend;
@@ -335,6 +339,15 @@ impl RestrictedProducer {
         let refs = match (head, args) {
             ("u", [_]) | ("nat" | "zero", []) => vec![],
             ("bool" | "btrue" | "bfalse", []) => vec![],
+            ("s1" | "base", []) => vec![],
+            ("loop", [r]) => vec![self.f.path.interval(d, r)?],
+            ("s1rec", xs) if xs.len() == 4 => {
+                let mut refs = Vec::new();
+                for x in xs {
+                    refs.push(self.scope(d, n, x)?);
+                }
+                refs
+            }
             ("suc", [x]) => vec![self.scope(d, n, x)?],
             ("bif" | "natrec", [p, tt, f, b]) => vec![
                 self.scope(d, n + 1, p)?,
@@ -745,6 +758,11 @@ impl RestrictedProducer {
                 )
             }
             _ => {
+                if let Some((ty, rule, refs)) = self.infer_circle(d, g, phi, t)? {
+                    let id = self.has(d, g, phi, t, &ty, &rule, refs);
+                    self.remember(d, g, phi, t, &ty, id);
+                    return Ok((ty, id));
+                }
                 if let Some((ty, rule, refs)) = self.infer_declared(d, g, phi, t)? {
                     let id = self.has(d, g, phi, t, &ty, &rule, refs);
                     self.remember(d, g, phi, t, &ty, id);
@@ -1548,6 +1566,9 @@ impl RestrictedProducer {
             && let Some(out) = self.reduce_composition(d, g, phi, t, &ty, ti)?
         {
             return Ok(out);
+        }
+        if let Some(reduced) = self.reduce_circle(d, g, phi, t, &ty, ti)? {
+            return Ok(reduced);
         }
         if let Some(reduced) = self.reduce_declared(d, g, phi, t, &ty, ti)? {
             return Ok(reduced);

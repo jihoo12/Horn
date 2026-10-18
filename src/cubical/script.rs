@@ -113,7 +113,7 @@ const RESERVED: &[&str] = &[
     "bool", "btrue", "bfalse", "nat", "zero", "i0", "i1", "u", "pi", "lam", "app", "sigma",
     "pair", "fst", "snd", "path", "plam", "papp", "bif", "ann", "equiv", "transport", "neg",
     "meet", "join", "ua", "iso-equiv", "suc", "natrec", "data", "elim", "ua-at",
-    "iso-equiv-at", "at", "def-poly", "univalence-at",
+    "iso-equiv-at", "at", "def-poly", "univalence-at", "s1", "base", "loop", "s1rec",
 ];
 
 struct Elaborator {
@@ -252,7 +252,7 @@ impl Elaborator {
     fn term(&mut self, s: &Sexp, names: &Names) -> Result<Sexp> {
         let xs = match s {
             Sexp::Atom(a) => {
-                return if ["bool", "btrue", "bfalse", "nat", "zero"].contains(&&**a) {
+                return if ["bool", "btrue", "bfalse", "nat", "zero", "s1", "base"].contains(&&**a) {
                     Ok(s.clone())
                 } else if let Ok(n) = a.parse::<usize>()
                     && a.bytes().all(|c| c.is_ascii_digit())
@@ -335,6 +335,11 @@ impl Elaborator {
             ),
             ("papp", [p, r]) => papp(self.term(p, names)?, self.interval(r, names)?),
             ("suc", [n]) => call("suc", [self.term(n, names)?]),
+            ("loop", [r]) => call("loop", [self.interval(r, names)?]),
+            ("s1rec", [a, b, l, x]) => call(
+                "s1rec",
+                [self.term(a, names)?, self.term(b, names)?, self.term(l, names)?, self.term(x, names)?],
+            ),
             (head @ ("bif" | "natrec"), [c, motive, t, f, b]) => call(
                 head,
                 [

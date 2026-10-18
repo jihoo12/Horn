@@ -304,3 +304,24 @@ fn addition_transported_to_binary_numbers_computes() {
         ]
     );
 }
+
+#[test]
+fn the_winding_number_of_loop_computes() {
+    let script =
+        cubical::script::run(include_str!("../examples/cubical/script/circle.hcs")).unwrap();
+    let shown: Vec<_> = script
+        .evaluations
+        .iter()
+        .map(|e| format!("{} = {} : {}", e.name, e.value, e.ty))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            "loop-once = (pos 1) : int",
+            "constant = (pos 0) : int",
+            "loop-backwards = (negsuc 0) : int"
+        ]
+    );
+    // The circle is not discrete: no composition rule returns a base in s1.
+    assert!(!script.certified.theory.contains("(comp s1 "));
+}

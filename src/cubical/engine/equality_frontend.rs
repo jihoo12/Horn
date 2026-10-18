@@ -269,6 +269,9 @@ impl RestrictedProducer {
             let eq = self.equality(d, g, phi, b, a, ty)?;
             return Ok(self.eq(d, g, phi, a, b, ty, "req.sym", vec![eq]));
         }
+        if let Some(eq) = self.congruence_circle(d, g, phi, a, b, ty)? {
+            return Ok(eq);
+        }
         if let Some(eq) = self.congruence_declared(d, g, phi, a, b, ty)? {
             return Ok(eq);
         }

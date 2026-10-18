@@ -123,6 +123,29 @@ Evaluation runs the transport: composition in Pi types transports the
 arguments back along the Glue line to `nat` (through `to-nat`), adds, and
 transports the sum forward (through `from-nat`), all as checked steps.
 
+## The circle and its winding number
+
+[circle.horn](../theories/cubical/circle.horn) adds the circle, a higher
+inductive type: `s1`, `base`, a path constructor `(loop r)` with
+`loop i0 = loop i1 = base`, and the recursor `(s1rec A b l x)` for `b : A`
+and `l : Path A b b`, which computes on `base` and on `(loop r)`.
+[circle.hcs](../examples/cubical/script/circle.hcs) (about 11 s) declares the
+integers, proves the successor an equivalence, and defines the universal
+cover `helix x = s1rec U0 int (ua sucEquiv) x`. Transporting `0` along
+`helix` over a loop counts its windings:
+
+```text
+(def winding (pi p (path s1 base base) int)
+  (lam p (path s1 base base) (transport i (app helix (papp p i)) (pos 0))))
+; winding loop = (pos 1), winding refl = (pos 0), winding loop⁻¹ = (negsuc 0)
+```
+
+There is no composition rule for `s1`: the circle is not discrete, so
+composition cannot return its base, and the homogeneous composition
+constructor is not included. Compositions in `s1` itself, and so composite
+loops such as `loop · loop`, do not evaluate; transports in families over
+the circle, which the winding number needs, do.
+
 ## Universe levels
 
 `ua` and `iso-equiv` are the prelude at level 0; `(ua-at L)` and

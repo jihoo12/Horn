@@ -47,6 +47,7 @@ pub const FRAGMENTS: &[(&str, &str)] = &[
     // twelve fragments above decode unchanged (oracle format 2).
     ("bool", include_str!("../theories/cubical/bool.horn")),
     ("nat", include_str!("../theories/cubical/nat.horn")),
+    ("circle", include_str!("../theories/cubical/circle.horn")),
 ];
 
 /// Predicates of the snapshot's unrestricted judgment layer. The restricted
