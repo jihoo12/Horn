@@ -1,0 +1,2 @@
+(var A N) (var B N) (var C N)
+(goal trans ((le A B) (le B C)) (le A C))

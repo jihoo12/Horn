@@ -49,6 +49,27 @@ struct Fact {
     /// Hypothesis steps this step depends on, sorted.
     hyps: Vec<u32>,
     is_hyp: bool,
+    /// For a hypothesis: the premises it assumes its judgment from, and the
+    /// variables an application may instantiate. Both empty for a plain
+    /// hypothesis.
+    premises: Vec<u32>,
+    general: Vec<u32>,
+}
+
+impl Fact {
+    fn plain(judgment: u32, hyps: Vec<u32>, is_hyp: bool) -> Self {
+        Fact {
+            judgment,
+            hyps,
+            is_hyp,
+            premises: Vec::new(),
+            general: Vec::new(),
+        }
+    }
+
+    fn is_plain_hyp(&self) -> bool {
+        self.is_hyp && self.premises.is_empty() && self.general.is_empty()
+    }
 }
 
 struct Checker<'s> {
@@ -70,6 +91,7 @@ pub struct Report {
     pub open_goals: usize,
     pub hypotheses: usize,
     pub inductions: usize,
+    pub inversions: usize,
     pub instances: usize,
 }
 
@@ -141,13 +163,23 @@ fn process(theory: &str, goals: &str, proof: impl BufRead, out: Mode) -> Result<
     let keep = !matches!(out, Mode::Check);
     let mut forms = Vec::new();
     let mut results = Vec::new();
+    let mut goal_hyps: HashMap<String, Vec<u32>> = HashMap::new();
     for form in parse(goals)? {
         let xs = form.list()?;
         match (xs.first().map(Sexp::atom).transpose()?, xs.len()) {
             (Some("var"), 3) => ck.declare(&xs[1], &xs[2])?,
-            (Some("goal"), 3) => {
-                let j = ck.judgment(&xs[2])?;
+            (Some("goal"), 3 | 4) => {
+                // `(goal NAME J)`, or `(goal NAME (H...) J)`: H implies J.
+                let hs = if xs.len() == 4 {
+                    ck.judgments(&xs[2])?
+                } else {
+                    Vec::new()
+                };
+                let j = ck.judgment(&xs[xs.len() - 1])?;
                 report.open_goals += usize::from(ck.open[j as usize]);
+                if !hs.is_empty() {
+                    goal_hyps.insert(xs[1].atom()?.to_owned(), hs);
+                }
                 if expected.insert(xs[1].atom()?.to_owned(), j).is_some() {
                     return Err("duplicate goal".into());
                 }
@@ -181,7 +213,7 @@ fn process(theory: &str, goals: &str, proof: impl BufRead, out: Mode) -> Result<
                     return Err("duplicate abbreviation".into());
                 }
             }
-            ("step" | "hyp" | "induct", _) if keep => forms.push(form.clone()),
+            ("step" | "hyp" | "induct" | "apply" | "invert", _) if keep => forms.push(form.clone()),
             _ => {}
         }
         match (tag, xs.len()) {
@@ -193,17 +225,32 @@ fn process(theory: &str, goals: &str, proof: impl BufRead, out: Mode) -> Result<
             ("hyp", 3) => {
                 let n = ck.next(id()?)?;
                 let judgment = ck.judgment(&xs[2])?;
-                ck.facts.push(Fact {
-                    judgment,
-                    hyps: vec![n as u32],
-                    is_hyp: true,
-                });
+                ck.facts.push(Fact::plain(judgment, vec![n as u32], true));
+                report.hypotheses += 1;
+            }
+            ("hyp", 5) => {
+                let n = ck.next(id()?)?;
+                ck.rule_hyp(n, &xs[2], &xs[3], &xs[4])?;
                 report.hypotheses += 1;
             }
             ("induct", 5) => {
                 ck.next(id()?)?;
-                ck.induct(&xs[2], &xs[3], &xs[4])?;
+                ck.induct(&xs[2], None, &xs[3], &xs[4])?;
                 report.inductions += 1;
+            }
+            ("induct", 6) => {
+                ck.next(id()?)?;
+                ck.induct(&xs[2], Some(&xs[3]), &xs[4], &xs[5])?;
+                report.inductions += 1;
+            }
+            ("apply", 5) => {
+                ck.next(id()?)?;
+                ck.apply(&xs[2], &xs[3], &xs[4])?;
+            }
+            ("invert", 6) => {
+                ck.next(id()?)?;
+                ck.invert(&xs[2], &xs[3], &xs[4], &xs[5])?;
+                report.inversions += 1;
             }
             ("result", 3) => {
                 let key = xs[1].atom()?;
@@ -214,7 +261,12 @@ fn process(theory: &str, goals: &str, proof: impl BufRead, out: Mode) -> Result<
                     .remove(key)
                     .ok_or_else(|| format!("unknown or repeated result {key}"))?;
                 let (fact, hyps) = ck.reference(&xs[2])?;
-                if !hyps.is_empty() {
+                // The result may use only plain hypotheses that the goal states.
+                let allowed = goal_hyps.get(key).cloned().unwrap_or_default();
+                if hyps.iter().any(|&h| {
+                    let f = &ck.facts[h as usize];
+                    !f.is_plain_hyp() || !allowed.contains(&f.judgment)
+                }) {
                     return Err(format!("result {key} depends on hypotheses"));
                 }
                 if fact != goal {
@@ -229,6 +281,16 @@ fn process(theory: &str, goals: &str, proof: impl BufRead, out: Mode) -> Result<
         return Err(format!("missing results: {:?}", expected.keys()));
     }
     report.steps = ck.facts.len();
+    let implicational = !goal_hyps.is_empty()
+        || forms.iter().any(|f| {
+            let xs = f.list().map(|xs| (xs[0].atom().unwrap_or(""), xs.len()));
+            matches!(xs, Ok(("apply" | "invert", _) | ("hyp", 5) | ("induct", 6)))
+        });
+    if implicational && !matches!(out, Mode::Check) {
+        return Err(
+            "implications are not yet supported by the Agda export or by instantiation".into(),
+        );
+    }
     if let Mode::Agda(module, w) = out {
         export(&mut ck, &forms, &goal_list, &results, module, w)?;
     } else if let Mode::Instantiate(bindings, goals_out, proof_out) = out {
@@ -708,7 +770,7 @@ impl Checker<'_> {
             let mut allowed = BTreeSet::new();
             self.variables(judgment, &mut allowed);
             for &h in &hyps {
-                self.variables(self.facts[h as usize].judgment, &mut allowed);
+                self.hyp_vars(h, &mut allowed);
             }
             for &t in premises.iter().chain(&bound) {
                 let mut used = BTreeSet::new();
@@ -721,17 +783,181 @@ impl Checker<'_> {
                 }
             }
         }
-        self.facts.push(Fact {
-            judgment,
-            hyps: hyps.into_iter().collect(),
-            is_hyp: false,
-        });
+        self.facts
+            .push(Fact::plain(judgment, hyps.into_iter().collect(), false));
         Ok(instances)
     }
 
-    fn induct(&mut self, x: &Sexp, j: &Sexp, cases: &Sexp) -> Result<()> {
+    /// The variables a hypothesis fixes: all but those it generalizes.
+    fn hyp_vars(&self, h: u32, out: &mut BTreeSet<u32>) {
+        let f = &self.facts[h as usize];
+        let mut vs = BTreeSet::new();
+        self.variables(f.judgment, &mut vs);
+        for &p in &f.premises {
+            self.variables(p, &mut vs);
+        }
+        out.extend(vs.into_iter().filter(|v| !f.general.contains(v)));
+    }
+
+    fn judgments(&mut self, x: &Sexp) -> Result<Vec<u32>> {
+        x.list()?.iter().map(|j| self.judgment(j)).collect()
+    }
+
+    fn vars_list(&self, x: &Sexp) -> Result<Vec<u32>> {
+        let mut out = Vec::new();
+        for v in x.list()? {
+            let v = self.var(v)?;
+            if out.contains(&v) {
+                return Err("a variable is listed twice".into());
+            }
+            out.push(v);
+        }
+        Ok(out)
+    }
+
+    /// Hypothesis steps of any kind.
+    fn any_hyps(&self, x: &Sexp) -> Result<Vec<u32>> {
+        let mut out = Vec::new();
+        for i in x.list()? {
+            let i: usize = i.atom()?.parse().map_err(|_| "expected a step index")?;
+            let f = self.facts.get(i).ok_or("reference to a later step")?;
+            if !f.is_hyp {
+                return Err(format!("step {i} is not a hypothesis"));
+            }
+            out.push(i as u32);
+        }
+        out.sort_unstable();
+        out.dedup();
+        Ok(out)
+    }
+
+    /// Steps that must be plain hypotheses.
+    fn plain_hyps(&self, x: &Sexp) -> Result<Vec<u32>> {
+        let mut out = Vec::new();
+        for i in x.list()? {
+            let i: usize = i.atom()?.parse().map_err(|_| "expected a step index")?;
+            let f = self.facts.get(i).ok_or("reference to a later step")?;
+            if !f.is_plain_hyp() {
+                return Err(format!("step {i} is not a plain hypothesis"));
+            }
+            out.push(i as u32);
+        }
+        out.sort_unstable();
+        out.dedup();
+        Ok(out)
+    }
+
+    /// `(hyp N (P...) J (X...))`: assume the rule P ⊢ J, whose variables X
+    /// may be instantiated where it is applied.
+    fn rule_hyp(&mut self, n: usize, ps: &Sexp, j: &Sexp, xs: &Sexp) -> Result<()> {
+        let premises = self.judgments(ps)?;
+        let judgment = self.judgment(j)?;
+        let general = self.vars_list(xs)?;
+        self.facts.push(Fact {
+            judgment,
+            hyps: vec![n as u32],
+            is_hyp: true,
+            premises,
+            general,
+        });
+        Ok(())
+    }
+
+    /// Read `(X TERM)...` with sort checks.
+    fn bindings(&mut self, x: &Sexp) -> Result<HashMap<u32, u32>> {
+        let mut map = HashMap::new();
+        for b in x.list()? {
+            let ys = b.list()?;
+            if ys.len() != 2 {
+                return Err("expected (VAR TERM)".into());
+            }
+            let v = self.var(&ys[0])?;
+            let t = self.term(&ys[1], Some(self.output[v as usize]))?;
+            if map.insert(v, t).is_some() {
+                return Err("variable substituted twice".into());
+            }
+        }
+        Ok(map)
+    }
+
+    /// `(apply N M (BIND...) (REF...))`: apply a rule hypothesis M, or an
+    /// earlier fact M whose hypotheses are plain, as a derived rule. The
+    /// references prove its premises (for a fact, its hypotheses, in step
+    /// order) under the bindings.
+    fn apply(&mut self, m: &Sexp, binds: &Sexp, refs: &Sexp) -> Result<()> {
+        let n = self.facts.len();
+        let mi: usize = m.atom()?.parse().map_err(|_| "expected a step index")?;
+        let map = self.bindings(binds)?;
+        let f = self.facts.get(mi).ok_or("reference to a later step")?;
+        let (premises, conclusion, mut hyps) = if f.is_hyp {
+            if map.keys().any(|v| !f.general.contains(v)) {
+                return Err(format!(
+                    "step {n}: binds a variable step {mi} does not generalize"
+                ));
+            }
+            (f.premises.clone(), f.judgment, BTreeSet::from([mi as u32]))
+        } else {
+            let mut ps = Vec::new();
+            for &h in &f.hyps {
+                let h = &self.facts[h as usize];
+                if !h.is_plain_hyp() {
+                    return Err(format!("step {n}: step {mi} depends on a rule hypothesis"));
+                }
+                ps.push(h.judgment);
+            }
+            (ps, f.judgment, BTreeSet::new())
+        };
+        let refs = refs.list()?;
+        if refs.len() != premises.len() {
+            return Err(format!("step {n}: wrong number of premises"));
+        }
+        let judgment = self.substitute(conclusion, &map, &mut HashMap::new());
+        let mut instances = Vec::new();
+        for (r, &p) in refs.iter().zip(&premises) {
+            let want = self.substitute(p, &map, &mut HashMap::new());
+            let (got, h) = self.reference(r)?;
+            if got != want {
+                return Err(format!("step {n}: a premise does not match"));
+            }
+            hyps.extend(h);
+            instances.push(want);
+        }
+        let mut allowed = BTreeSet::new();
+        self.variables(judgment, &mut allowed);
+        for &h in &hyps {
+            self.hyp_vars(h, &mut allowed);
+        }
+        for &t in instances.iter().chain(map.values()) {
+            let mut used = BTreeSet::new();
+            self.variables(t, &mut used);
+            if !used.is_subset(&allowed) {
+                return Err(format!(
+                    "step {n}: premise variable absent from the conclusion"
+                ));
+            }
+        }
+        self.facts
+            .push(Fact::plain(judgment, hyps.into_iter().collect(), false));
+        Ok(())
+    }
+
+    /// `(induct N X (H...) J (CASE...))`: for every X, the plain hypotheses
+    /// H give J. Case i concludes J[X := cᵢ(Y...)] from the hypotheses
+    /// H[X := cᵢ(Y...)] and, for each Y of X's sort, the induction
+    /// hypothesis H[X := Y] ⊢ J[X := Y] as a rule hypothesis generalizing
+    /// any of the other variables. With no H, the induction hypothesis may
+    /// also be the plain hypothesis J[X := Y].
+    fn induct(&mut self, x: &Sexp, hs: Option<&Sexp>, j: &Sexp, cases: &Sexp) -> Result<()> {
         let n = self.facts.len();
         let x = self.var(x)?;
+        let hyps = match hs {
+            Some(hs) => self.plain_hyps(hs)?,
+            None => Vec::new(),
+        };
+        let premises: Vec<u32> = hyps
+            .iter()
+            .map(|&h| self.facts[h as usize].judgment)
+            .collect();
         let judgment = self.judgment(j)?;
         let sort = self.output[x as usize];
         let ctors = self.spec.by_sort[sort as usize].clone();
@@ -739,16 +965,20 @@ impl Checker<'_> {
         if cases.len() != ctors.len() {
             return Err(format!("step {n}: expected {} cases", ctors.len()));
         }
-        let mut in_j = BTreeSet::new();
-        self.variables(judgment, &mut in_j);
+        let mut in_motive = BTreeSet::new();
+        self.variables(judgment, &mut in_motive);
+        for &p in &premises {
+            self.variables(p, &mut in_motive);
+        }
         // Otherwise, for a sort whose every constructor is recursive (a sort
         // without ground terms), each case could be its own hypothesis, and
         // the conclusion would not keep the vacuous quantifier.
-        if !in_j.contains(&x) {
+        if !in_motive.contains(&x) {
             return Err(format!(
                 "step {n}: the induction variable must occur in the judgment"
             ));
         }
+        let others: BTreeSet<u32> = in_motive.iter().copied().filter(|&v| v != x).collect();
         for (case, &c) in cases.iter().zip(&ctors) {
             let ys = case.list()?;
             let m = ys.first().ok_or("empty case")?.atom()?.parse::<usize>();
@@ -762,7 +992,7 @@ impl Checker<'_> {
             let mut fresh = Vec::new();
             for (y, &s) in ys[1..].iter().zip(&inputs) {
                 let v = self.var(y)?;
-                if self.output[v as usize] != s || in_j.contains(&v) || fresh.contains(&v) {
+                if self.output[v as usize] != s || in_motive.contains(&v) || fresh.contains(&v) {
                     return Err(format!("step {n}: invalid case variable {y}"));
                 }
                 fresh.push(v);
@@ -772,16 +1002,18 @@ impl Checker<'_> {
                 key.push(self.make(&[v])?);
             }
             let term = self.make(&key)?;
-            let want = self.substitute(judgment, &HashMap::from([(x, term)]), &mut HashMap::new());
+            let at = |ck: &mut Self, t: u32, by: u32| {
+                ck.substitute(t, &HashMap::from([(x, by)]), &mut HashMap::new())
+            };
+            let want = at(self, judgment, term);
+            let case_premises: Vec<u32> = premises.iter().map(|&p| at(self, p, term)).collect();
+            // Induction hypotheses: premises and conclusion at each Y.
             let mut ihs = Vec::new();
             for (&v, &s) in fresh.iter().zip(&inputs) {
                 if s == sort {
                     let y = self.make(&[v])?;
-                    ihs.push(self.substitute(
-                        judgment,
-                        &HashMap::from([(x, y)]),
-                        &mut HashMap::new(),
-                    ));
+                    let ps: Vec<u32> = premises.iter().map(|&p| at(self, p, y)).collect();
+                    ihs.push((ps, at(self, judgment, y)));
                 }
             }
             let f = self.facts.get(m).ok_or("case refers to a later step")?;
@@ -790,18 +1022,207 @@ impl Checker<'_> {
             }
             for &h in &f.hyps {
                 let h = &self.facts[h as usize];
-                if !h.is_hyp || !ihs.contains(&h.judgment) {
+                let ok = if h.is_plain_hyp() {
+                    case_premises.contains(&h.judgment)
+                        || (premises.is_empty() && ihs.iter().any(|(_, c)| *c == h.judgment))
+                } else {
+                    h.is_hyp
+                        && h.general.iter().all(|g| others.contains(g))
+                        && ihs
+                            .iter()
+                            .any(|(ps, c)| *ps == h.premises && *c == h.judgment)
+                };
+                if !ok {
                     return Err(format!(
                         "step {n}: case {m} uses a hypothesis that is not an induction hypothesis"
                     ));
                 }
             }
         }
-        self.facts.push(Fact {
-            judgment,
-            hyps: Vec::new(),
-            is_hyp: false,
-        });
+        self.facts.push(Fact::plain(judgment, hyps, false));
+        Ok(())
+    }
+
+    /// A most general unifier of two terms, treating every declared
+    /// variable as a unification variable; `None` when there is none.
+    fn unify(&mut self, a: u32, b: u32) -> Option<HashMap<u32, u32>> {
+        let mut theta: HashMap<u32, u32> = HashMap::new();
+        let mut work = vec![(a, b)];
+        while let Some((s, t)) = work.pop() {
+            let s = self.substitute(s, &theta, &mut HashMap::new());
+            let t = self.substitute(t, &theta, &mut HashMap::new());
+            if s == t {
+                continue;
+            }
+            let (ns, nt) = (self.arena.node(s).to_vec(), self.arena.node(t).to_vec());
+            let var_of = |ck: &Self, n: &[u32]| (n.len() == 1 && ck.is_var(n[0])).then_some(n[0]);
+            let (x, u) = match (var_of(self, &ns), var_of(self, &nt)) {
+                (Some(x), _) => (x, t),
+                (None, Some(y)) => (y, s),
+                (None, None) => {
+                    if ns[0] != nt[0] || ns.len() != nt.len() {
+                        return None;
+                    }
+                    work.extend(ns[1..].iter().copied().zip(nt[1..].iter().copied()));
+                    continue;
+                }
+            };
+            let mut occurs = BTreeSet::new();
+            self.variables(u, &mut occurs);
+            if occurs.contains(&x) {
+                return None;
+            }
+            let single = HashMap::from([(x, u)]);
+            for v in theta.values_mut() {
+                *v = self.substitute(*v, &single, &mut HashMap::new());
+            }
+            theta.insert(x, u);
+        }
+        Some(theta)
+    }
+
+    /// `(invert N K (C...) J (CASE...))` with `CASE = (RULE M (X...))`: the
+    /// plain hypothesis K was derived by some rule. For each rule whose
+    /// conclusion unifies with K's judgment, with the rule's variables
+    /// renamed to the fresh X, a case M concludes θJ for the most general
+    /// unifier θ, from the hypotheses θ(premises of the rule) and θC.
+    fn invert(&mut self, k: &Sexp, cs: &Sexp, j: &Sexp, cases: &Sexp) -> Result<()> {
+        let n = self.facts.len();
+        let ki: usize = k.atom()?.parse().map_err(|_| "expected a step index")?;
+        let kf = self.facts.get(ki).ok_or("reference to a later step")?;
+        if !kf.is_plain_hyp() {
+            return Err(format!("step {n}: step {ki} is not a plain hypothesis"));
+        }
+        let h = kf.judgment;
+        let context = self.any_hyps(cs)?;
+        let judgment = self.judgment(j)?;
+        let mut used = BTreeSet::new();
+        self.variables(h, &mut used);
+        self.variables(judgment, &mut used);
+        for &c in &context {
+            let f = &self.facts[c as usize];
+            let mut vs = BTreeSet::new();
+            self.variables(f.judgment, &mut vs);
+            for &p in &f.premises {
+                self.variables(p, &mut vs);
+            }
+            used.extend(vs);
+        }
+        let pred = self.arena.node(h)[0];
+        let mut given: HashMap<String, (usize, Vec<u32>)> = HashMap::new();
+        for case in cases.list()? {
+            let ys = case.list()?;
+            if ys.len() != 3 {
+                return Err(format!("step {n}: expected (RULE STEP (VAR...))"));
+            }
+            let name = ys[0].atom()?.to_owned();
+            let m: usize = ys[1].atom()?.parse().map_err(|_| "expected a step index")?;
+            let xs = self.vars_list(&ys[2])?;
+            if given.insert(name.clone(), (m, xs)).is_some() {
+                return Err(format!("step {n}: two cases for rule {name}"));
+            }
+        }
+        let spec = self.spec;
+        let mut fresh_seen = BTreeSet::new();
+        for &r in &spec.by_pred[pred as usize] {
+            let rule = &spec.rules[r as usize];
+            // Rename the rule's variables apart: to the case's variables, or
+            // to internal ones when no case is given.
+            let names: Vec<u32> = match given.get(&rule.name) {
+                Some((_, xs)) => {
+                    if xs.len() != rule.vars.len()
+                        || xs
+                            .iter()
+                            .zip(&rule.vars)
+                            .any(|(&v, (_, s))| self.output[v as usize] != *s)
+                    {
+                        return Err(format!("step {n}: wrong variables for rule {}", rule.name));
+                    }
+                    for &v in xs {
+                        if used.contains(&v) || !fresh_seen.insert(v) {
+                            return Err(format!("step {n}: case variables must be fresh"));
+                        }
+                    }
+                    xs.clone()
+                }
+                None => rule
+                    .vars
+                    .iter()
+                    .map(|(_, s)| {
+                        let v = self.output.len() as u32;
+                        self.output.push(*s);
+                        v
+                    })
+                    .collect(),
+            };
+            let mut env = Vec::new();
+            for &v in &names {
+                env.push(self.make(&[v])?);
+            }
+            let concl = self.build(&rule.conclusion, &env)?;
+            let Some(theta) = self.unify(h, concl) else {
+                if given.contains_key(&rule.name) {
+                    return Err(format!("step {n}: rule {} cannot conclude it", rule.name));
+                }
+                continue;
+            };
+            let Some(&(m, _)) = given.get(&rule.name) else {
+                return Err(format!("step {n}: missing case for rule {}", rule.name));
+            };
+            let sub = |ck: &mut Self, t: u32| ck.substitute(t, &theta, &mut HashMap::new());
+            let want = sub(self, judgment);
+            // What the case may assume: the rule's premises and the context,
+            // under θ. A rule hypothesis keeps its generalized variables, so
+            // θ applies to the others only and must not capture them.
+            let mut allowed: Vec<(Vec<u32>, u32, Vec<u32>)> = Vec::new();
+            for p in &rule.premises {
+                let p = self.build(p, &env)?;
+                allowed.push((Vec::new(), sub(self, p), Vec::new()));
+            }
+            for &c in &context {
+                let f = &self.facts[c as usize];
+                let (ps, cj, general) = (f.premises.clone(), f.judgment, f.general.clone());
+                let local: HashMap<u32, u32> = theta
+                    .iter()
+                    .filter(|(v, _)| !general.contains(v))
+                    .map(|(&v, &t)| (v, t))
+                    .collect();
+                for t in local.values() {
+                    let mut vs = BTreeSet::new();
+                    self.variables(*t, &mut vs);
+                    if general.iter().any(|g| vs.contains(g)) {
+                        return Err(format!(
+                            "step {n}: the unifier would capture a generalized variable"
+                        ));
+                    }
+                }
+                let ps = ps
+                    .iter()
+                    .map(|&p| self.substitute(p, &local, &mut HashMap::new()))
+                    .collect();
+                let cj = self.substitute(cj, &local, &mut HashMap::new());
+                allowed.push((ps, cj, general));
+            }
+            let f = self.facts.get(m).ok_or("case refers to a later step")?;
+            if f.judgment != want {
+                return Err(format!("step {n}: case {m} proves the wrong judgment"));
+            }
+            for &hh in &f.hyps {
+                let hf = &self.facts[hh as usize];
+                let ok = hf.is_hyp
+                    && allowed.iter().any(|(ps, c, g)| {
+                        *ps == hf.premises && *c == hf.judgment && *g == hf.general
+                    });
+                if !ok {
+                    return Err(format!("step {n}: case {m} uses a hypothesis it may not"));
+                }
+            }
+        }
+        let mut hyps = context;
+        hyps.push(ki as u32);
+        hyps.sort_unstable();
+        hyps.dedup();
+        self.facts.push(Fact::plain(judgment, hyps, false));
         Ok(())
     }
 }

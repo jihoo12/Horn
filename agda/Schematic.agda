@@ -82,6 +82,7 @@ infixr 2 _×_
 data _⊎_ (A B : Set) : Set where
   inl : A → A ⊎ B
   inr : B → A ⊎ B
+infixr 1 _⊎_
 
 data ℕ : Set where
   zero : ℕ

@@ -1,0 +1,6 @@
+(sort N)
+(ctor z () N)
+(ctor s (N) N)
+(pred le (N N))
+(rule le.zero () (le z ?n))
+(rule le.succ ((le ?m ?n)) (le (s ?m) (s ?n)))
