@@ -20,8 +20,8 @@
 -- the rules: a derivable judgment is the conclusion of some rule instance
 -- with derivable premises. Each case is taken at a most general unifier of
 -- the hypothesis and the rule's conclusion; this file assumes the
--- unifier's defining properties (`IsMGU`), which the checker's unification
--- has to provide.
+-- unifier's defining properties (`IsMGU`, `NoUnifier`), and Unify.agda proves
+-- that the checker's unification algorithm provides them.
 --
 -- As in Schematic.agda, this models what each step establishes, not the
 -- Rust code, and imports no library.

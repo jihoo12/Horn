@@ -226,6 +226,39 @@ Rust comes from a `hyp` step, so this loses nothing. Parsing, names, `def`
 and hash-consing are not modelled, and no proof connects the Rust code to
 the model.
 
+### Implications
+
+[agda/Implication.agda](../agda/Implication.agda) proves the forms that
+prove implications sound at the level of the calculus: rule hypotheses,
+`apply`, induction with generalized induction hypotheses, and `invert`.
+Inversion takes each case at a most general unifier of the hypothesis and
+a rule's renamed conclusion, and that file states what it needs of the
+unifier: every unifier factors through it, and it keeps sorts (`IsMGU`);
+a rule without a case has no unifier (`NoUnifier`).
+
+[agda/Unify.agda](../agda/Unify.agda) defines the unification algorithm
+of `src/schematic.rs` and proves it provides both. `mgu` is Robinson's
+algorithm in the Rust checker's order: a stack of pairs taken under the
+substitution so far, a variable on the left bound first, an occurs check,
+and argument pairs pushed with the last on top. The order matters because
+the checker compares case judgments, which depend on which most general
+unifier comes out. The algorithm takes fuel; running out is a third
+outcome a checker rejects. For any fuel:
+
+- `mgu-sound`: if `mgu` returns θ for well-sorted terms of one sort, then
+  `IsMGU θ s t`. Every unifier ρ of the remaining pairs that absorbs the
+  substitution so far (ρ ≈ ρ ∘ θ) absorbs the next one; binding x := u
+  keeps this because ρ solves x := u.
+- `mgu-none`: if `mgu` fails, no ρ unifies s and t. A clash of heads or
+  lengths contradicts injectivity; a failed occurs check contradicts the
+  size of ρ(x) against that of a term properly containing it.
+
+Checked examples fix the order on the unifier of `le_trans`'s first
+inversion: the Agda algorithm computes the same `B := s N, P := M` as the
+Rust checker. The export of implicational certificates to the Agda checker
+is not done yet; with this proof, its `invert` can call `mgu` instead of
+taking the unifier on trust.
+
 ### Checking Rust output with the Agda model
 
 No proof connects the Rust code to the model, but a certificate the Rust

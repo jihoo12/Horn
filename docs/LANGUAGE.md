@@ -138,8 +138,9 @@ theory: `rule bad : le (succ n) n` makes false things provable.
 
 ## Next steps
 
-1. Exporting implications to the Agda model, with a proof that the
-   unification algorithm computes a most general unifier.
+1. Exporting implications to the Agda model. The unification algorithm it
+   needs is proved to give most general unifiers in
+   [agda/Unify.agda](../agda/Unify.agda).
 2. Nested induction and a small tactic language (`apply`, `cases`, `exact`).
 3. Using a function's clauses as rewrite rules, so that `#eval` computes
    instead of searching.

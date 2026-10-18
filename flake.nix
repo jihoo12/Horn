@@ -32,6 +32,7 @@
           agda --safe --no-libraries -i agda agda/Soundness.agda
           agda --safe --no-libraries -i agda agda/Schematic.agda
           agda --safe --no-libraries -i agda agda/Implication.agda
+          agda --safe --no-libraries -i agda agda/Unify.agda
           agda --safe --no-libraries -i agda agda/LevelsCertificate.agda
           agda --safe --no-libraries -i agda agda/NatLang.agda
           touch "$out"
