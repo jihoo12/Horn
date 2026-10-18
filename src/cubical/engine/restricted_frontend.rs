@@ -72,6 +72,16 @@ pub struct RestrictedProducer {
     checked_forms: BTreeMap<Sexp, Vec<(usize, Sexp, Sexp)>>,
 }
 
+/// Whether `t`, after stripping projections, applications and path
+/// applications, is an introduction form without an annotation.
+fn unannotated_head(t: &Sexp) -> bool {
+    match shape(t) {
+        Ok(("lam" | "pair" | "plam", _)) => true,
+        Ok(("fst" | "snd", [x])) | Ok(("app" | "papp", [x, _])) => unannotated_head(x),
+        _ => false,
+    }
+}
+
 /// Whether ordinary variable `k` occurs free in `t`.
 fn mentions(t: &Sexp, k: usize) -> bool {
     match shape(t) {
@@ -454,7 +464,12 @@ impl RestrictedProducer {
         }
         // A failed attempt in the shorter context falls back to the ordinary
         // search, which may try other candidates.
-        if let Some((b, rest)) = self.strengthenable(g, t, None)
+        // Not for a term headed by an unannotated introduction: its type is
+        // not determined by the term, and the shorter context may only hold
+        // typings from unrelated uses, which would hide the one recorded
+        // where the term occurs.
+        if !unannotated_head(t)
+            && let Some((b, rest)) = self.strengthenable(g, t, None)
             && let Ok(t0) = self.lower(t)
             && let Ok((a0, id0)) = self.infer(d, &rest, phi, &t0)
         {
@@ -1856,30 +1871,43 @@ impl RestrictedProducer {
             return Ok(None);
         }
         let known = self.checked_forms.get(t).cloned().unwrap_or_default();
-        for (d0, g0, a0) in known {
-            let candidate = if d0 == d {
-                let mut tail = g.clone();
-                let mut extra = 0;
-                while tail != g0 {
-                    let ("cons", [_, rest]) = shape(&tail)? else {
-                        break;
-                    };
-                    tail = rest.clone();
-                    extra += 1;
-                }
-                if tail != g0 || extra == 0 {
-                    continue;
-                }
-                let mut a = a0;
-                for _ in 0..extra {
-                    a = self.f.path.transform(&a, &Op::Shift(0))?.0;
-                }
-                a
-            } else if d == d0 + 1 && self.f.path.dshiftctx(&g0, 0)?.0 == *g {
-                self.f.path.transform(&a0, &Op::DShift(0))?.0
-            } else {
+        // A closed term can have many types. Try the typings recorded in the
+        // closest context first (fewest added variables, then fewest added
+        // dimensions), most recent first: an older typing from an unrelated,
+        // more specific use (say at int) must not win over the one recorded
+        // where the term was built (say as a composition base, now under the
+        // two extra dimensions of a filler).
+        let mut ranked = Vec::new();
+        for (index, (d0, g0, a0)) in known.into_iter().enumerate() {
+            if d0 > d {
                 continue;
-            };
+            }
+            let dims = d - d0;
+            // Lift the recorded context and type over the new dimensions.
+            let (mut g1, mut a1) = (g0, a0);
+            for _ in 0..dims {
+                g1 = self.f.path.dshiftctx(&g1, 0)?.0;
+                a1 = self.f.path.transform(&a1, &Op::DShift(0))?.0;
+            }
+            let mut tail = g.clone();
+            let mut extra = 0;
+            while tail != g1 {
+                let ("cons", [_, rest]) = shape(&tail)? else {
+                    break;
+                };
+                tail = rest.clone();
+                extra += 1;
+            }
+            if tail != g1 || (extra == 0 && dims == 0) {
+                continue;
+            }
+            for _ in 0..extra {
+                a1 = self.f.path.transform(&a1, &Op::Shift(0))?.0;
+            }
+            ranked.push(((extra, dims), std::cmp::Reverse(index), a1));
+        }
+        ranked.sort_by(|x, y| (x.0, x.1).cmp(&(y.0, y.1)));
+        for (_, _, candidate) in ranked {
             if let Ok(id) = self.check(d, g, phi, t, &candidate) {
                 return Ok(Some((candidate, id)));
             }
