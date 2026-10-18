@@ -10,6 +10,11 @@ type theory, substitution engine, equality solver, or univalence primitive.
 
 ## Certified evaluation through univalence
 
+In [binary.hcs](examples/cubical/script/binary.hcs), addition written once on
+unary naturals is transported along `ua (nat ≃ bin)` and evaluated on binary
+numbers: `3 + 2` computes to the binary numeral for 5, and the whole run,
+including the proof of the equivalence, is one kernel-checked certificate.
+
 `horn cubical eval FILE.hcs` elaborates definitions and evaluations to the
 cubical core and certifies them; a value is printed only after the kernel
 accepts the oracle. In [bool.hcs](examples/cubical/script/bool.hcs), `not`

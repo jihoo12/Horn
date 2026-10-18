@@ -1,0 +1,103 @@
+; Univalence for programming: binary numbers are natural numbers.
+; Addition written once, on unary nat, is transported to binary along ua.
+
+; Bijective base-2 numerals: 0, 2b+1, 2b+2. Every number has one spelling.
+(data bin (bz) (b1 bin) (b2 bin))
+
+(def double (pi n nat nat)
+  (lam n nat (natrec k nat 0 (lam k nat (lam r nat (suc (suc r)))) n)))
+(def add (pi m nat (pi n nat nat))
+  (lam m nat (lam n nat (natrec k nat m (lam k nat (lam r nat (suc r))) n))))
+
+(def to-nat (pi b bin nat)
+  (lam b bin
+    (elim bin k nat
+      (0 (lam x bin (lam r nat (suc (app double r))))
+         (lam x bin (lam r nat (suc (suc (app double r))))))
+      b)))
+(def sucb (pi b bin bin)
+  (lam b bin
+    (elim bin k bin ((b1 bz) (lam x bin (lam r bin (b2 x))) (lam x bin (lam r bin (b1 r)))) b)))
+(def from-nat (pi n nat bin)
+  (lam n nat (natrec k bin bz (lam k nat (lam r bin (app sucb r))) n)))
+
+(eval three (app to-nat (b1 (b1 bz))))
+(eval five (app from-nat 5))
+
+; Path composition, by transport along the second path.
+(def trans-nat (pi a nat (pi b nat (pi c nat (pi p (path nat a b) (pi q (path nat b c) (path nat a c))))))
+  (lam a nat (lam b nat (lam c nat (lam p (path nat a b) (lam q (path nat b c)
+    (transport j (path nat a (papp q j)) p)))))))
+(def trans-bin (pi a bin (pi b bin (pi c bin (pi p (path bin a b) (pi q (path bin b c) (path bin a c))))))
+  (lam a bin (lam b bin (lam c bin (lam p (path bin a b) (lam q (path bin b c)
+    (transport j (path bin a (papp q j)) p)))))))
+
+; to-nat commutes with successor.
+(def to-suc (pi b bin (path nat (app to-nat (app sucb b)) (suc (app to-nat b))))
+  (lam b bin
+    (elim bin k (path nat (app to-nat (app sucb k)) (suc (app to-nat k)))
+      ((plam i 1)
+       (lam x bin (lam h (path nat (app to-nat (app sucb x)) (suc (app to-nat x)))
+         (plam i (suc (suc (app double (app to-nat x)))))))
+       (lam x bin (lam h (path nat (app to-nat (app sucb x)) (suc (app to-nat x)))
+         (plam i (suc (app double (papp h i)))))))
+      b)))
+
+(def to-from (pi n nat (path nat (app to-nat (app from-nat n)) n))
+  (lam n nat
+    (natrec k (path nat (app to-nat (app from-nat k)) k)
+      (plam i 0)
+      (lam k nat (lam h (path nat (app to-nat (app from-nat k)) k)
+        (app trans-nat
+          (app to-nat (app sucb (app from-nat k)))
+          (suc (app to-nat (app from-nat k)))
+          (suc k)
+          (app to-suc (app from-nat k))
+          (plam i (suc (papp h i))))))
+      n)))
+
+; from-nat on odd and even numbers.
+(def from-odd (pi n nat (path bin (app from-nat (suc (app double n))) (b1 (app from-nat n))))
+  (lam n nat
+    (natrec k (path bin (app from-nat (suc (app double k))) (b1 (app from-nat k)))
+      (plam i (b1 bz))
+      (lam k nat (lam h (path bin (app from-nat (suc (app double k))) (b1 (app from-nat k)))
+        (plam i (app sucb (app sucb (papp h i))))))
+      n)))
+(def from-even (pi n nat (path bin (app from-nat (suc (suc (app double n)))) (b2 (app from-nat n))))
+  (lam n nat
+    (natrec k (path bin (app from-nat (suc (suc (app double k)))) (b2 (app from-nat k)))
+      (plam i (b2 bz))
+      (lam k nat (lam h (path bin (app from-nat (suc (suc (app double k)))) (b2 (app from-nat k)))
+        (plam i (app sucb (app sucb (papp h i))))))
+      n)))
+
+(def from-to (pi b bin (path bin (app from-nat (app to-nat b)) b))
+  (lam b bin
+    (elim bin k (path bin (app from-nat (app to-nat k)) k)
+      ((plam i bz)
+       (lam x bin (lam h (path bin (app from-nat (app to-nat x)) x)
+         (app trans-bin
+           (app from-nat (suc (app double (app to-nat x))))
+           (b1 (app from-nat (app to-nat x)))
+           (b1 x)
+           (app from-odd (app to-nat x))
+           (plam i (b1 (papp h i))))))
+       (lam x bin (lam h (path bin (app from-nat (app to-nat x)) x)
+         (app trans-bin
+           (app from-nat (suc (suc (app double (app to-nat x)))))
+           (b2 (app from-nat (app to-nat x)))
+           (b2 x)
+           (app from-even (app to-nat x))
+           (plam i (b2 (papp h i)))))))
+      b)))
+
+; nat and bin are equivalent, hence equal as types.
+(def nat-bin (equiv nat bin)
+  (pair from-nat (app iso-equiv nat bin from-nat to-nat from-to to-from)))
+(def nat-is-bin (path (u 0) nat bin) (app ua nat bin nat-bin))
+
+; Addition on binary numbers, obtained by transport, not written.
+(def add-bin (pi a bin (pi b bin bin))
+  (transport i (pi a (papp nat-is-bin i) (pi b (papp nat-is-bin i) (papp nat-is-bin i))) add))
+(eval three-plus-two (app add-bin (b1 (b1 bz)) (b2 bz)))

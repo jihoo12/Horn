@@ -284,3 +284,23 @@ fn a_result_reports_the_rules_it_relies_on() {
     assert!(!c.rules_used.iter().any(|r| r.contains("glue")));
     assert!(c.rules_used.len() < declared.len() / 2, "{}", c.rules_used.len());
 }
+
+#[test]
+fn addition_transported_to_binary_numbers_computes() {
+    let script =
+        cubical::script::run(include_str!("../examples/cubical/script/binary.hcs")).unwrap();
+    let shown: Vec<_> = script
+        .evaluations
+        .iter()
+        .map(|e| format!("{} = {} : {}", e.name, e.value, e.ty))
+        .collect();
+    // 5 = 2*2 + 1 and 2 = 2*0 + 2 in bijective base 2.
+    assert_eq!(
+        shown,
+        [
+            "three = 3 : nat",
+            "five = (b1 (b2 bz)) : bin",
+            "three-plus-two = (b1 (b2 bz)) : bin"
+        ]
+    );
+}

@@ -102,6 +102,27 @@ The type (in its parameters), its constructors and its eliminator also get
 congruence rules. Indices, function-typed fields and
 higher constructors are not supported.
 
+## Programs move along equivalences
+
+[binary.hcs](../examples/cubical/script/binary.hcs) (about 28 s) declares
+binary numbers in bijective base 2, `(data bin (bz) (b1 bin) (b2 bin))` for
+0, 2b+1 and 2b+2, proves `nat ≃ bin` with conversions in both directions and
+their inverse laws (by induction, with path composition defined by
+transport), and turns it into a path `nat-is-bin : Path U0 nat bin` with
+`ua`. Addition is written once, on unary `nat`; binary addition is obtained
+by transport and is never written:
+
+```text
+(def add-bin (pi a bin (pi b bin bin))
+  (transport i (pi a (papp nat-is-bin i) (pi b (papp nat-is-bin i) (papp nat-is-bin i))) add))
+(eval three-plus-two (app add-bin (b1 (b1 bz)) (b2 bz)))
+; three-plus-two = (b1 (b2 bz)) : bin                 that is, 3 + 2 = 5
+```
+
+Evaluation runs the transport: composition in Pi types transports the
+arguments back along the Glue line to `nat` (through `to-nat`), adds, and
+transports the sum forward (through `from-nat`), all as checked steps.
+
 ## Universe levels
 
 `ua` and `iso-equiv` are the prelude at level 0; `(ua-at L)` and
