@@ -1,4 +1,5 @@
 pub mod compress;
+pub mod cubical;
 pub mod generalize;
 pub mod kernel;
 pub mod lang;

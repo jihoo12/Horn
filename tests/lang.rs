@@ -135,6 +135,12 @@ fn ground_evaluation_executes_nested_calls_and_certifies_the_result() {
     );
     assert_eq!(r.checked.goals, 2);
     schematic::check(&r.theory, &r.goals, r.proof.as_bytes()).unwrap();
+    // Ground computations need no induction/inversion extension: their
+    // emitted rule applications also replay through the ground kernel.
+    horn::kernel::Theory::parse(&r.theory)
+        .unwrap()
+        .check(&r.goals, &r.proof)
+        .unwrap();
     // Independently changing the caller's expected result must be rejected.
     let wrong = r.goals.replacen("(succ zero)", "zero", 1);
     assert_ne!(wrong, r.goals);

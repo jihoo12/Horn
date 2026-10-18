@@ -8,6 +8,21 @@ The checker implements generic sorting and schema matching. Predicate names
 have no built-in meaning. It does not search for proofs or implement a native
 type theory, substitution engine, equality solver, or univalence primitive.
 
+## Standalone language and cubical integration
+
+Ground forward `#eval` calls now execute pattern-matching clauses, including
+nested calls, and produce checked evidence; logic queries and theorem proving
+retain proof search. Try `horn examples/lang/program.hn` for arithmetic programs
+and induction in the same file. The language is a prototype with bounded
+execution, not yet Lean's dependent, total-function language.
+
+`horn cubical check all` independently checks bundled deep U0 univalence and
+judgmental ua-transport certificates, with no kamo3 checkout. Their cubical
+rules are explicit theory data; the generic kernel has no new primitives.
+This migrates replay of real research results, not yet the construction of new
+cubical source proofs. See [CUBICAL.md](docs/CUBICAL.md) and the staged
+[integration plan](docs/INTEGRATION.md).
+
 ## What 0.3 adds: oracle certificates
 
 A certificate can now be just the decisions the checker cannot make by
@@ -163,8 +178,10 @@ checks that. It requires `gzip`; large proofs identified only by hashes are not
 regenerated. Their generation remains an application responsibility.
 
 See [BENCHMARKS.md](docs/BENCHMARKS.md) for the standalone measurement tool and
-recorded application results. The recorded cubical workloads are private, so
-those measurements cannot currently be independently reproduced from Horn alone.
+recorded application results. The full recorded cubical corpus still requires kamo3. The standalone
+[cubical package](docs/CUBICAL.md) now includes the U0 univalence and
+ua-transport workloads for independent replay; it does not reproduce the
+entire historical benchmark corpus.
 
 ## Origin and direction
 

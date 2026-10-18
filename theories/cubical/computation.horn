@@ -1,0 +1,164 @@
+; Type-directed composition equations (CCHM 4.4-4.5). Append after equality.
+; filldef is a syntactic macro checked through explicit shifts/substitutions.
+(pred filldef (Tm F Tm Tm Tm))
+(rule def.fill (
+    (dshift ?a (s z) ?a1) (dshift ?a1 (s z) ?a2)
+    (dsubst ?a2 z (meet (dim (s z)) (dim z)) ?a3)
+    (dshift ?t (s z) ?t1) (dshift ?t1 (s z) ?t2)
+    (dsubst ?t2 z (meet (dim (s z)) (dim z)) ?t3)
+    (fshift ?phi z ?phi1) (fshift ?phi1 z ?phi2)
+    (dshift ?b z ?b1) (dshift ?b1 z ?b2))
+  (filldef ?a ?phi ?t ?b
+    (comp ?a3 (for ?phi1 (at0 z))
+      (system (side ?phi2 ?t3 (side (at0 (s z)) ?b2 snil))) ?b1)))
+
+(rule req.comp-sigma (
+    (rhas ?d ?g ?psi (comp (sigma ?a ?b) ?phi ?t ?base) ?out)
+    (filldef ?a ?phi (fst ?t) (fst ?base) ?fill)
+    (dshiftctx ?g z ?g2) (fshift ?psi z ?psi2)
+    (rhas (s ?d) ?g2 ?psi2 ?fill ?a)
+    (subst ?b z ?fill ?bf)
+    (rhas ?d ?g ?psi
+      (pair (comp ?a ?phi (fst ?t) (fst ?base))
+        (comp ?bf ?phi (snd ?t) (snd ?base))) ?out))
+  (req ?d ?g ?psi (comp (sigma ?a ?b) ?phi ?t ?base)
+    (pair (comp ?a ?phi (fst ?t) (fst ?base))
+      (comp ?bf ?phi (snd ?t) (snd ?base))) ?out))
+
+(rule req.comp-nat-zero (
+    (rhas ?d ?g ?psi (comp nat ?phi zero zero) nat))
+  (req ?d ?g ?psi (comp nat ?phi zero zero) zero nat))
+
+(rule req.comp-path (
+    (rhas ?d ?g ?psi (comp (path ?a ?left ?right) ?phi ?t ?base) ?out)
+    (dshift ?a z ?a0) (dsubst ?a0 (s (s z)) (dim z) ?ai)
+    (fshift ?phi z ?phi1) (fshift ?phi1 z ?phi2)
+    (dshift ?t (s z) ?ti) (dshift ?left (s z) ?li) (dshift ?right (s z) ?ri)
+    (dshift ?base z ?bj)
+    (rhas ?d ?g ?psi
+      (plam (comp ?ai (for ?phi1 (for (at0 z) (at1 z)))
+        (system (side ?phi2 (papp ?ti (dim (s z)))
+          (side (at0 (s z)) ?li (side (at1 (s z)) ?ri snil))))
+        (papp ?bj (dim z)))) ?out))
+  (req ?d ?g ?psi (comp (path ?a ?left ?right) ?phi ?t ?base)
+    (plam (comp ?ai (for ?phi1 (for (at0 z) (at1 z)))
+      (system (side ?phi2 (papp ?ti (dim (s z)))
+        (side (at0 (s z)) ?li (side (at1 (s z)) ?ri snil))))
+      (papp ?bj (dim z)))) ?out))
+
+(pred reverse0 (Tm Tm))
+(rule def.reverse0 ((dshift ?a (s z) ?a1) (dsubst ?a1 z (neg (dim z)) ?a2))
+  (reverse0 ?a ?a2))
+; Product composition is specified by its application equation (CCHM 4.5).
+(rule req.comp-pi-app (
+    (rhas ?d ?g ?psi (app (comp (pi ?a ?b) ?phi ?t ?base) ?arg) ?out)
+    (reverse0 ?a ?ar) (filldef ?ar ff zero ?arg ?backfill)
+    (reverse0 ?backfill ?v)
+    (dshiftctx ?g z ?g2) (fshift ?psi z ?psi2)
+    (rhas (s ?d) ?g2 ?psi2 ?v ?a)
+    (subst ?b z ?v ?bv) (dsubst ?v z i0 ?v0)
+    (rhas ?d ?g ?psi (comp ?bv ?phi (app ?t ?v) (app ?base ?v0)) ?out))
+  (req ?d ?g ?psi (app (comp (pi ?a ?b) ?phi ?t ?base) ?arg)
+    (comp ?bv ?phi (app ?t ?v) (app ?base ?v0)) ?out))
+
+; Universe composition glues the endpoint type to the base along the checked
+; canonical equivalence of the reversed line. canonical-map is a fixed program
+; definition, NOT a typing axiom (see canonical-map.horn).
+(rule req.comp-universe (
+    (rhas ?d ?g ?psi (comp (u ?l) ?phi ?t ?base) (u ?l))
+    (dsubst ?t z i1 ?t1) (reverse0 ?t ?tr) (canonical-map ?l ?program)
+    (rhas ?d ?g ?psi
+      (glue-type ?base ?phi ?t1
+        (app (app (app ?program ?t1) ?base)
+          (ann (plam ?tr) (path (u ?l) ?t1 ?base)))) (u ?l)))
+  (req ?d ?g ?psi (comp (u ?l) ?phi ?t ?base)
+    (glue-type ?base ?phi ?t1
+      (app (app (app ?program ?t1) ?base)
+        (ann (plam ?tr) (path (u ?l) ?t1 ?base)))) (u ?l)))
+
+; Universal quantification of a face over dimension ?k (CCHM 3): the largest
+; face without ?k that entails the original. It is the lattice homomorphism
+; sending k=0 and k=1 to the empty face and keeping every other literal, with
+; dimensions above ?k lowered. Used by Glue composition below.
+(pred fforall (F N F))
+(rule fforall.ff () (fforall ff ?k ff))
+(rule fforall.ft () (fforall ft ?k ft))
+(rule fforall.0.hit () (fforall (at0 ?k) ?k ff))
+(rule fforall.1.hit () (fforall (at1 ?k) ?k ff))
+(rule fforall.0.lt ((lt ?n ?k)) (fforall (at0 ?n) ?k (at0 ?n)))
+(rule fforall.1.lt ((lt ?n ?k)) (fforall (at1 ?n) ?k (at1 ?n)))
+(rule fforall.0.gt ((lt ?k (s ?n))) (fforall (at0 (s ?n)) ?k (at0 ?n)))
+(rule fforall.1.gt ((lt ?k (s ?n))) (fforall (at1 (s ?n)) ?k (at1 ?n)))
+(rule fforall.and ((fforall ?a ?k ?a2) (fforall ?b ?k ?b2))
+  (fforall (fand ?a ?b) ?k (fand ?a2 ?b2)))
+(rule fforall.or ((fforall ?a ?k ?a2) (fforall ?b ?k ?b2))
+  (fforall (for ?a ?b) ?k (for ?a2 ?b2)))
+
+; Glue composition (CCHM 6.2), with kamo3's fiber direction: a fiber element
+; of f over y is (x, p) with p : Path (f x) y, and isContr's contraction runs
+; from the center. Inputs, with i the composition dimension (dim z under its
+; binder): G = Glue A [phi ↦ (T, e)], tube b on psi, base b0. Following the
+; paper, with every piece written out:
+;   delta = ∀i.phi, phi1 = phi(i1), and A1, T1, e1, e0, b(i1) the endpoints;
+;   a1'   = comp^i A [psi ↦ unglue b] (unglue b0)
+;   t1'   = comp^i T [psi ↦ b] b0                          (on delta)
+;   v     = fill^i T [psi ↦ b] b0                          (on delta)
+;   omega = <j> comp^i A [psi ∨ j=1 ↦ e v] (e0 b0)          (pres; on delta)
+;   u     = [delta ↦ (t1', <j> omega(~j)), psi ↦ (b(i1), <_> a1')]
+;   ext   = comp^k (fiber e1 a1') [delta ∨ psi ↦ (snd p) u k] (fst p),
+;           p = snd e1 a1'                       (equiv: contractibility)
+;   a1    = comp^j A1 [phi1 ↦ (snd ext)(~j), psi ↦ unglue b(i1)] a1'
+;   result = glue G(i1) (fst ext) a1
+; When phi is ft, delta is ft and the result reduces to t1', as composition
+; in T requires. This is an equation of the object theory, checked only for
+; typed instances; it is not a univalence or computation oracle.
+(rule req.comp-glue (
+    (rhas ?d ?g ?psi0 (comp (glue-type ?a ?phi ?t ?e) ?psi ?b ?b0) ?out)
+    (fforall ?phi z ?delta)
+    (dsubst ?a z i1 ?a1) (fsubst ?phi z i1 ?phi1) (dsubst ?t z i1 ?t1)
+    (dsubst ?e z i1 ?e1) (dsubst ?e z i0 ?e0) (dsubst ?b z i1 ?bend)
+    (filldef ?t ?psi ?b ?b0 ?v)
+    ; Equivalences are projected through their checked types, since a
+    ; partial equivalence is often a system of unannotated terms.
+    (equivdef ?t ?a ?et) (dsubst ?et z i1 ?et1) (dsubst ?et z i0 ?et0)
+    (dshift ?et (s z) ?etj) (dshift ?et0 z ?et0j)
+    ; unglue's argument is typed at the Glue type it belongs to.
+    (dsubst (glue-type ?a ?phi ?t ?e) z i0 ?g0)
+    (dshift (glue-type ?a1 ?phi1 ?t1 ?e1) z ?g1k)
+    ; pres: under <j>, then the composition binder i.
+    (dshift ?a (s z) ?aj) (dshift ?e (s z) ?ej) (dshift ?b (s z) ?bj)
+    (dshift ?v (s z) ?vj) (fshift ?psi z ?psij) (fshift ?psij z ?psijj)
+    (dshift ?e0 z ?e0j) (dshift ?b0 z ?b0j)
+    (dshift (plam (comp ?aj (for ?psij (at1 z))
+        (system (side ?psijj (app (fst (ann ?ej ?etj)) ?bj)
+          (side (at1 (s z)) (app (fst (ann ?ej ?etj)) ?vj) snil)))
+        (app (fst (ann ?e0j ?et0j)) ?b0j))) z ?omegaj)
+    (dshift (comp ?a ?psi (unglue (ann ?b (glue-type ?a ?phi ?t ?e))) (unglue (ann ?b0 ?g0))) z ?a1j)
+    ; equiv: extend the partial fiber element by contractibility.
+    (fiberdef ?t1 ?a1 (fst (ann ?e1 ?et1)) (comp ?a ?psi (unglue (ann ?b (glue-type ?a ?phi ?t ?e))) (unglue (ann ?b0 ?g0))) ?fib)
+    (dshift ?fib z ?fibk)
+    (dshift (app (snd (ann ?e1 ?et1)) (comp ?a ?psi (unglue (ann ?b (glue-type ?a ?phi ?t ?e))) (unglue (ann ?b0 ?g0)))) z ?pk)
+    (dshift (system (side ?delta (pair (comp ?t ?psi ?b ?b0)
+          (plam (papp ?omegaj (neg (dim z)))))
+        (side ?psi (pair ?bend (plam ?a1j)) snil))) z ?uk)
+    ; a1: correct the A-composition on phi1 along the fiber path.
+    (dshift ?a1 z ?a1k) (fshift ?phi1 z ?phi1k) (fshift ?psi z ?psik)
+    (dshift ?bend z ?bendk)
+    (dshift (snd (comp ?fibk (for ?delta ?psi) (papp (app (snd ?pk) ?uk) (dim z))
+        (fst (app (snd (ann ?e1 ?et1)) (comp ?a ?psi (unglue (ann ?b (glue-type ?a ?phi ?t ?e))) (unglue (ann ?b0 ?g0))))))) z ?alphak)
+    (rhas ?d ?g ?psi0
+      (glue (glue-type ?a1 ?phi1 ?t1 ?e1)
+        (fst (comp ?fibk (for ?delta ?psi) (papp (app (snd ?pk) ?uk) (dim z))
+          (fst (app (snd (ann ?e1 ?et1)) (comp ?a ?psi (unglue (ann ?b (glue-type ?a ?phi ?t ?e))) (unglue (ann ?b0 ?g0)))))))
+        (comp ?a1k (for ?phi1 ?psi)
+          (system (side ?phi1k (papp ?alphak (neg (dim z)))
+            (side ?psik (unglue (ann ?bendk ?g1k)) snil)))
+          (comp ?a ?psi (unglue (ann ?b (glue-type ?a ?phi ?t ?e))) (unglue (ann ?b0 ?g0))))) ?out))
+  (req ?d ?g ?psi0 (comp (glue-type ?a ?phi ?t ?e) ?psi ?b ?b0)
+    (glue (glue-type ?a1 ?phi1 ?t1 ?e1)
+      (fst (comp ?fibk (for ?delta ?psi) (papp (app (snd ?pk) ?uk) (dim z))
+        (fst (app (snd (ann ?e1 ?et1)) (comp ?a ?psi (unglue (ann ?b (glue-type ?a ?phi ?t ?e))) (unglue (ann ?b0 ?g0)))))))
+      (comp ?a1k (for ?phi1 ?psi)
+        (system (side ?phi1k (papp ?alphak (neg (dim z)))
+          (side ?psik (unglue (ann ?bendk ?g1k)) snil)))
+        (comp ?a ?psi (unglue (ann ?b (glue-type ?a ?phi ?t ?e))) (unglue (ann ?b0 ?g0))))) ?out))

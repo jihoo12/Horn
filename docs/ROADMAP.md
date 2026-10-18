@@ -1,5 +1,9 @@
 # Next work
 
+The active product direction is the staged [language and cubical integration](INTEGRATION.md).
+Keep the generic kernel independent of both, and distinguish the existing
+[standalone replay package](CUBICAL.md) from migration of source elaboration.
+
 ## Verification
 
 Done: [agda/Soundness.agda](../agda/Soundness.agda) mechanizes that acceptance
@@ -58,4 +62,5 @@ public fields, which matters only to code that constructs it.
 Keep cubical rules and producers outside this repository. A self-contained
 representative workload generator would let external readers reproduce the
 performance studies without access to the private application inputs.
-General proof search is outside the checker.
+General proof search stays outside the ground checker; the surface-language
+frontend already provides bounded search and certified forward execution.

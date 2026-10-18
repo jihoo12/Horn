@@ -1,0 +1,19 @@
+; Definitional macros over Pi/Sigma/Path, NOT isEquiv axioms or new term types.
+(pred contrdef (Tm Tm))
+(pred fiberdef (Tm Tm Tm Tm Tm))
+(pred isequivdef (Tm Tm Tm Tm))
+(pred equivdef (Tm Tm Tm))
+; isContr X = Sigma c:X. Pi x:X. Path X c x
+(rule def.contr ((shift ?x z ?x1) (shift ?x1 z ?x2) (dshift ?x2 z ?xi))
+  (contrdef ?x (sigma ?x (pi ?x1 (path ?xi (v (s z)) (v z))))))
+; fiber f b = Sigma a:A. Path B (f a) b
+(rule def.fiber ((shift ?b z ?b1) (dshift ?b1 z ?bi)
+    (shift ?f z ?f1) (shift ?y z ?y1))
+  (fiberdef ?a ?b ?f ?y (sigma ?a (path ?bi (app ?f1 (v z)) ?y1))))
+; isEquiv f = Pi b:B. isContr (fiber f b)
+(rule def.isequiv ((shift ?a z ?a1) (shift ?b z ?b1) (shift ?f z ?f1)
+    (fiberdef ?a1 ?b1 ?f1 (v z) ?fiber) (contrdef ?fiber ?c))
+  (isequivdef ?a ?b ?f (pi ?b ?c)))
+; A equiv B = Sigma f:(Pi a:A. B). isEquiv f
+(rule def.equiv ((shift ?a z ?a1) (shift ?b z ?b1)
+    (isequivdef ?a1 ?b1 (v z) ?e)) (equivdef ?a ?b (sigma (pi ?a ?b1) ?e)))

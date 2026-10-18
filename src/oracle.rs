@@ -1215,3 +1215,29 @@ pub fn decode(theory: &str, goals: &str, oracle: &[u8], out: impl Write + Send) 
         Ok(engine.stats)
     })
 }
+
+/// Decode an untrusted oracle into a pipe and check every emitted step with
+/// the ground kernel against the caller's theory and exact goals. No decoded
+/// proof file is materialized, and decoder failure is never acceptance.
+pub fn check(theory: &str, goals: &str, oracle: &[u8]) -> Result<crate::kernel::Report> {
+    use std::io::{BufReader, BufWriter};
+    let checker = crate::kernel::Theory::parse(theory)?;
+    let (reader, writer) = std::io::pipe().map_err(|e| e.to_string())?;
+    let (report, decoded) = std::thread::scope(|scope| {
+        let decoder = scope.spawn(|| {
+            decode(
+                theory,
+                goals,
+                oracle,
+                BufWriter::with_capacity(1 << 20, writer),
+            )
+        });
+        let report = checker.check_reader(goals, BufReader::with_capacity(1 << 20, reader));
+        (report, decoder.join())
+    });
+    let decoded = decoded.map_err(|_| "decoder panicked".to_string())?;
+    // A kernel rejection explains more than the decoder's broken pipe.
+    let report = report?;
+    decoded?;
+    Ok(report)
+}

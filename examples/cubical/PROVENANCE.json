@@ -1,0 +1,33 @@
+{
+  "repository": "https://github.com/jihoo12/kamo3",
+  "commit": "199d67705c591511b0f557b505d2baf019e2687d",
+  "files": {
+    "theories/path.horn": "d4cf4d5fd79824fefeb758623050e74939cf5902d55933d2f750cdaa9a697a20",
+    "theories/faces.horn": "12f506a06400363355214b0a9748bea1cba636e37e771f8e74231c442a0a9c05",
+    "theories/face-ops.horn": "0ed4b512d048b0e4bde3d71a35005ebddf03cc98a1418010b4acb7cb3d920d0f",
+    "theories/restricted.horn": "e134eb025eff8a817a2842b1678181cb148e0ee0c446f446d3fa7d586ea1b61e",
+    "theories/systems.horn": "bdb9ab314a039b39f0b9d26a114b26b8f7dc444c32f32c564c1ad8b8928835b4",
+    "theories/composition.horn": "9ea1526a216a04a1ee3193085f8babd512836ab5a2f38065e6a8133d1c803261",
+    "theories/sigma.horn": "36fe8742c5d786bd0f6485e9e483185f5c267265580fe54f91cfbd69ebaedae3",
+    "theories/equivalence-defs.horn": "83eaf0349a155aeb453f568ed5a7bc2cdb840190796e5743348a1d01c8590885",
+    "theories/glue.horn": "44ca518986a061d579a71894d48a7d57780b14f5aed349c247b790c9ea29b04c",
+    "theories/equality.horn": "5f479274a1e14b39697f8568eb6e4a2f8623281675b58039585abb9417ee100a",
+    "theories/canonical-map.horn": "7a10caf1f86b50f8ef578716b4ab47bef6ffa08a64737375b907a1095c9285a4",
+    "theories/computation.horn": "0f47c55a9c696f83dd28ebbfb509bdeb2e33d4a36fbae494f60554a7a99946bd",
+    "examples/deep-univalence.goals": "e9948208af37873c6b8311f278ddd3c23f8371edf25d677ce4014e3c6b7c0b4a",
+    "examples/deep-univalence.proof.gz": "e6e19ead8eb0a98c10cd91c82289d7004757bf7162322204aad937f31d9952b4",
+    "examples/ua-transport.goals": "9c465a537d972d2ee92013e0b14285a6f3bf2adee0e7c9352c2df7b28d8a1e95",
+    "examples/ua-transport.proof.gz": "d40bb0e0be0f364625b4549bcf59463d5e5acefe6e9543a0023ef13ef13ec028"
+  },
+  "oracle_format": "horn-oracle 1",
+  "artifacts": {
+    "examples/cubical/deep-univalence.oracle": {
+      "sha256": "6d8b9384131abb9c6a5138bb74580c7d3bea886a53cb092b8321eaef5e725929",
+      "bytes": 35830
+    },
+    "examples/cubical/ua-transport.oracle": {
+      "sha256": "adfb0dd7852ed316e310069410c90bc8f858b4aeaadc7d6774b6f272a2c116ce",
+      "bytes": 4086
+    }
+  }
+}

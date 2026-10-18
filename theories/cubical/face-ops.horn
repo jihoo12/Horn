@@ -1,0 +1,23 @@
+; Append after path.horn and faces.horn. Pure syntactic dimension operations.
+(pred fshift (F N F))
+(pred fsubst (F N I F))
+(rule fshift.ff () (fshift ff ?k ff))
+(rule fshift.ft () (fshift ft ?k ft))
+(rule fshift.0 ((ishift (dim ?n) ?k (dim ?m))) (fshift (at0 ?n) ?k (at0 ?m)))
+(rule fshift.1 ((ishift (dim ?n) ?k (dim ?m))) (fshift (at1 ?n) ?k (at1 ?m)))
+(rule fshift.and ((fshift ?a ?k ?a2) (fshift ?b ?k ?b2))
+  (fshift (fand ?a ?b) ?k (fand ?a2 ?b2)))
+(rule fshift.or ((fshift ?a ?k ?a2) (fshift ?b ?k ?b2))
+  (fshift (for ?a ?b) ?k (for ?a2 ?b2)))
+(rule fsubst.ff () (fsubst ff ?k ?r ff))
+(rule fsubst.ft () (fsubst ft ?k ?r ft))
+; A literal replaced by a compound interval becomes its endpoint FACE.
+; E.g. (i=0)[i := j /\ k] = (j=0) \/ (k=0).
+(rule fsubst.0 ((isubst (dim ?n) ?k ?r ?s) (boundary ?s ?a ?b))
+  (fsubst (at0 ?n) ?k ?r ?a))
+(rule fsubst.1 ((isubst (dim ?n) ?k ?r ?s) (boundary ?s ?a ?b))
+  (fsubst (at1 ?n) ?k ?r ?b))
+(rule fsubst.and ((fsubst ?a ?k ?r ?a2) (fsubst ?b ?k ?r ?b2))
+  (fsubst (fand ?a ?b) ?k ?r (fand ?a2 ?b2)))
+(rule fsubst.or ((fsubst ?a ?k ?r ?a2) (fsubst ?b ?k ?r ?b2))
+  (fsubst (for ?a ?b) ?k ?r (for ?a2 ?b2)))
