@@ -1,5 +1,8 @@
-//! Explicit cubical theory data and frozen certificates. This module adds no
-//! inference or reduction algorithm to the generic kernel. See docs/CUBICAL.md.
+//! Explicit cubical data and untrusted certificate generation. No new
+//! inference or reduction algorithm in the kernel. See docs/CUBICAL.md.
+
+pub mod ast;
+pub mod producer;
 
 /// Order matters: later fragments use declarations from earlier fragments.
 pub const FRAGMENTS: &[(&str, &str)] = &[
