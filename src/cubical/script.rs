@@ -26,8 +26,9 @@
 //! definition; neither is an axiom. Definitions are closed and transparent.
 use super::engine::data::{self, ArgTy, Ctor, Data};
 use super::engine::face_frontend::Face;
+use super::engine::deep_univalence_frontend;
 use super::engine::iso_equiv_frontend::{iso_equiv_term, iso_equiv_type};
-use super::engine::path_frontend::{dim, papp, path, u, v};
+use super::engine::path_frontend::{dim, papp, path, v};
 use super::engine::restricted_frontend::RestrictedProducer;
 use super::engine::ua_frontend::{ua_term, ua_type};
 use super::generate::{Regenerated, certify};
@@ -46,12 +47,26 @@ pub struct Evaluation {
 pub struct Script {
     pub certified: Regenerated,
     pub evaluations: Vec<Evaluation>,
+    /// One schematic certificate per level-polymorphic definition.
+    pub polymorphic: Vec<Polymorphic>,
+}
+
+/// `∀L. ⊢ NAME : TYPE`, as a schematic certificate accepted by
+/// `schematic::check`, generalized from the definition's proof at level 0.
+pub struct Polymorphic {
+    pub name: String,
+    pub goals: String,
+    pub proof: String,
+    pub steps: usize,
+    pub inductions: usize,
 }
 
 #[derive(Clone, Default)]
 struct Names {
     ordinary: Vec<String>,
     dimensions: Vec<String>,
+    /// Level variables and the unary level terms they stand for.
+    levels: Vec<(String, Sexp)>,
 }
 
 impl Names {
@@ -98,25 +113,82 @@ const RESERVED: &[&str] = &[
     "bool", "btrue", "bfalse", "nat", "zero", "i0", "i1", "u", "pi", "lam", "app", "sigma",
     "pair", "fst", "snd", "path", "plam", "papp", "bif", "ann", "equiv", "transport", "neg",
     "meet", "join", "ua", "iso-equiv", "suc", "natrec", "data", "elim", "ua-at",
-    "iso-equiv-at",
+    "iso-equiv-at", "at", "def-poly", "univalence-at",
 ];
 
 struct Elaborator {
     p: RestrictedProducer,
     defs: HashMap<String, Sexp>,
+    /// Level-polymorphic definitions: level parameter, type, term (source).
+    poly: HashMap<String, (String, Sexp, Sexp)>,
     prelude: HashMap<&'static str, Sexp>,
+}
+
+fn producer() -> RestrictedProducer {
+    let mut p = RestrictedProducer::default();
+    p.f.path.p.archive_judgments();
+    p.reuse_restricted_typings();
+    p.f.path.memoize_transformations();
+    p.reuse_certified_checks();
+    p.strengthen_typings();
+    p.keep_reduct_types();
+    p.enable_composition_computation();
+    p
+}
+
+/// Prove `t0 : ty0` (the level-0 instance) on its own, generalize the proof
+/// over universe levels, check the schematic certificate, and require its
+/// goal to be exactly `expected`, the user's statement with level `L`.
+fn generalize_definition(
+    name: &str,
+    t0: &Sexp,
+    ty0: &Sexp,
+    expected: &Sexp,
+    theory: &str,
+) -> Result<Polymorphic> {
+    let mut p = producer();
+    let id = p.check(0, &atom("nil"), &Face::True, t0, ty0)?;
+    p.f.path.p.result(name, id);
+    let goals = format!("(goal {name} {})\n", p.f.path.p.judgment(id));
+    let mut proof = Vec::new();
+    p.f.path.p.write_reachable(&mut proof).map_err(|e| e.to_string())?;
+    let (mut sg, mut sp) = (Vec::new(), Vec::new());
+    crate::generalize::generalize(
+        theory,
+        &goals,
+        &proof[..],
+        &["max:2"],
+        Some("u:0"),
+        Some((&mut sg, &mut sp)),
+    )?;
+    let (sg, sp) = (
+        String::from_utf8(sg).map_err(|e| e.to_string())?,
+        String::from_utf8(sp).map_err(|e| e.to_string())?,
+    );
+    let report = crate::schematic::check(theory, &sg, sp.as_bytes())?;
+    let want = format!("(goal {name} {expected})");
+    if !sg.lines().any(|l| l == want) {
+        let got = sg.lines().find(|l| l.starts_with("(goal ")).unwrap_or("");
+        let at = got.bytes().zip(want.bytes()).take_while(|(a, b)| a == b).count();
+        let near = |s: &str| s.get(at.saturating_sub(60)..(at + 60).min(s.len())).unwrap_or("").to_owned();
+        return Err(format!(
+            "the proof does not generalize to the stated level: at byte {at}, got ...{}... but stated ...{}...",
+            near(got),
+            near(&want)
+        ));
+    }
+    Ok(Polymorphic {
+        name: name.to_owned(),
+        goals: sg,
+        proof: sp,
+        steps: report.steps,
+        inductions: report.inductions,
+    })
 }
 
 impl Elaborator {
     fn new() -> Result<Self> {
-        let mut p = RestrictedProducer::default();
-        p.f.path.p.archive_judgments();
-        p.reuse_restricted_typings();
-        p.f.path.memoize_transformations();
-        p.reuse_certified_checks();
-        p.strengthen_typings();
-        p.keep_reduct_types();
-        p.enable_composition_computation();
+        let mut p = producer();
         let mut prelude = HashMap::new();
         prelude.insert("ua", call("ann", [ua_term(), ua_type(&mut p, 0)?]));
         prelude.insert(
@@ -129,8 +201,35 @@ impl Elaborator {
         Ok(Self {
             p,
             defs: HashMap::new(),
+            poly: HashMap::new(),
             prelude,
         })
+    }
+
+    /// A level: a numeral, a level variable, or `(s LEVEL)`.
+    fn level_term(&self, s: &Sexp, names: &Names) -> Result<Sexp> {
+        match s {
+            Sexp::Atom(a) => {
+                if let Some((_, t)) = names.levels.iter().rev().find(|(n, _)| **n == **a) {
+                    return Ok(t.clone());
+                }
+                let n = level(s)?;
+                Ok((0..n).fold(atom("z"), |t, _| call("s", [t])))
+            }
+            Sexp::List(xs) if xs.len() == 2 && xs[0] == atom("s") => {
+                Ok(call("s", [self.level_term(&xs[1], names)?]))
+            }
+            _ => Err(format!("invalid level {s}")),
+        }
+    }
+
+    /// A level-polymorphic definition's term and type at `level`.
+    fn instance(&mut self, param: &str, level: Sexp, ty: &Sexp, t: &Sexp) -> Result<(Sexp, Sexp)> {
+        let names = Names {
+            levels: vec![(param.to_owned(), level)],
+            ..Names::default()
+        };
+        Ok((self.term(t, &names)?, self.term(ty, &names)?))
     }
 
     fn interval(&self, s: &Sexp, names: &Names) -> Result<Sexp> {
@@ -190,7 +289,18 @@ impl Elaborator {
         let head = xs.first().ok_or("empty term")?.atom()?;
         let args = &xs[1..];
         Ok(match (head, args) {
-            ("u", [l]) => u(level(l)?),
+            ("u", [l]) => call("u", [self.level_term(l, names)?]),
+            ("at", [name, l]) => {
+                let name = name.atom()?;
+                let (param, ty, t) = self
+                    .poly
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| format!("{name} is not level-polymorphic"))?;
+                let level = self.level_term(l, names)?;
+                let (t, ty) = self.instance(&param, level, &ty, &t)?;
+                call("ann", [t, ty])
+            }
             (former @ ("pi" | "sigma"), [x, a, b]) => {
                 let a = self.term(a, names)?;
                 let b = self.term(b, &names.with_ordinary(binder(x)?))?;
@@ -237,16 +347,24 @@ impl Elaborator {
             ("ann", [t, a]) => call("ann", [self.term(t, names)?, self.term(a, names)?]),
             // The prelude at other universe levels; each instance is a
             // closed term whose typing is checked where it is used.
+            // Built at level 0, where every universe is the parameter's,
+            // then moved to the requested level, which may be a variable.
             ("ua-at", [l]) => {
-                let l = level(l)?;
-                call("ann", [ua_term(), ua_type(&mut self.p, l)?])
+                let level = self.level_term(l, names)?;
+                let ty = ua_type(&mut self.p, 0)?;
+                relevel(&call("ann", [ua_term(), ty]), &level)
             }
-            ("iso-equiv-at", [m, n]) => {
-                let (m, n) = (level(m)?, level(n)?);
-                call(
-                    "ann",
-                    [iso_equiv_term(&mut self.p, m, n)?, iso_equiv_type(&mut self.p, m, n)?],
-                )
+            ("univalence-at", [l]) => {
+                let level = self.level_term(l, names)?;
+                let t = deep_univalence_frontend::univalence_term(&mut self.p)?;
+                let ty = deep_univalence_frontend::univalence_type(&mut self.p)?;
+                relevel(&call("ann", [t, ty]), &level)
+            }
+            ("iso-equiv-at", [l]) => {
+                let level = self.level_term(l, names)?;
+                let t = iso_equiv_term(&mut self.p, 0, 0)?;
+                let ty = iso_equiv_type(&mut self.p, 0, 0)?;
+                relevel(&call("ann", [t, ty]), &level)
             }
             ("elim", [ty, rest @ ..]) => {
                 let d = data::by_name(ty.atom()?).ok_or_else(|| format!("unknown data type {ty}"))?;
@@ -396,6 +514,26 @@ impl Elaborator {
     }
 }
 
+/// Shift every universe by `level`: `(u n)` becomes `(u level+n)`.
+fn relevel(t: &Sexp, level: &Sexp) -> Sexp {
+    fn raise(n: &Sexp, level: &Sexp) -> Option<Sexp> {
+        match n {
+            Sexp::Atom(a) if &**a == "z" => Some(level.clone()),
+            Sexp::List(xs) if xs.len() == 2 && xs[0] == atom("s") => {
+                Some(call("s", [raise(&xs[1], level)?]))
+            }
+            _ => None,
+        }
+    }
+    match t {
+        Sexp::List(xs) if xs.len() == 2 && xs[0] == atom("u") && raise(&xs[1], level).is_some() => {
+            call("u", [raise(&xs[1], level).unwrap()])
+        }
+        Sexp::List(xs) => super::engine::term::list(xs.iter().map(|x| relevel(x, level)).collect()),
+        Sexp::Atom(_) => t.clone(),
+    }
+}
+
 /// Pretty-print a closed core value: unary levels become decimal.
 fn show(s: &Sexp) -> String {
     fn unary(s: &Sexp) -> Option<usize> {
@@ -446,6 +584,7 @@ pub fn run(source: &str) -> Result<Script> {
         let nil = atom("nil");
         let top = Face::True;
         let mut evaluations = Vec::new();
+        let mut polymorphic = Vec::new();
         let mut names_seen = std::collections::HashSet::new();
         for form in &forms {
             let xs = form.list()?;
@@ -461,6 +600,30 @@ pub fn run(source: &str) -> Result<Script> {
             let empty = Names::default();
             match (head, &xs[2..]) {
                 ("data", ctors) => appended.push_str(&e.declare(&xs[1], ctors)?),
+                ("def-poly", [params, ty, t]) => {
+                    e.fresh(&name)?;
+                    let [param] = params.list()? else {
+                        return Err(format!("def-poly {name}: exactly one level parameter"));
+                    };
+                    let param = binder(param)?.to_owned();
+                    e.poly.insert(name.clone(), (param.clone(), ty.clone(), t.clone()));
+                    // The instance at level 0 is an ordinary definition.
+                    let (t0, ty0) = e.instance(&param, atom("z"), ty, t)?;
+                    let id = e
+                        .p
+                        .check(0, &nil, &top, &t0, &ty0)
+                        .map_err(|err| format!("def-poly {name}: {err}"))?;
+                    e.p.f.path.p.result(&name, id);
+                    e.defs.insert(name.clone(), call("ann", [t0.clone(), ty0.clone()]));
+                    // The statement for every level, with L an eigenvariable.
+                    let (tl, tyl) = e.instance(&param, atom("L"), ty, t)?;
+                    let expected = call("rhas", [atom("z"), nil.clone(), atom("ft"), tl, tyl]);
+                    let theory = super::theory() + &appended;
+                    polymorphic.push(
+                        generalize_definition(&name, &t0, &ty0, &expected, &theory)
+                            .map_err(|err| format!("def-poly {name}: {err}"))?,
+                    );
+                }
                 ("def", [ty, t]) => {
                     e.fresh(&name)?;
                     let ty = e.term(ty, &empty)?;
@@ -515,10 +678,12 @@ pub fn run(source: &str) -> Result<Script> {
                 _ => return Err(format!("invalid form {form}")),
             }
         }
-        Ok((e.p, evaluations, appended))
+        Ok((e.p, (evaluations, polymorphic), appended))
     })?;
+    let (evaluations, polymorphic) = evaluations;
     Ok(Script {
         certified,
         evaluations,
+        polymorphic,
     })
 }

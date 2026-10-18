@@ -116,9 +116,24 @@ fn run_cubical(args: &[String]) -> Result<(), String> {
                 fs::write(dir.join("proof.oracle"), &script.certified.oracle)
                     .map_err(|e| e.to_string())?;
             }
+            if let Some(dir) = output {
+                let dir = std::path::Path::new(dir);
+                for p in &script.polymorphic {
+                    fs::write(dir.join(format!("{}.schematic.goals", p.name)), &p.goals)
+                        .map_err(|e| e.to_string())?;
+                    fs::write(dir.join(format!("{}.schematic.proof", p.name)), &p.proof)
+                        .map_err(|e| e.to_string())?;
+                }
+            }
             // Results are printed only after the kernel accepted the oracle.
             for e in &script.evaluations {
                 println!("{} = {} : {}", e.name, e.value, e.ty);
+            }
+            for p in &script.polymorphic {
+                println!(
+                    "ACCEPT (schematic {}): every level L, {} steps, {} inductions",
+                    p.name, p.steps, p.inductions
+                );
             }
             let report = &script.certified.checked;
             println!(

@@ -1297,18 +1297,20 @@ impl RestrictedProducer {
             level(&ub)?;
             let ri = self.check(d, g, phi, r, a)?;
             let (out, si) = self.f.path.transform(body, &Op::Subst(0, r.clone()))?;
-            let (_, bsi) = self.f.path.transform(b, &Op::Subst(0, r.clone()))?;
-            let oi = self.check(d, g, phi, &out, &ty)?;
+            // The rule states the reduct at b[r]; convert to the caller's type.
+            let (c, bsi) = self.f.path.transform(b, &Op::Subst(0, r.clone()))?;
+            let oi = self.check(d, g, phi, &out, &c)?;
             let eq = self.eq(
                 d,
                 g,
                 phi,
                 t,
                 &out,
-                &ty,
+                &c,
                 "req.beta-r",
                 vec![ai, bi, bti, ri, si, bsi, oi],
             );
+            let eq = self.retype_eq(d, g, phi, t, &out, &c, &ty, eq)?;
             return Ok((out, ty, eq));
         }
         if let ("glue-type", [_, f, partial_ty, _]) = shape(t)?

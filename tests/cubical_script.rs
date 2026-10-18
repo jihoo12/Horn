@@ -210,3 +210,58 @@ fn univalence_one_universe_up_computes_on_data_results() {
     assert_eq!(shown, ["applied = btrue : bool"]);
     assert!(script.certified.goals.contains("(goal swap-path (rhas z nil ft"));
 }
+
+#[test]
+fn level_polymorphic_definitions_hold_at_every_level() {
+    let script = cubical::script::run(include_str!("../examples/cubical/script/poly.hcs")).unwrap();
+    let shown: Vec<_> = script
+        .evaluations
+        .iter()
+        .map(|e| format!("{} = {} : {}", e.name, e.value, e.ty))
+        .collect();
+    assert_eq!(
+        shown,
+        ["on-bool = btrue : bool", "on-types = bool : (u 0)", "twice-not = btrue : bool"]
+    );
+    let names: Vec<_> = script.polymorphic.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["id", "const", "twice", "ua-poly", "apply-id", "univalence"]);
+    let theory = &script.certified.theory;
+    for p in &script.polymorphic {
+        // Every schematic certificate states its goal for the variable L.
+        assert!(p.goals.starts_with("(var L N)"), "{}", p.name);
+        assert!(p.goals.contains("(u L)"), "{}", p.name);
+        horn::schematic::check(theory, &p.goals, p.proof.as_bytes()).unwrap();
+    }
+    // The univalence instance at L := 1 unfolds to a ground certificate that
+    // the unchanged kernel accepts.
+    let uv = script.polymorphic.iter().find(|p| p.name == "univalence").unwrap();
+    let (mut goals, mut proof) = (Vec::new(), Vec::new());
+    horn::schematic::instantiate(
+        theory,
+        &uv.goals,
+        uv.proof.as_bytes(),
+        &[("L".into(), "(s z)".into())],
+        &mut goals,
+        &mut proof,
+    )
+    .unwrap();
+    let report = horn::kernel::Theory::parse(theory)
+        .unwrap()
+        .check(std::str::from_utf8(&goals).unwrap(), std::str::from_utf8(&proof).unwrap())
+        .unwrap();
+    assert_eq!(report.goals, 1);
+}
+
+#[test]
+fn definitions_that_pin_their_level_are_not_polymorphic() {
+    for bad in [
+        // bool lives in U0 only.
+        "(def-poly bad (L) (u L) bool)",
+        "(def-poly bad (L) (pi A (u L) (u L)) (lam A (u L) nat))",
+        // One level parameter.
+        "(def-poly bad (L M) (u L) bool)",
+        "(eval x (at missing 0))",
+    ] {
+        assert!(cubical::script::run(bad).is_err(), "{bad}");
+    }
+}

@@ -118,6 +118,41 @@ would force composition in that Glue type to agree with composition in `A`,
 which reintroduces regularity, so the theory does not have it. Results
 reach canonical form when they are data (booleans, numbers, declared types).
 
+## Level variables
+
+`(def-poly NAME (L) TYPE TERM)` states a definition for every universe level
+`L` ([poly.hcs](../examples/cubical/script/poly.hcs), about 16 s, most of it
+univalence). Levels are numerals, a level variable, or `(s LEVEL)`;
+`(ua-at LEVEL)`, `(iso-equiv-at LEVEL)` and `(univalence-at LEVEL)` accept
+level variables. `(at NAME LEVEL)` uses a definition at a level, including
+the enclosing definition's own `L`.
+
+```text
+(def-poly univalence (L)
+  (pi A (u L) (pi B (u L) (equiv (path (u L) A B) (equiv A B))))
+  (univalence-at L))
+; ACCEPT (schematic univalence): every level L, 210196 steps, 3 inductions
+```
+
+The ground kernel cannot state "for every L", so a polymorphic definition is
+certified in three steps, reusing the research tools on schematic
+certificates ([SCHEMATIC.md](SCHEMATIC.md)):
+
+1. The engine proves the definition at level 0, as an ordinary certificate.
+2. `generalize` abstracts the universe levels of that proof into one
+   eigenvariable `L`, proving the `max` facts it needs by induction.
+3. `schematic::check` accepts the result, and the script requires its goal
+   to be exactly the stated judgment with `L` for the level variable. A
+   proof that pins the level (for example `bool : U_L`) is rejected.
+
+The level-0 instance also enters the script's ordinary certificate. `--emit`
+writes `NAME.schematic.goals` and `NAME.schematic.proof`; `schematic-kernel
+... L=(s z) OUT_GOALS OUT_PROOF` unfolds any instance into a ground
+certificate for the unchanged kernel, which the tests do for univalence at
+`L := 1`. The schematic checker is a research prototype modelled and proved
+sound in [agda/Schematic.agda](../agda/Schematic.agda); it is not part of the
+ground kernel.
+
 ## What this language is for
 
 It is not meant to become Lean 4. Its distinguishing commitments are:
@@ -167,7 +202,7 @@ cubical type theory is still a separate obligation; see [CUBICAL.md](CUBICAL.md)
 ## Limits
 
 Evaluation is weak-head, continued under constructors and pairs, and bounded
-by 100,000 steps. Universe levels are explicit numbers; there are no level
-variables, and declared data types live in `U0`. Data types are bool, nat and declared types with parameters but no indices;
+by 100,000 steps. Each polymorphic definition has one level variable, and
+declared data types live in `U0`. Data types are bool, nat and declared types with parameters but no indices;
 there are no implicit arguments and no modules. This format and the `.hcu` core files
 and `.hn` programs are still separate frontends.

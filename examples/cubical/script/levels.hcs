@@ -7,7 +7,7 @@
   (lam p (sigma x (u 0) (u 0)) (plam i p)))
 
 (def swap-equiv (equiv (sigma x (u 0) (u 0)) (sigma x (u 0) (u 0)))
-  (pair swap (app (iso-equiv-at 1 1) (sigma x (u 0) (u 0)) (sigma x (u 0) (u 0)) swap swap swap-swap swap-swap)))
+  (pair swap (app (iso-equiv-at 1) (sigma x (u 0) (u 0)) (sigma x (u 0) (u 0)) swap swap swap-swap swap-swap)))
 
 (def swap-path (path (u 1) (sigma x (u 0) (u 0)) (sigma x (u 0) (u 0)))
   (app (ua-at 1) (sigma x (u 0) (u 0)) (sigma x (u 0) (u 0)) swap-equiv))
