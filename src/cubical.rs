@@ -4,6 +4,7 @@
 pub mod ast;
 pub mod engine;
 pub mod generate;
+pub mod script;
 pub mod producer;
 pub mod source;
 

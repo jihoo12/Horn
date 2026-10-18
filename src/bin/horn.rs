@@ -48,7 +48,7 @@ fn run() -> Result<(), String> {
 }
 
 fn run_cubical(args: &[String]) -> Result<(), String> {
-    let usage = "usage: horn cubical list\n       horn cubical check NAME|all\n       horn cubical export NAME DIR\n       horn cubical run FILE [--profile NAME] [--emit NEW_DIR]\n       horn cubical generate NAME [--emit NEW_DIR]";
+    let usage = "usage: horn cubical list\n       horn cubical check NAME|all\n       horn cubical export NAME DIR\n       horn cubical run FILE [--profile NAME] [--emit NEW_DIR]\n       horn cubical generate NAME [--emit NEW_DIR]\n       horn cubical eval FILE.hcs [--emit NEW_DIR]";
     let args: Vec<_> = args.iter().map(String::as_str).collect();
     if args == ["list"] {
         for example in cubical::EXAMPLES {
@@ -91,6 +91,40 @@ fn run_cubical(args: &[String]) -> Result<(), String> {
             println!(
                 "ACCEPT (generated cubical): {} goals, {} proof steps",
                 generated.checked.goals, generated.checked.steps
+            );
+        }
+        ["eval", path, rest @ ..] => {
+            let output = match rest {
+                [] => None,
+                ["--emit", dir] => Some(*dir),
+                _ => return Err(usage.into()),
+            };
+            if let Some(dir) = output
+                && std::path::Path::new(dir).exists()
+            {
+                return Err(format!("{dir} already exists"));
+            }
+            let source = fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+            let script = cubical::script::run(&source).map_err(|e| format!("{path}: {e}"))?;
+            if let Some(dir) = output {
+                fs::create_dir(dir)
+                    .map_err(|e| format!("cannot create new directory {dir}: {e}"))?;
+                let dir = std::path::Path::new(dir);
+                fs::write(dir.join("theory.horn"), cubical::theory()).map_err(|e| e.to_string())?;
+                fs::write(dir.join("goals"), &script.certified.goals).map_err(|e| e.to_string())?;
+                fs::write(dir.join("proof.oracle"), &script.certified.oracle)
+                    .map_err(|e| e.to_string())?;
+            }
+            // Results are printed only after the kernel accepted the oracle.
+            for e in &script.evaluations {
+                println!("{} = {} : {}", e.name, e.value, e.ty);
+            }
+            let report = &script.certified.checked;
+            println!(
+                "ACCEPT (cubical script): {} goals, {} proof steps, {} oracle bytes",
+                report.goals,
+                report.steps,
+                script.certified.oracle.len()
             );
         }
         ["generate", name, rest @ ..] => {

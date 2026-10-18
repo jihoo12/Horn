@@ -1,0 +1,20 @@
+; Booleans, an equivalence, and computation along univalence.
+; Every def/check/eval is a goal of one certificate checked by the kernel.
+(def not (pi b bool bool)
+  (lam b bool (bif c bool bfalse btrue b)))
+
+(eval not-true (app not btrue))
+
+; not is its own inverse, by the dependent eliminator.
+(def not-not (pi b bool (path bool (app not (app not b)) b))
+  (lam b bool
+    (bif c (path bool (app not (app not c)) c) (plam i btrue) (plam i bfalse) b)))
+
+(def not-equiv (equiv bool bool)
+  (pair not (app iso-equiv bool bool not not not-not not-not)))
+
+; The path of types obtained from the equivalence.
+(def not-path (path (u 0) bool bool) (app ua bool bool not-equiv))
+
+; Transport along it computes, through Glue, to a boolean.
+(eval along-ua (transport i (papp not-path i) btrue))

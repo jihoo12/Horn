@@ -24,18 +24,17 @@ pub struct Regenerated {
     pub checked: Report,
 }
 
-pub fn regenerate(name: &str) -> Result<Regenerated> {
-    let (_, produce) = GENERATORS
-        .iter()
-        .find(|(n, _)| *n == name)
-        .ok_or_else(|| format!("no generator for cubical example {name}"))?;
-    let produce = *produce;
+/// Run `produce` on a large stack, encode the results it registered as goals
+/// into an oracle, and check that oracle with the kernel.
+pub fn certify<T: Send>(
+    produce: impl FnOnce() -> Result<(RestrictedProducer, T)> + Send,
+) -> Result<(Regenerated, T)> {
     let theory = super::theory();
-    let (goals, oracle) = std::thread::scope(|scope| {
+    let (goals, oracle, extra) = std::thread::scope(|scope| {
         let worker = std::thread::Builder::new()
             .stack_size(STACK_BYTES)
-            .spawn_scoped(scope, || -> Result<(String, Vec<u8>)> {
-                let p = produce()?;
+            .spawn_scoped(scope, || -> Result<(String, Vec<u8>, T)> {
+                let (p, extra) = produce()?;
                 let steps = &p.f.path.p;
                 let goals: String = steps
                     .results()
@@ -43,7 +42,7 @@ pub fn regenerate(name: &str) -> Result<Regenerated> {
                     .map(|(name, id)| format!("(goal {name} {})\n", steps.judgment(*id)))
                     .collect();
                 let (reader, writer) = std::io::pipe().map_err(|e| e.to_string())?;
-                std::thread::scope(|inner| {
+                let oracle = std::thread::scope(|inner| -> Result<Vec<u8>> {
                     let encoder = inner.spawn(|| {
                         oracle::encode(&theory, &goals, BufReader::with_capacity(1 << 20, reader))
                     });
@@ -55,16 +54,29 @@ pub fn regenerate(name: &str) -> Result<Regenerated> {
                     drop(writer);
                     let encoded = encoder.join().map_err(|_| "encoder panicked")?;
                     written?;
-                    Ok((goals.clone(), encoded?.0))
-                })
+                    Ok(encoded?.0)
+                })?;
+                Ok((goals, oracle, extra))
             })
             .map_err(|e| e.to_string())?;
         worker.join().map_err(|_| "producer panicked".to_string())?
     })?;
     let checked = oracle::check(&theory, &goals, &oracle)?;
-    Ok(Regenerated {
-        goals,
-        oracle,
-        checked,
-    })
+    Ok((
+        Regenerated {
+            goals,
+            oracle,
+            checked,
+        },
+        extra,
+    ))
+}
+
+pub fn regenerate(name: &str) -> Result<Regenerated> {
+    let (_, produce) = GENERATORS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .ok_or_else(|| format!("no generator for cubical example {name}"))?;
+    let produce = *produce;
+    Ok(certify(|| Ok((produce()?, ())))?.0)
 }

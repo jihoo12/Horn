@@ -876,6 +876,33 @@ impl RestrictedProducer {
         self.reduce_typed(d, g, phi, t, ty, ti)
     }
 
+    /// Weak-head normal form of `t : ty` with the equation `t ≡ nf : ty`, by
+    /// repeated single steps; at most `fuel` steps. The search is untrusted:
+    /// the equation is an ordinary derivation for the kernel to check.
+    pub fn whnf(
+        &mut self,
+        d: usize,
+        g: &Sexp,
+        phi: &Face,
+        t: &Sexp,
+        ty: &Sexp,
+        fuel: usize,
+    ) -> Result<(Sexp, usize)> {
+        let ti = self.check(d, g, phi, t, ty)?;
+        let mut eq = self.eq(d, g, phi, t, t, ty, "req.refl", vec![ti]);
+        let mut current = t.clone();
+        for _ in 0..fuel {
+            let (next, next_ty, step) = self.reduce_at(d, g, phi, &current, ty)?;
+            if next == current {
+                return Ok((current, eq));
+            }
+            let step = self.retype_eq(d, g, phi, &current, &next, &next_ty, ty, step)?;
+            eq = self.eq(d, g, phi, t, &next, ty, "req.trans", vec![eq, step]);
+            current = next;
+        }
+        Err(format!("evaluation did not finish in {fuel} steps"))
+    }
+
     /// With `keep_reduct_types`, reduce a term whose type the caller knows
     /// without inferring it again: a reduct may be an introduction form or a
     /// system that cannot be inferred on its own.
