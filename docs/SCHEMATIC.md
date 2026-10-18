@@ -205,16 +205,30 @@ accompany the proof. One builds `max L L L` by induction and obtains
 is necessary: in a theory with an empty sort, `p X` is accepted, the step
 `p X ⊢ q` fails the condition, and `q` is provably not derivable.
 
-What is modelled is what each accepted step establishes, not the Rust code.
-The rule step takes its bindings as given (the Rust code finds them by
-matching), hypotheses are judgments rather than step indices, and parsing,
-names and hash-consing are outside the model.
+The module `Algorithm` then models the checking algorithm, as
+`Soundness.agda` does for ground certificates. Steps are checked in order
+and may reference only earlier ones; rule bindings are found by matching;
+instance substitutions are sort-checked; the premise variable condition is
+decided on variable lists; and induction cases are aligned with a list of
+the sort's constructors, which must name every constructor.
+`accepts-sound` proves that an accepted certificate makes every
+well-sorted ground instance of every goal derivable. The `max` certificate
+evaluates to accepted, and a circular induction and the empty-sort step
+evaluate to rejected.
+
+The model differs from `src/schematic.rs` in three ways. Hypotheses are
+judgments rather than step indices; every hypothesis in Rust comes from a
+`hyp` step, so this loses nothing. The model checks explicitly that rule
+bindings are well-sorted; the Rust code gets this from its sort discipline
+(facts are well-sorted and rule variables have one sort), which is argued,
+not mechanized. Parsing, names, `def` and hash-consing are not modelled,
+and no proof connects the Rust code to the model.
 
 ## What this does and does not establish
 
 - The schematic checker is a prototype outside the trusted kernel. Its
-  inference forms are proved sound in Agda (next section), but the Rust code
-  is not connected to that model. Instances at concrete levels are checked
+  checking algorithm is modelled and proved sound in Agda (next section),
+  but no proof connects the Rust code to that model. Instances at concrete levels are checked
   by the unchanged kernel and do not depend on either.
 - A goal over `L` is a schema: it states every ground instance. It is not an
   internal universe-polymorphic term of the object theory.
@@ -226,10 +240,10 @@ names and hash-consing are outside the model.
 
 ## Next steps
 
-1. Model the schematic checking algorithm itself (matching, hypothesis sets
-   by step index) and connect it to `Schematic.agda`, as `Soundness.agda`
-   does for ground certificates; then decide whether the kernel adopts
-   schematic checking.
+1. Mechanize the sort discipline that makes rule bindings well-sorted, then
+   decide whether the kernel adopts schematic checking. Connecting either
+   Agda model to the Rust code (by extraction and differential testing, or
+   by verifying the Rust) remains open for both kernels.
 2. Let kamo3 producers build at a symbolic level directly, instead of
    generalizing a level-0 proof afterwards.
 3. Several eigenvariables, with lemmas such as `max i j k → max j i k`
