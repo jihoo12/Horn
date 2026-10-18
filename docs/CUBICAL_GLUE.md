@@ -2,6 +2,7 @@
 
 ```sh
 cargo run --release --locked --offline --bin horn -- cubical run examples/cubical/source/glue.hcu
+cargo run --release --locked --offline --bin horn -- cubical run examples/cubical/source/glue-faces.hcu
 ```
 
 The core source accepts `(glue-type BASE_TYPE FACE PARTIAL_TYPE EQUIVALENCE)`,
@@ -61,3 +62,20 @@ rules. Failure to find evidence is not a mathematical counterexample. The
 existing source, expansion, conversion, face-search and proof-size bounds
 still apply; semantic adequacy and executable-to-Agda refinement are separate
 obligations.
+
+The regression corpus covers partially typed system equivalences, contexts
+well formed only on a face, all twelve Glue shift/substitution operations,
+compound interval substitution into the attaching face and into a computed
+witness, and hidden Glue heads behind reducible type aliases. Eliminating a
+hidden Glue type stops exposure at that head, retaining explicit conversion
+evidence even when its face would allow further type reduction. Independent
+CLI replay and forged partial-equation export rejection exercise the boundary
+with the generic checker.
+
+On `ff`, existing `req.false` can relate two well-formed types in the same
+universe, and `rhas.conv` can retype an already typed term between them. This
+is permitted, including in the equivalence position on an empty attaching
+face. It is not a global equivalence witness. Free variables/dimensions and
+terms without a supported typing derivation still fail; no `rhas.false`
+primitive was added or invoked. The nonempty-face tests require actual
+witnesses and boundary agreement.

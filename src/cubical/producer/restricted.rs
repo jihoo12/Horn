@@ -74,12 +74,30 @@ impl Producer {
         ty: &Term,
         typed: usize,
     ) -> Result<(Term, usize)> {
+        self.restricted_expose_until(scope, phi, t, ty, typed, |_| false)
+    }
+
+    /// Some eliminators need an intermediate head (Glue), which may itself
+    /// compute further on an active face. Retain its explicitly converted
+    /// typing instead of normalizing past the constructor being eliminated.
+    pub(super) fn restricted_expose_until(
+        &mut self,
+        scope: (usize, &[Term]),
+        phi: &Face,
+        t: &Term,
+        ty: &Term,
+        typed: usize,
+        stop: fn(&Term) -> bool,
+    ) -> Result<(Term, usize)> {
         let (d, g) = scope;
         let (level, _) = self.restricted_universe(d, g, phi, ty)?;
         let kind = Term::Universe(level);
         let mut normal = ty.clone();
         let mut id = typed;
         for reductions in 0..=32 {
+            if stop(&normal) {
+                return Ok((normal, id));
+            }
             let Some((out, actual, equality)) = self.restricted_reduce(scope, phi, &normal)? else {
                 return Ok((normal, id));
             };

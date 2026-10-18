@@ -1,0 +1,20 @@
+; Partial equivalences and contexts retain their ambient face.
+(check partial-equivalence (scope (i) ((e (equiv nat nat))))
+  (glue-type nat (at0 i) nat (system (equiv nat nat) (((at0 i) e)))) (u 0))
+(check-on partial-value (scope (i) ((e (equiv nat nat)))) (at0 i)
+  (glue (glue-type nat (at0 i) nat (system (equiv nat nat) (((at0 i) e))))
+    zero (app (fst (system (equiv nat nat) (((at0 i) e)))) zero))
+  (glue-type nat (at0 i) nat (system (equiv nat nat) (((at0 i) e)))))
+(equal-on covered-type (scope (i j) ((e (equiv nat nat)))) (at0 i)
+  (glue-type nat (for (at0 i) (at1 j)) nat e) nat (u 0))
+(check-on local-context (scope (i)
+    ((P (path (u 1) (u 0) (u 0))) (A (papp P i)) (e (equiv A A))))
+  (at0 i) (glue-type A ft A e) (u 0))
+
+; Preserve a hidden Glue head even if that Glue can itself compute to Nat.
+(check hidden (scope () ((e (equiv nat nat))
+    (item (app (lam T (u 0) T) (glue-type nat ft nat e)))))
+  (unglue item) nat)
+(check-on hidden-local (scope (i) ((e (equiv nat nat))
+    (item (app (lam T (u 0) T) (glue-type nat (at0 i) nat e)))))
+  (at0 i) (unglue item) nat)

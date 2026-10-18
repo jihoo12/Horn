@@ -39,7 +39,11 @@ impl Producer {
     ) -> Result<(Term, usize)> {
         let (mut ty, mut typed) = self.restricted_infer(scope.0, scope.1, psi, u)?;
         if !matches!(ty, Term::GlueType(..)) {
-            (ty, typed) = self.converting(|p| p.restricted_expose(scope, psi, u, &ty, typed))?;
+            (ty, typed) = self.converting(|p| {
+                p.restricted_expose_until(scope, psi, u, &ty, typed, |head| {
+                    matches!(head, Term::GlueType(..))
+                })
+            })?;
         }
         if !matches!(ty, Term::GlueType(..)) {
             return Err("unglue requires a Glue value".into());
