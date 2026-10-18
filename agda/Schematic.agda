@@ -148,13 +148,17 @@ concat (xs ∷ xss) = xs ++ concat xss
 -- A stream of naturals, the compact form of an exported certificate. It
 -- has no implicit arguments, so Agda elaborates long literals quickly.
 data Code : Set where
-  ε   : Code
-  _▸_ : ℕ → Code → Code
+  ε    : Code
+  _▸_  : ℕ → Code → Code
+  -- `pack k w`: k numbers, least significant first, as base-2³² digits
+  -- of w. One literal holds many numbers, which Agda elaborates as one.
+  pack : ℕ → ℕ → Code → Code
 infixr 5 _▸_
 
 _⊕_ : Code → Code → Code
-ε       ⊕ d = d
-(n ▸ c) ⊕ d = n ▸ (c ⊕ d)
+ε          ⊕ d = d
+(n ▸ c)    ⊕ d = n ▸ (c ⊕ d)
+(pack k w c) ⊕ d = pack k w (c ⊕ d)
 infixr 4 _⊕_
 
 data All {A : Set} (P : A → Set) : List A → Set where
@@ -596,6 +600,164 @@ any-occs (there a) = tl (any-occs a)
 vars-ground : (t : Tm) → vars t ≡ [] → Ground t
 vars-ground t e x o with transport (λ xs → x ∈ xs) e (occ-vars t o)
 ... | ()
+
+------------------------------------------------------------------------
+-- Hash-consed terms
+
+-- An entry of a term table: a variable, or a symbol applied to the terms
+-- at other positions. It caches its term, a tree that checking does not
+-- build, and its variables.
+data Shape : Set where
+  svar  : ℕ → Shape
+  snode : ℕ → List ℕ → Shape
+
+record Entry : Set where
+  constructor entry
+  field
+    shape : Shape
+    tm    : Tm
+    vrs   : List ℕ
+    -- The term's sort, when the decoder could establish one.
+    srt   : Maybe ℕ
+open Entry public
+
+Table : Set
+Table = Tree Entry
+
+-- Every lookup that succeeds in t gives the same element in t′.
+Ext : {A : Set} → Tree A → Tree A → Set
+Ext {A} t t′ = ∀ i {x : A} → lookupT t i ≡ just x → lookupT t′ i ≡ just x
+
+-- Changing one subtree in an extending way extends the tree.
+ext-left : {A : Set} (x : A) (l l′ r : Tree A) (i : ℕ) {y : A} → Ext l l′
+         → lookupT (bin x l r) (suc i) ≡ just y → lookupT (bin x l′ r) (suc i) ≡ just y
+ext-left x l l′ r i ext e with even i
+... | true  = ext (half i) e
+... | false = e
+
+ext-right : {A : Set} (x : A) (l r r′ : Tree A) (i : ℕ) {y : A} → Ext r r′
+          → lookupT (bin x l r) (suc i) ≡ just y → lookupT (bin x l r′) (suc i) ≡ just y
+ext-right x l r r′ i ext e with even i
+... | true  = e
+... | false = ext (half i) e
+
+-- Insertion never overwrites, so it extends.
+insert-ext : {A : Set} (t : Tree A) (n : ℕ) (a : A) → Ext t (insertT t n a)
+insert-ext leaf        n       a i       ()
+insert-ext (bin x l r) zero    a i       e = e
+insert-ext (bin x l r) (suc n) a zero    e with even n
+... | true  = e
+... | false = e
+insert-ext (bin x l r) (suc n) a (suc i) e with even n
+... | true  = ext-left x l (insertT l (half n) a) r i (insert-ext l (half n) a) e
+... | false = ext-right x l r (insertT r (half n) a) i (insert-ext r (half n) a) e
+
+ext-trans : {A : Set} {t t′ t″ : Tree A} → Ext t t′ → Ext t′ t″ → Ext t t″
+ext-trans p q i e = q i (p i e)
+
+-- Elements of xs not in ys.
+without : List ℕ → List ℕ → List ℕ
+without []       ys = []
+without (x ∷ xs) ys = pick (x ∈? ys) (without xs ys) (x ∷ without xs ys)
+
+union : List ℕ → List ℕ → List ℕ
+union xs ys = xs ++ without ys xs
+
+unions : List (List ℕ) → List ℕ
+unions []         = []
+unions (v ∷ vss) = union v (unions vss)
+
+without-∈ : {x : ℕ} (xs ys : List ℕ) → x ∈ without xs ys → x ∈ xs
+without-∈ (z ∷ xs) ys m with z ∈? ys
+... | yes _ = there (without-∈ xs ys m)
+without-∈ (z ∷ xs) ys (here e)  | no _ = here e
+without-∈ (z ∷ xs) ys (there m) | no _ = there (without-∈ xs ys m)
+
+∈-without : {x : ℕ} (xs ys : List ℕ) → x ∈ xs → ¬ (x ∈ ys) → x ∈ without xs ys
+∈-without (z ∷ xs) ys (here refl) n with z ∈? ys
+... | yes m = ⊥-elim (n m)
+... | no _  = here refl
+∈-without (z ∷ xs) ys (there m) n with z ∈? ys
+... | yes _ = ∈-without xs ys m n
+... | no _  = there (∈-without xs ys m n)
+
+∈-union⁻ : {x : ℕ} (xs ys : List ℕ) → x ∈ union xs ys → (x ∈ xs) ⊎ (x ∈ ys)
+∈-union⁻ xs ys m with ∈-++⁻ xs m
+... | inl m′ = inl m′
+... | inr m′ = inr (without-∈ ys xs m′)
+
+∈-unionʳ : {x : ℕ} (xs ys : List ℕ) → x ∈ ys → x ∈ union xs ys
+∈-unionʳ xs ys m with _ ∈? xs
+... | yes m′ = any-++ˡ m′
+... | no n   = any-++ʳ xs (∈-without ys xs m n)
+
+∈-unions⁻ : {x : ℕ} (vss : List (List ℕ)) → x ∈ unions vss → Any (λ v → x ∈ v) vss
+∈-unions⁻ (v ∷ vss) m with ∈-union⁻ v (unions vss) m
+... | inl m′ = here m′
+... | inr m′ = there (∈-unions⁻ vss m′)
+
+∈-unions⁺ : {x : ℕ} (vss : List (List ℕ)) → Any (λ v → x ∈ v) vss → x ∈ unions vss
+∈-unions⁺ (v ∷ vss) (here m)  = any-++ˡ m
+∈-unions⁺ (v ∷ vss) (there a) = ∈-unionʳ v (unions vss) (∈-unions⁺ vss a)
+
+-- `ks` name the entries `es` in T.
+data Kids (T : Table) : List ℕ → List Entry → Set where
+  []  : Kids T [] []
+  _∷_ : {k : ℕ} {e : Entry} {ks : List ℕ} {es : List Entry}
+      → lookupT T k ≡ just e → Kids T ks es → Kids T (k ∷ ks) (e ∷ es)
+
+-- An entry agrees with T: its term and variables are built from those of
+-- the entries it names.
+data EntryOk (T : Table) : Entry → Set where
+  okvar  : (x : ℕ) {s : Maybe ℕ} → EntryOk T (entry (svar x) (var x) (x ∷ []) s)
+  oknode : (f : ℕ) {ks : List ℕ} {es : List Entry} {s : Maybe ℕ} → Kids T ks es
+         → EntryOk T (entry (snode f ks) (node f (map tm es)) (unions (map vrs es)) s)
+
+kids-ext : {T T′ : Table} → Ext T T′ → {ks : List ℕ} {es : List Entry} → Kids T ks es → Kids T′ ks es
+kids-ext x []       = []
+kids-ext x (e ∷ ks) = x _ e ∷ kids-ext x ks
+
+entryOk-ext : {T T′ : Table} → Ext T T′ → {e : Entry} → EntryOk T e → EntryOk T′ e
+entryOk-ext x (okvar v)       = okvar v
+entryOk-ext x (oknode f kids) = oknode f (kids-ext x kids)
+
+-- A table whose entries all agree with it.
+Wf : Table → Set
+Wf T = AllT (EntryOk T) T
+
+∷-head : {A : Set} {x y : A} {xs ys : List A} → (x ∷ xs) ≡ (y ∷ ys) → x ≡ y
+∷-head refl = refl
+
+∷-tail : {A : Set} {x y : A} {xs ys : List A} → (x ∷ xs) ≡ (y ∷ ys) → xs ≡ ys
+∷-tail refl = refl
+
+-- The cached variables are exactly the variables of the cached term.
+module _ {T : Table} (wf : Wf T) where
+  mutual
+    vrs-occ : (t : Tm) {e : Entry} → EntryOk T e → tm e ≡ t → {x : ℕ} → x ∈ vrs e → Occ x t
+    vrs-occ t (okvar v) e (here refl) = transport (Occ v) e here
+    vrs-occ t (oknode f {es = es} kids) refl m = arg (vrs-occs (map tm es) kids refl (∈-unions⁻ (map vrs es) m))
+
+    vrs-occs : (ts : List Tm) {ks : List ℕ} {es : List Entry} → Kids T ks es → map tm es ≡ ts
+             → {x : ℕ} → Any (λ v → x ∈ v) (map vrs es) → Occs x ts
+    vrs-occs (t ∷ ts) {es = e′ ∷ es} (k ∷ kids) eq (here m) =
+      hd (vrs-occ t (allT-lookup wf _ k) (∷-head eq) m)
+    vrs-occs (t ∷ ts) {es = e′ ∷ es} (k ∷ kids) eq (there a) =
+      tl (vrs-occs ts kids (∷-tail eq) a)
+
+  mutual
+    occ-vrs : (t : Tm) {e : Entry} → EntryOk T e → tm e ≡ t → {x : ℕ} → Occ x t → x ∈ vrs e
+    occ-vrs t (okvar v) e o with transport (Occ _) (sym e) o
+    ... | here = here refl
+    occ-vrs t (oknode f {es = es} kids) refl (arg o) =
+      ∈-unions⁺ (map vrs es) (occs-vrs (map tm es) kids refl o)
+
+    occs-vrs : (ts : List Tm) {ks : List ℕ} {es : List Entry} → Kids T ks es → map tm es ≡ ts
+             → {x : ℕ} → Occs x ts → Any (λ v → x ∈ v) (map vrs es)
+    occs-vrs (t ∷ ts) {es = e′ ∷ es} (k ∷ kids) eq (hd o) =
+      here (occ-vrs t (allT-lookup wf _ k) (∷-head eq) o)
+    occs-vrs (t ∷ ts) {es = e′ ∷ es} (k ∷ kids) eq (tl o) =
+      there (occs-vrs ts kids (∷-tail eq) o)
 
 ------------------------------------------------------------------------
 -- Signatures, rules, derivations
@@ -1570,52 +1732,55 @@ module Calculus (Sg : Signature) (R : List Rule) where
     liftₚ (just a) c = just (a , c)
 
     num : Parser ℕ
-    num ε       = nothing
-    num (n ▸ c) = just (n , c)
+    num ε                  = nothing
+    num (n ▸ c)            = just (n , c)
+    num (pack zero w c)    = num c
+    num (pack (suc k) w c) =
+      just (mod-helper 0 4294967295 w 4294967295 , pack k (div-helper 0 4294967295 w 4294967295) c)
 
     many : {A : Set} → ℕ → Parser A → Parser (List A)
     many zero    p = pureₚ []
     many (suc k) p = p >>=ₚ λ a → many k p >>=ₚ λ as → pureₚ (a ∷ as)
 
-    Table : Set
-    Table = Tree Tm
+    TmTable : Set
+    TmTable = Tree Tm
 
-    tm : Table → Parser Tm
-    tm T = num >>=ₚ λ i → liftₚ (lookupT T i)
+    tmP : TmTable → Parser Tm
+    tmP T = num >>=ₚ λ i → liftₚ (lookupT T i)
 
-    entry : Table → ℕ → Parser Tm
-    entry T zero    = num >>=ₚ λ x → pureₚ (var x)
-    entry T (suc _) = num >>=ₚ λ f → num >>=ₚ λ k → many k (tm T) >>=ₚ λ ts → pureₚ (node f ts)
+    entryP : TmTable → ℕ → Parser Tm
+    entryP T zero    = num >>=ₚ λ x → pureₚ (var x)
+    entryP T (suc _) = num >>=ₚ λ f → num >>=ₚ λ k → many k (tmP T) >>=ₚ λ ts → pureₚ (node f ts)
 
-    table : ℕ → ℕ → Table → Parser Table
+    table : ℕ → ℕ → TmTable → Parser TmTable
     table zero    i T = pureₚ T
-    table (suc n) i T = num >>=ₚ entry T >>=ₚ λ t → table n (suc i) (insertT T i t)
+    table (suc n) i T = num >>=ₚ entryP T >>=ₚ λ t → table n (suc i) (insertT T i t)
 
-    binding : Table → Parser (ℕ × Tm)
-    binding T = num >>=ₚ λ x → tm T >>=ₚ λ t → pureₚ (x , t)
+    binding : TmTable → Parser (ℕ × Tm)
+    binding T = num >>=ₚ λ x → tmP T >>=ₚ λ t → pureₚ (x , t)
 
-    refTag : Table → ℕ → Parser Ref
+    refTag : TmTable → ℕ → Parser Ref
     refTag T zero    = num >>=ₚ λ n → pureₚ (ref n)
     refTag T (suc _) = num >>=ₚ λ n → num >>=ₚ λ b → many b (binding T) >>=ₚ λ bs → pureₚ (at n bs)
 
-    refP : Table → Parser Ref
+    refP : TmTable → Parser Ref
     refP T = num >>=ₚ refTag T
 
-    statedTag : Table → ℕ → Parser (Maybe Tm)
+    statedTag : TmTable → ℕ → Parser (Maybe Tm)
     statedTag T zero    = pureₚ nothing
-    statedTag T (suc _) = tm T >>=ₚ λ j → pureₚ (just j)
+    statedTag T (suc _) = tmP T >>=ₚ λ j → pureₚ (just j)
 
     caseP : Parser (ℕ × List ℕ)
     caseP = num >>=ₚ λ m → num >>=ₚ λ k → many k num >>=ₚ λ ys → pureₚ (m , ys)
 
-    formTag : Table → ℕ → Parser Form
-    formTag T zero          = tm T >>=ₚ λ j → pureₚ (hypF j)
+    formTag : TmTable → ℕ → Parser Form
+    formTag T zero          = tmP T >>=ₚ λ j → pureₚ (hypF j)
     formTag T (suc zero)    =
       num >>=ₚ λ r → num >>=ₚ λ n → many n (refP T) >>=ₚ λ refs →
       num >>=ₚ λ b → many b (binding T) >>=ₚ λ bs →
       num >>=ₚ statedTag T >>=ₚ λ st → pureₚ (ruleF r refs bs st)
     formTag T (suc (suc _)) =
-      num >>=ₚ λ X → tm T >>=ₚ λ J → num >>=ₚ λ k → many k caseP >>=ₚ λ cs → pureₚ (inductF X J cs)
+      num >>=ₚ λ X → tmP T >>=ₚ λ J → num >>=ₚ λ k → many k caseP >>=ₚ λ cs → pureₚ (inductF X J cs)
 
     certificateP : Parser (List Form × List Ref)
     certificateP =
@@ -1630,6 +1795,649 @@ module Calculus (Sg : Signature) (R : List Rule) where
                       → All (λ g → ∀ γ → GW γ (λ x → Occ x g) → Der (sub γ g)) goals
     acceptsCode-sound goals c e with bind-inv (certificateP c) _ e
     ... | ((forms , results) , _) , _ , e₁ = accepts-sound goals forms results e₁
+
+    --------------------------------------------------------------------
+    -- The checker on hash-consed terms. Facts and bindings hold indices
+    -- into a table T, so matching and comparing terms costs one comparison
+    -- of naturals per node of the rule's patterns. The rare checks on
+    -- hypotheses, inductions, instances and goals use the cached trees.
+    -- Soundness needs only that the table is well-formed (`Wf T`).
+
+
+    _≟ₘ_ : (a b : Maybe ℕ) → Dec (a ≡ b)
+    nothing ≟ₘ nothing = yes refl
+    nothing ≟ₘ just _  = no (λ ())
+    just _  ≟ₘ nothing = no (λ ())
+    just a  ≟ₘ just b with a ≟ b
+    ... | yes refl = yes refl
+    ... | no ne    = no (λ { refl → ne refl })
+
+    -- An entry whose cached sort is the sort of its term.
+    SortOk : Entry → Set
+    SortOk e = ∀ s → srt e ≡ just s → WS (tm e) s
+
+    srts? : (es : List Entry) (ss : List ℕ) → Dec (All₂ (λ e s → srt e ≡ just s) es ss)
+    srts? []       []       = yes []
+    srts? []       (s ∷ ss) = no (λ ())
+    srts? (e ∷ es) []       = no (λ ())
+    srts? (e ∷ es) (s ∷ ss) with srt e ≟ₘ just s | srts? es ss
+    ... | yes p | yes ps = yes (p ∷ ps)
+    ... | no np | _      = no (λ { (p ∷ _) → np p })
+    ... | yes _ | no nps = no (λ { (_ ∷ ps) → nps ps })
+
+    -- A symbol applied to entries of its argument sorts has its sort.
+    nodeSort : ℕ → List Entry → Maybe ℕ
+    nodeSort f es = pick (srts? es (ins f)) (just (out f)) nothing
+
+    kids-sortOk : {T : Table} → AllT SortOk T → {ks : List ℕ} {es : List Entry} → Kids T ks es → All SortOk es
+    kids-sortOk sw []         = []
+    kids-sortOk sw (k ∷ kids) = allT-lookup sw _ k ∷ kids-sortOk sw kids
+
+    srts-ws : {es : List Entry} {ss : List ℕ} → All SortOk es → All₂ (λ e s → srt e ≡ just s) es ss
+            → WSs (map tm es) ss
+    srts-ws []         []       = []
+    srts-ws (ok ∷ oks) (p ∷ ps) = ok _ p ∷ srts-ws oks ps
+
+    nodeSort-ok : (f : ℕ) (es : List Entry) → All SortOk es → ∀ s → nodeSort f es ≡ just s
+                → WS (node f (map tm es)) s
+    nodeSort-ok f es oks s e with srts? es (ins f)
+    ... | yes p with e
+    ...   | refl = node refl (srts-ws oks p)
+    nodeSort-ok f es oks s () | no _
+    -- References and steps for the hashed checker: terms are table indices.
+    data RefH : Set where
+      refH : ℕ → RefH
+      -- An instance (N (VAR TERM)...), with the index of its judgment.
+      atH  : ℕ → List (ℕ × ℕ) → ℕ → RefH
+
+    data FormH : Set where
+      hypH    : ℕ → FormH
+      -- Rule index, premise references, explicit bindings, conclusion.
+      ruleH   : ℕ → List RefH → List (ℕ × ℕ) → ℕ → FormH
+      inductH : ℕ → ℕ → List (ℕ × List ℕ) → FormH
+
+    module Hashed (T : Table) where
+
+      -- An index outside the table denotes the variable 0, an entry that
+      -- agrees with any table.
+      default : Entry
+      default = entry (svar 0) (var 0) (0 ∷ []) nothing
+
+      entryOf : Maybe Entry → Entry
+      entryOf nothing  = default
+      entryOf (just e) = e
+
+      entryAt : ℕ → Entry
+      entryAt i = entryOf (lookupT T i)
+
+      ⟦_⟧ : ℕ → Tm
+      ⟦ i ⟧ = tm (entryAt i)
+
+      at-ok : Wf T → (i : ℕ) → EntryOk T (entryAt i)
+      at-ok wf i with lookupT T i in e
+      ... | nothing = okvar 0
+      ... | just x  = allT-lookup wf i e
+
+      at-lookup : {i : ℕ} {e : Entry} → lookupT T i ≡ just e → entryAt i ≡ e
+      at-lookup {i} e = cong entryOf e
+
+      FactH : Set
+      FactH = List ℕ × ℕ
+
+      conv : FactH → Fact
+      conv f = map ⟦_⟧ (fst f) , ⟦ snd f ⟧
+
+      GoodH : FactH → Set
+      GoodH f = ValidF (conv f) × FactWS (conv f)
+
+      convBs : List (ℕ × ℕ) → List (ℕ × Tm)
+      convBs []             = []
+      convBs ((x , k) ∷ bs) = (x , ⟦ k ⟧) ∷ convBs bs
+
+      instFactH : List (ℕ × ℕ) → ℕ → FactH → Maybe FactH
+      instFactH bs i ([] , j) =
+        when (all? (λ b → ws? (snd b) (vs (fst b))) (convBs bs)) tt >>= λ _ →
+        when (⟦ i ⟧ ≟ₜ sub (substOf (convBs bs)) ⟦ j ⟧) ([] , i)
+      instFactH bs i ((h ∷ H) , j) = nothing
+
+      resolveH : Tree FactH → RefH → Maybe FactH
+      resolveH fs (refH n)      = lookupT fs n
+      resolveH fs (atH n bs i)  = lookupT fs n >>= instFactH bs i
+
+      resolveAllH : Tree FactH → List RefH → Maybe (List FactH)
+      resolveAllH fs []       = just []
+      resolveAllH fs (r ∷ rs) = resolveH fs r >>= λ f → resolveAllH fs rs >>= λ qs → just (f ∷ qs)
+
+      -- Assignments of rule variables to indices.
+      EnvH : Set
+      EnvH = ℕ → Maybe ℕ
+
+      emptyH : EnvH
+      emptyH _ = nothing
+
+      _[_↦_]ʰ : EnvH → ℕ → ℕ → EnvH
+      (b [ x ↦ i ]ʰ) y = pick (x ≟ y) (just i) (b y)
+
+      bindVarH : ℕ → ℕ → EnvH → Maybe ℕ → Maybe EnvH
+      bindVarH y i b nothing  = just (b [ y ↦ i ]ʰ)
+      bindVarH y i b (just j) = when (j ≟ i) b
+
+      mutual
+        matchH : Tm → ℕ → EnvH → Maybe EnvH
+        matchH (var y)     i b = bindVarH y i b (b y)
+        matchH (node f ps) i b = matchShape f ps (shape (entryAt i)) b
+
+        matchShape : ℕ → List Tm → Shape → EnvH → Maybe EnvH
+        matchShape f ps (svar _)     b = nothing
+        matchShape f ps (snode g ks) b = when (f ≟ g) b >>= matchsH ps ks
+
+        matchsH : List Tm → List ℕ → EnvH → Maybe EnvH
+        matchsH []       []       b = just b
+        matchsH (p ∷ ps) (k ∷ ks) b = matchH p k b >>= matchsH ps ks
+        matchsH []       (k ∷ ks) b = nothing
+        matchsH (p ∷ ps) []       b = nothing
+
+      bindFreshH : Rule → ℕ → ℕ → EnvH → Maybe ℕ → Maybe EnvH
+      bindFreshH r x i b nothing  = when (ws? ⟦ i ⟧ (rs r x)) (b [ x ↦ i ]ʰ)
+      bindFreshH r x i b (just _) = nothing
+
+      bindAllH : Rule → List (ℕ × ℕ) → EnvH → Maybe EnvH
+      bindAllH r []             b = just b
+      bindAllH r ((x , i) ∷ bs) b = bindFreshH r x i b (b x) >>= bindAllH r bs
+
+      premisesMatchH : List Tm → List FactH → EnvH → Maybe EnvH
+      premisesMatchH []       []       b = just b
+      premisesMatchH (p ∷ ps) (f ∷ qs) b = matchH p (snd f) b >>= premisesMatchH ps qs
+      premisesMatchH []       (f ∷ qs) b = nothing
+      premisesMatchH (p ∷ ps) []       b = nothing
+
+      hypsOfH : List FactH → List ℕ
+      hypsOfH []       = []
+      hypsOfH (f ∷ qs) = fst f ++ hypsOfH qs
+
+      fromMaybeℕ : Maybe ℕ → ℕ
+      fromMaybeℕ nothing  = 0
+      fromMaybeℕ (just i) = i
+
+      vrsAt : ℕ → List ℕ
+      vrsAt i = vrs (entryAt i)
+
+      sortAt : ℕ → Maybe ℕ
+      sortAt i = srt (entryAt i)
+
+      finishH : Rule → List FactH → EnvH → ℕ → Maybe FactH
+      finishH r qs b s =
+        when (all? (λ y → sortAt (fromMaybeℕ (b y)) ≟ₘ just (rs r y)) (conclOnly r)) tt >>= λ _ →
+        when (all? (λ x → x ∈? (vrsAt s ++ concatMap vrsAt (hypsOfH qs)))
+                   (concatMap (λ y → vrsAt (fromMaybeℕ (b y))) (premOnly r)))
+             (hypsOfH qs , s)
+
+      checkRuleH : Tree FactH → ℕ → List RefH → List (ℕ × ℕ) → ℕ → Maybe FactH
+      checkRuleH fs n refs binds s =
+        lookup R n >>= λ r →
+        resolveAllH fs refs >>= λ qs →
+        bindAllH r binds emptyH >>= λ b₀ →
+        matchH (concl r) s b₀ >>= λ b₁ →
+        premisesMatchH (prem r) qs b₁ >>= λ b₂ →
+        finishH r qs b₂ s
+
+      checkCasesH : Tree FactH → ℕ → Tm → List ℕ → List (ℕ × List ℕ) → Maybe ⊤
+      checkCasesH fs X J []       []              = just tt
+      checkCasesH fs X J (c ∷ cs) ((m , ys) ∷ ks) =
+        lookupT fs m >>= λ f → when (caseOk? X J c ys (conv f)) tt >>= λ _ → checkCasesH fs X J cs ks
+      checkCasesH fs X J []       (k ∷ ks)        = nothing
+      checkCasesH fs X J (c ∷ cs) []              = nothing
+
+      checkInductH : Tree FactH → ℕ → ℕ → List (ℕ × List ℕ) → Maybe FactH
+      checkInductH fs X j ks =
+        when (ws? ⟦ j ⟧ (headSort ⟦ j ⟧)) tt >>= λ _ →
+        when (X ∈? vars ⟦ j ⟧) tt >>= λ _ →
+        checkCasesH fs X ⟦ j ⟧ (ctors (vs X)) ks >>= λ _ → just ([] , j)
+
+      checkStepH : Tree FactH → FormH → Maybe FactH
+      checkStepH fs (hypH j)                = when (ws? ⟦ j ⟧ (headSort ⟦ j ⟧)) ((j ∷ []) , j)
+      checkStepH fs (ruleH n refs binds s)  = checkRuleH fs n refs binds s
+      checkStepH fs (inductH X j ks)        = checkInductH fs X j ks
+
+      -- Evaluate a fact before storing it. Agda evaluates lazily, and an
+      -- unevaluated fact would keep everything its step computed alive.
+      forceN : {B : Set} → ℕ → (ℕ → B) → B
+      forceN zero    k = k zero
+      forceN (suc n) k = k (suc n)
+
+      forceL : {B : Set} → List ℕ → (List ℕ → B) → B
+      forceL []       k = k []
+      forceL (x ∷ xs) k = forceN x (λ x′ → forceL xs (λ xs′ → k (x′ ∷ xs′)))
+
+      forceF : {B : Set} → FactH → (FactH → B) → B
+      forceF (hs , j) k = forceL hs (λ hs′ → forceN j (λ j′ → k (hs′ , j′)))
+
+      checkStepsH : Tree FactH → ℕ → List FormH → Maybe (Tree FactH)
+      checkStepsH fs n []       = just fs
+      checkStepsH fs n (s ∷ ss) =
+        checkStepH fs s >>= λ f → forceF f (λ f′ → checkStepsH (insertT fs n f′) (suc n) ss)
+
+      checkGoalsH : Tree FactH → List Tm → List RefH → Maybe ⊤
+      checkGoalsH fs []       []       = just tt
+      checkGoalsH fs (g ∷ gs) (r ∷ rs) =
+        resolveH fs r >>= λ f → when (closed? (conv f) g) tt >>= λ _ → checkGoalsH fs gs rs
+      checkGoalsH fs []       (r ∷ rs) = nothing
+      checkGoalsH fs (g ∷ gs) []       = nothing
+
+      acceptsH : List Tm → List FormH → List RefH → Maybe ⊤
+      acceptsH goals forms results = checkStepsH leaf 0 forms >>= λ fs → checkGoalsH fs goals results
+
+      ------------------------------------------------------------------
+      -- Soundness, given a well-formed table.
+
+      module Sound (twf : Wf T) (tws : AllT SortOk T) where
+
+        sortAt-ok : (i s : ℕ) → sortAt i ≡ just s → WS ⟦ i ⟧ s
+        sortAt-ok i s e with lookupT T i in l
+        ... | nothing = ⊥-elim (nothing≢just e)
+        ... | just x  = allT-lookup tws i l s e
+
+        denM : Maybe ℕ → Maybe Tm
+        denM nothing  = nothing
+        denM (just i) = just ⟦ i ⟧
+
+        -- The assignment of terms an assignment of indices stands for.
+        den : EnvH → Env
+        den b y = denM (b y)
+
+        bindVarH-ok : (y i : ℕ) (b : EnvH) (m : Maybe ℕ) {c : EnvH} → b y ≡ m → bindVarH y i b m ≡ just c
+                    → (den b ⊑ den c) × (den c y ≡ just ⟦ i ⟧)
+        bindVarH-ok y i b nothing eqy refl = keeps ext , same
+          where
+            ext : ∀ {z t} → den b z ≡ just t → den (b [ y ↦ i ]ʰ) z ≡ just t
+            ext {z} e with y ≟ z
+            ... | yes refl = ⊥-elim (nothing≢just (trans (sym (cong denM eqy)) e))
+            ... | no _     = e
+
+            same : den (b [ y ↦ i ]ʰ) y ≡ just ⟦ i ⟧
+            same with y ≟ y
+            ... | yes _ = refl
+            ... | no ne = ⊥-elim (ne refl)
+        bindVarH-ok y i b (just j) eqy e with when-inv (j ≟ i) e
+        ... | refl , refl = ⊑-refl , cong denM eqy
+
+        mutual
+          -- Matching an index is matching the term it stands for.
+          matchH-ok : (p : Tm) (i : ℕ) (b : EnvH) {c : EnvH} → matchH p i b ≡ just c
+                    → (den b ⊑ den c) × (instE (den c) p ≡ just ⟦ i ⟧)
+          matchH-ok (var y)     i b e = bindVarH-ok y i b (b y) refl e
+          matchH-ok (node f ps) i b e = shape-ok f ps i (entryAt i) refl (at-ok twf i) b e
+
+          shape-ok : (f : ℕ) (ps : List Tm) (i : ℕ) (en : Entry) → entryAt i ≡ en → EntryOk T en
+                   → (b : EnvH) {c : EnvH} → matchShape f ps (shape en) b ≡ just c
+                   → (den b ⊑ den c) × (instE (den c) (node f ps) ≡ just ⟦ i ⟧)
+          shape-ok f ps i _ ei (okvar x) b ()
+          shape-ok f ps i _ ei (oknode g {ks} {es} kids) b e
+            with bind-inv (when (f ≟ g) b) (matchsH ps ks) e
+          ... | b′ , e₁ , e₂ with when-inv (f ≟ g) e₁
+          ...   | refl , refl with matchsH-ok ps ks es kids b e₂
+          ...     | ext , ok = ext , trans (node-ok f ps ok) (cong just (sym (cong tm ei)))
+
+          matchsH-ok : (ps : List Tm) (ks : List ℕ) (es : List Entry) → Kids T ks es
+                     → (b : EnvH) {c : EnvH} → matchsH ps ks b ≡ just c
+                     → (den b ⊑ den c) × (instsE (den c) ps ≡ just (map tm es))
+          matchsH-ok []       []       []        []          b refl = ⊑-refl , refl
+          matchsH-ok (p ∷ ps) (k ∷ ks) (en ∷ es) (lk ∷ kids) b e
+            with bind-inv (matchH p k b) (matchsH ps ks) e
+          ... | c₁ , e₁ , e₂ with matchH-ok p k b e₁ | matchsH-ok ps ks es kids c₁ e₂
+          ...   | ext₁ , ok₁ | ext₂ , ok₂ =
+                  ⊑-trans ext₁ ext₂
+                  , cons-ok p ps (trans (inst-mono ext₂ p ok₁) (cong just (cong tm (at-lookup lk)))) ok₂
+          matchsH-ok []       (k ∷ ks) _ _ b ()
+          matchsH-ok (p ∷ ps) []       _ _ b ()
+
+        all-conv : {P : Fact → Set} {qs : List FactH} → All (λ q → P (conv q)) qs → All P (map conv qs)
+        all-conv []       = []
+        all-conv (p ∷ ps) = p ∷ all-conv ps
+
+        map-++ : {A B : Set} (f : A → B) (xs ys : List A) → map f (xs ++ ys) ≡ (map f xs ++ map f ys)
+        map-++ f []       ys = refl
+        map-++ f (x ∷ xs) ys = cong (f x ∷_) (map-++ f xs ys)
+
+        hypsOf-conv : (qs : List FactH) → hypsOf (map conv qs) ≡ map ⟦_⟧ (hypsOfH qs)
+        hypsOf-conv []       = refl
+        hypsOf-conv (q ∷ qs) = trans (cong (map ⟦_⟧ (fst q) ++_) (hypsOf-conv qs)) (sym (map-++ ⟦_⟧ (fst q) (hypsOfH qs)))
+
+        premisesMatchH-ok : (ps : List Tm) (qs : List FactH) (b : EnvH) {c : EnvH}
+                          → All (λ q → ValidF (conv q)) qs → premisesMatchH ps qs b ≡ just c
+                          → (den b ⊑ den c) × PremsAt (den c) ps (map conv qs)
+        premisesMatchH-ok []       []       b vq       refl = ⊑-refl , []
+        premisesMatchH-ok (p ∷ ps) (q ∷ qs) b (v ∷ vq) e
+          with bind-inv (matchH p (snd q) b) (premisesMatchH ps qs) e
+        ... | c₁ , e₁ , e₂ with matchH-ok p (snd q) b e₁ | premisesMatchH-ok ps qs c₁ vq e₂
+        ...   | ext₁ , ok₁ | ext₂ , rest = ⊑-trans ext₁ ext₂ , cons (inst-mono ext₂ p ok₁) v rest
+        premisesMatchH-ok []       (q ∷ qs) b vq ()
+        premisesMatchH-ok (p ∷ ps) []       b vq ()
+
+        resolveH-ok : (fs : Tree FactH) → AllT GoodH fs → (r : RefH) {f : FactH} → resolveH fs r ≡ just f → GoodH f
+        resolveH-ok fs gf (refH n) e = allT-lookup gf n e
+        resolveH-ok fs gf (atH n bs i) e with bind-inv (lookupT fs n) (instFactH bs i) e
+        ... | ([] , j) , e₁ , e₂ with bind-inv (when (all? (λ b → ws? (snd b) (vs (fst b))) (convBs bs)) tt) _ e₂
+        ...   | _ , ew , e₃ with when-inv (all? (λ b → ws? (snd b) (vs (fst b))) (convBs bs)) ew
+        ...     | ws , _ with when-inv (⟦ i ⟧ ≟ₜ sub (substOf (convBs bs)) ⟦ j ⟧) e₃
+        ...       | eq , refl with allT-lookup gf n e₁
+        ...         | v , (s , w) =
+                      transport (Valid []) (sym eq) (inst-valid v τ (λ x _ → wτ x))
+                      , (s , transport (λ t → WS t s) (sym eq) (ws-sub τ w (λ x _ → wτ x)))
+          where
+            τ : Subst
+            τ = substOf (convBs bs)
+
+            wτ : ∀ x → WS (τ x) (vs x)
+            wτ x = substOf-ws (convBs bs) ws x
+        resolveH-ok fs gf (atH n bs i) e | ((h ∷ H) , j) , e₁ , ()
+
+        resolveAllH-ok : (fs : Tree FactH) → AllT GoodH fs → (rs : List RefH) {qs : List FactH}
+                       → resolveAllH fs rs ≡ just qs → All GoodH qs
+        resolveAllH-ok fs gf []       refl = []
+        resolveAllH-ok fs gf (r ∷ rs) e
+          with bind-inv (resolveH fs r) (λ f → resolveAllH fs rs >>= λ qs → just (f ∷ qs)) e
+        ... | f , e₁ , e₂ with bind-inv (resolveAllH fs rs) (λ qs → just (f ∷ qs)) e₂
+        ...   | qs , e₃ , refl = resolveH-ok fs gf r e₁ ∷ resolveAllH-ok fs gf rs e₃
+
+        -- Cached variables of hypotheses are variables of their terms.
+        vrs-hyps : (hs : List ℕ) {x : ℕ} → x ∈ concatMap vrsAt hs → Any (Occ x) (map ⟦_⟧ hs)
+        vrs-hyps (h ∷ hs) m with ∈-++⁻ (vrsAt h) m
+        ... | inl m′ = here (vrs-occ twf ⟦ h ⟧ (at-ok twf h) refl m′)
+        ... | inr m′ = there (vrs-hyps hs m′)
+
+        rule-okH : (fs : Tree FactH) → AllT GoodH fs → (n : ℕ) (refs : List RefH)
+                   (binds : List (ℕ × ℕ)) (s : ℕ) {f : FactH}
+                 → checkRuleH fs n refs binds s ≡ just f → GoodH f
+        rule-okH fs gf n refs binds s e
+          with bind-inv (lookup R n) _ e
+        ... | r , er , e₁ with bind-inv (resolveAllH fs refs) _ e₁
+        ... | qs , eq , e₂ with bind-inv (bindAllH r binds emptyH) _ e₂
+        ... | b₀ , eb , e₃ with bind-inv (matchH (concl r) s b₀) _ e₃
+        ... | b₁ , ec , e₄ with bind-inv (premisesMatchH (prem r) qs b₁) _ e₄
+        ... | b₂ , ep , e₅
+          with bind-inv (when (all? (λ y → sortAt (fromMaybeℕ (b₂ y)) ≟ₘ just (rs r y)) (conclOnly r)) tt) _ e₅
+        ... | _ , ew , e₆ with when-inv (all? (λ y → sortAt (fromMaybeℕ (b₂ y)) ≟ₘ just (rs r y)) (conclOnly r)) ew
+        ... | conclWS , _
+          with when-inv (all? (λ x → x ∈? (vrsAt s ++ concatMap vrsAt (hypsOfH qs)))
+                              (concatMap (λ y → vrsAt (fromMaybeℕ (b₂ y))) (premOnly r))) e₆
+        ... | sideAll , refl =
+              transport (Valid (map ⟦_⟧ (hypsOfH qs))) concl-eq
+                (transport (λ H → Valid H (sub θ (concl r))) (hypsOf-conv qs)
+                  (step-valid (lookup-∈ R n er) θ wθ (premsAt-sem (den b₂) (snd pm)) side))
+              , (headSort (concl r) , transport (λ t → WS t _) concl-eq wsJ)
+          where
+            gqs : All GoodH qs
+            gqs = resolveAllH-ok fs gf refs eq
+
+            wfr : RuleWF r
+            wfr = all-lookup n wf er
+
+            pm : (den b₁ ⊑ den b₂) × PremsAt (den b₂) (prem r) (map conv qs)
+            pm = premisesMatchH-ok (prem r) qs b₁ (all-map fst gqs) ep
+
+            concl-inst : instE (den b₂) (concl r) ≡ just ⟦ s ⟧
+            concl-inst = inst-mono (fst pm) (concl r) (snd (matchH-ok (concl r) s b₀ ec))
+
+            θ : Subst
+            θ = total (den b₂)
+
+            concl-eq : sub θ (concl r) ≡ ⟦ s ⟧
+            concl-eq = inst-subst (den b₂) (concl r) concl-inst
+
+            -- A bound variable's term is the term of its index.
+            bound : ∀ y → Σ Tm (λ u → den b₂ y ≡ just u) → θ y ≡ ⟦ fromMaybeℕ (b₂ y) ⟧
+            bound y (u , d) with b₂ y
+            ... | just j = refl
+            ... | nothing = ⊥-elim (nothing≢just d)
+
+            premWS : ∀ y → Occs y (prem r) → WS (θ y) (rs r y)
+            premWS = prem-ws r (den b₂) (snd pm) (all-conv (all-map snd gqs)) (fst wfr)
+
+            wθ : ∀ y → OccR y r → WS (θ y) (rs r y)
+            wθ y (inl o) = premWS y o
+            wθ y (inr o) with y ∈? varss (prem r)
+            ... | yes m = premWS y (varss-occs (prem r) m)
+            ... | no nm = transport (λ t → WS t (rs r y))
+                            (sym (bound y (inst-bound (den b₂) (concl r) concl-inst o)))
+                            (sortAt-ok _ _ (all-∈ conclWS (filterOut-∈ (varss (prem r)) (occ-vars (concl r) o) nm)))
+
+            wsJ : WS (sub θ (concl r)) (headSort (concl r))
+            wsJ = ws-sub′ θ (snd (snd wfr)) (λ y o → wθ y (inr o))
+
+            allowed : ∀ x → x ∈ (vrsAt s ++ concatMap vrsAt (hypsOfH qs))
+                    → Vars (hypsOf (map conv qs)) (sub θ (concl r)) x
+            allowed x m with ∈-++⁻ (vrsAt s) m
+            ... | inl m′ = inl (transport (Occ x) (sym concl-eq) (vrs-occ twf ⟦ s ⟧ (at-ok twf s) refl m′))
+            ... | inr m′ = inr (transport (Any (Occ x)) (sym (hypsOf-conv qs)) (vrs-hyps (hypsOfH qs) m′))
+
+            side : ∀ x → Occs x (subs θ (prem r)) → Vars (hypsOf (map conv qs)) (sub θ (concl r)) x
+            side x o with occs-sub θ (prem r) o
+            ... | y , oy , ox with y ∈? vars (concl r)
+            ...   | yes m = inl (sub-occ θ (concl r) (vars-occ (concl r) m) ox)
+            ...   | no nm =
+                    allowed x (all-∈ sideAll
+                      (concatMap-∈ (λ z → vrsAt (fromMaybeℕ (b₂ z)))
+                        (filterOut-∈ (vars (concl r)) (occs-varss (prem r) oy) nm)
+                        (occ-vrs twf ⟦ fromMaybeℕ (b₂ y) ⟧ (at-ok twf _) refl
+                          (transport (Occ x) (bound y (premsAt-bound (den b₂) (snd pm) oy)) ox))))
+
+        cases-okH : (fs : Tree FactH) → AllT GoodH fs → (X : ℕ) (J : Tm) (cs : List ℕ) (ks : List (ℕ × List ℕ))
+                  → checkCasesH fs X J cs ks ≡ just tt → All (SemCase X J) cs
+        cases-okH fs gf X J []       []              refl = []
+        cases-okH fs gf X J (c ∷ cs) ((m , ys) ∷ ks) e with bind-inv (lookupT fs m) _ e
+        ... | f , ef , e₁ with bind-inv (when (caseOk? X J c ys (conv f)) tt) _ e₁
+        ...   | _ , ew , e₂ with when-inv (caseOk? X J c ys (conv f)) ew
+        ...     | ok , _ = case-sem X J c ys (conv f) (fst (allT-lookup gf m ef)) ok ∷ cases-okH fs gf X J cs ks e₂
+        cases-okH fs gf X J []       (k ∷ ks) ()
+        cases-okH fs gf X J (c ∷ cs) []       ()
+
+        induct-okH : (fs : Tree FactH) → AllT GoodH fs → (X j : ℕ) (ks : List (ℕ × List ℕ)) {f : FactH}
+                   → checkInductH fs X j ks ≡ just f → GoodH f
+        induct-okH fs gf X j ks e with bind-inv (when (ws? ⟦ j ⟧ (headSort ⟦ j ⟧)) tt) _ e
+        ... | _ , ewj , e₀ with when-inv (ws? ⟦ j ⟧ (headSort ⟦ j ⟧)) ewj
+        ... | wJ , _ with bind-inv (when (X ∈? vars ⟦ j ⟧) tt) _ e₀
+        ... | _ , em , e₁ with when-inv (X ∈? vars ⟦ j ⟧) em
+        ... | mX , _ with bind-inv (checkCasesH fs X ⟦ j ⟧ (ctors (vs X)) ks) _ e₁
+        ... | _ , ec , refl =
+              Induction.induction X ⟦ j ⟧ (vars-occ ⟦ j ⟧ mX)
+                (λ c ce → all-∈ (cases-okH fs gf X ⟦ j ⟧ (ctors (vs X)) ks ec) (complete c X ce))
+              , (headSort ⟦ j ⟧ , wJ)
+
+        step-okH : (fs : Tree FactH) → AllT GoodH fs → (s : FormH) {f : FactH}
+                 → checkStepH fs s ≡ just f → GoodH f
+        step-okH fs gf (hypH j) e with when-inv (ws? ⟦ j ⟧ (headSort ⟦ j ⟧)) e
+        ... | w , refl = hyp-valid ⟦ j ⟧ , (headSort ⟦ j ⟧ , w)
+        step-okH fs gf (ruleH n refs binds s) e = rule-okH fs gf n refs binds s e
+        step-okH fs gf (inductH X j ks)       e = induct-okH fs gf X j ks e
+
+
+        forceN-id : {B : Set} (n : ℕ) (k : ℕ → B) → forceN n k ≡ k n
+        forceN-id zero    k = refl
+        forceN-id (suc n) k = refl
+
+        forceL-id : {B : Set} (xs : List ℕ) (k : List ℕ → B) → forceL xs k ≡ k xs
+        forceL-id []       k = refl
+        forceL-id (x ∷ xs) k = trans (forceN-id x _) (forceL-id xs (λ xs′ → k (x ∷ xs′)))
+
+        forceF-id : {B : Set} (f : FactH) (k : FactH → B) → forceF f k ≡ k f
+        forceF-id (hs , j) k = trans (forceL-id hs _) (forceN-id j (λ j′ → k (hs , j′)))
+
+        steps-okH : (fs : Tree FactH) → AllT GoodH fs → (n : ℕ) (ss : List FormH) {gs : Tree FactH}
+                  → checkStepsH fs n ss ≡ just gs → AllT GoodH gs
+        steps-okH fs gf n []       refl = gf
+        steps-okH fs gf n (s ∷ ss) e with bind-inv (checkStepH fs s) _ e
+        ... | f , e₁ , e₂ =
+              steps-okH (insertT fs n f) (allT-insert gf (step-okH fs gf s e₁) n) (suc n) ss
+                (trans (sym (forceF-id f (λ f′ → checkStepsH (insertT fs n f′) (suc n) ss))) e₂)
+
+        goals-okH : (fs : Tree FactH) → AllT GoodH fs → (gs : List Tm) (rs : List RefH)
+                  → checkGoalsH fs gs rs ≡ just tt → All (Valid []) gs
+        goals-okH fs gf []       []       refl = []
+        goals-okH fs gf (g ∷ gs) (r ∷ rs) e with bind-inv (resolveH fs r) _ e
+        ... | f , ef , e₁ with bind-inv (when (closed? (conv f) g) tt) _ e₁
+        ...   | _ , ew , e₂ with when-inv (closed? (conv f) g) ew
+        ...     | (h , j) , _ = closed-fact (conv f) h j (fst (resolveH-ok fs gf r ef)) ∷ goals-okH fs gf gs rs e₂
+        goals-okH fs gf []       (r ∷ rs) ()
+        goals-okH fs gf (g ∷ gs) []       ()
+
+        acceptsH-sound : (goals : List Tm) (forms : List FormH) (results : List RefH)
+                       → acceptsH goals forms results ≡ just tt
+                       → All (λ g → ∀ γ → GW γ (λ x → Occ x g) → Der (sub γ g)) goals
+        acceptsH-sound goals forms results e with bind-inv (checkStepsH leaf 0 forms) _ e
+        ... | fs , e₁ , e₂ = all-map closed (goals-okH fs (steps-okH leaf leaf 0 forms e₁) goals results e₂)
+
+    --------------------------------------------------------------------
+    -- Decoding for the hashed checker. The table is the one `certificateP`
+    -- reads, now kept as entries; forms refer to terms by index, and every
+    -- rule step and instance names the index of its judgment:
+    --
+    --   FORM = 0 TERM | 1 r n REF^n b (y TERM)^b TERM | 2 X TERM k CASE^k
+    --   REF  = 0 n | 1 n b (x TERM)^b TERM
+    --
+    -- Forms need no proof. The table does: decoding builds each entry from
+    -- the entries it names, so the table is well-formed.
+
+    lookupAll : Table → List ℕ → Maybe (List Entry)
+    lookupAll T []       = just []
+    lookupAll T (k ∷ ks) = lookupT T k >>= λ e → lookupAll T ks >>= λ es → just (e ∷ es)
+
+    lookupAll-ok : (T : Table) (ks : List ℕ) {es : List Entry} → lookupAll T ks ≡ just es → Kids T ks es
+    lookupAll-ok T []       refl = []
+    lookupAll-ok T (k ∷ ks) e
+      with bind-inv (lookupT T k) (λ e → lookupAll T ks >>= λ es → just (e ∷ es)) e
+    ... | en , e₁ , e₂ with bind-inv (lookupAll T ks) (λ es → just (en ∷ es)) e₂
+    ...   | es , e₃ , refl = e₁ ∷ lookupAll-ok T ks e₃
+
+    entryH : Table → ℕ → Parser Entry
+    entryH T zero    = num >>=ₚ λ x → pureₚ (entry (svar x) (var x) (x ∷ []) (just (vs x)))
+    entryH T (suc _) =
+      num >>=ₚ λ f → num >>=ₚ λ k → many k num >>=ₚ λ ks → liftₚ (lookupAll T ks) >>=ₚ λ es →
+      pureₚ (entry (snode f ks) (node f (map tm es)) (unions (map vrs es)) (nodeSort f es))
+
+    tableH : ℕ → ℕ → Table → Parser Table
+    tableH zero    i T = pureₚ T
+    tableH (suc n) i T = num >>=ₚ entryH T >>=ₚ λ e → tableH n (suc i) (insertT T i e)
+
+    liftₚ-inv : {A : Set} (m : Maybe A) {c : Code} {r : A × Code} → liftₚ m c ≡ just r → m ≡ just (fst r)
+    liftₚ-inv (just a) refl = refl
+
+    entryH-ok : (T : Table) (tag : ℕ) (c : Code) {r : Entry × Code} → AllT SortOk T → entryH T tag c ≡ just r
+              → EntryOk T (fst r) × SortOk (fst r)
+    entryH-ok T zero c sw e with bind-inv (num c) _ e
+    ... | (x , c₁) , _ , refl = okvar x , λ { s refl → var }
+    entryH-ok T (suc _) c sw e with bind-inv (num c) _ e
+    ... | (f , c₁) , _ , e₁ with bind-inv (num c₁) _ e₁
+    ... | (k , c₂) , _ , e₂ with bind-inv (many k num c₂) _ e₂
+    ... | (ks , c₃) , _ , e₃ with bind-inv (liftₚ (lookupAll T ks) c₃) _ e₃
+    ... | (es , c₄) , e₄ , refl =
+          oknode f kids , nodeSort-ok f es (kids-sortOk sw kids)
+      where
+        kids : Kids T ks es
+        kids = lookupAll-ok T ks (liftₚ-inv (lookupAll T ks) e₄)
+
+    -- Decoding builds a well-formed table with right cached sorts.
+    TableOk : Table → Set
+    TableOk T = Wf T × AllT SortOk T
+
+    tableH-ok : (n i : ℕ) (T : Table) (c : Code) {r : Table × Code} → TableOk T → tableH n i T c ≡ just r
+              → TableOk (fst r)
+    tableH-ok zero    i T c ok refl = ok
+    tableH-ok (suc n) i T c (wfT , swT) e with bind-inv ((num >>=ₚ entryH T) c) _ e
+    ... | (en , c₂) , e₁ , e₃ with bind-inv (num c) _ e₁
+    ... | (tag , c₁) , _ , e₂ with entryH-ok T tag c₁ swT e₂
+    ... | eok , sok =
+          tableH-ok n (suc i) (insertT T i en) c₂
+            ( allT-insert (allT-map (entryOk-ext (insert-ext T i en)) wfT) (entryOk-ext (insert-ext T i en) eok) i
+            , allT-insert swT sok i)
+            e₃
+
+    refH-tag : ℕ → Parser RefH
+    refH-tag zero    = num >>=ₚ λ n → pureₚ (refH n)
+    refH-tag (suc _) =
+      num >>=ₚ λ n → num >>=ₚ λ b → many b (num >>=ₚ λ x → num >>=ₚ λ t → pureₚ (x , t)) >>=ₚ λ bs →
+      num >>=ₚ λ i → pureₚ (atH n bs i)
+
+    formH-tag : ℕ → Parser FormH
+    formH-tag zero          = num >>=ₚ λ j → pureₚ (hypH j)
+    formH-tag (suc zero)    =
+      num >>=ₚ λ r → num >>=ₚ λ n → many n (num >>=ₚ refH-tag) >>=ₚ λ refs →
+      num >>=ₚ λ b → many b (num >>=ₚ λ y → num >>=ₚ λ t → pureₚ (y , t)) >>=ₚ λ bs →
+      num >>=ₚ λ s → pureₚ (ruleH r refs bs s)
+    formH-tag (suc (suc _)) =
+      num >>=ₚ λ X → num >>=ₚ λ j → num >>=ₚ λ k → many k caseP >>=ₚ λ cs → pureₚ (inductH X j cs)
+
+    -- Steps are decoded and checked one at a time, so the decoded
+    -- certificate is never held in memory as a whole.
+    checkStreamH : (T : Table) → Tree (List ℕ × ℕ) → ℕ → ℕ → Code → Maybe (Tree (List ℕ × ℕ) × Code)
+    checkStreamH T fs n zero    c = just (fs , c)
+    checkStreamH T fs n (suc m) c =
+      (num >>=ₚ formH-tag) c >>= λ r →
+      Hashed.checkStepH T fs (fst r) >>= λ f →
+      Hashed.forceF T f (λ f′ → checkStreamH T (insertT fs n f′) (suc n) m (snd r))
+
+    goalsStreamH : (T : Table) → Tree (List ℕ × ℕ) → List Tm → ℕ → Code → Maybe ⊤
+    goalsStreamH T fs []       zero    c = just tt
+    goalsStreamH T fs (g ∷ gs) (suc k) c =
+      (num >>=ₚ refH-tag) c >>= λ r →
+      Hashed.resolveH T fs (fst r) >>= λ f →
+      when (closed? (Hashed.conv T f) g) tt >>= λ _ → goalsStreamH T fs gs k (snd r)
+    goalsStreamH T fs []       (suc k) c = nothing
+    goalsStreamH T fs (g ∷ gs) zero    c = nothing
+
+    runH : (T : Table) → List Tm → Code → Maybe ⊤
+    runH T goals c =
+      num c >>= λ r₁ → checkStreamH T leaf 0 (fst r₁) (snd r₁) >>= λ r₂ →
+      num (snd r₂) >>= λ r₃ → goalsStreamH T (fst r₂) goals (fst r₃) (snd r₃)
+
+    tableP : Parser Table
+    tableP = num >>=ₚ λ n → tableH n 0 leaf
+
+    -- CODE = N ENTRY^N  M FORM^M  K REF^K, checked as it is read.
+    acceptsCodeH : List Tm → Code → Maybe ⊤
+    acceptsCodeH goals c = tableP c >>= λ r → runH (fst r) goals (snd r)
+
+    tableP-ok : (c : Code) {r : Table × Code} → tableP c ≡ just r → TableOk (fst r)
+    tableP-ok c e with bind-inv (num c) _ e
+    ... | (n , c₁) , _ , e₁ = tableH-ok n 0 leaf c₁ (leaf , leaf) e₁
+
+    module StreamSound (T : Table) (ok : TableOk T) where
+      open Hashed T
+      open Hashed.Sound T (fst ok) (snd ok)
+
+      stream-ok : (fs : Tree (List ℕ × ℕ)) → AllT GoodH fs → (n m : ℕ) (c : Code) {r : Tree (List ℕ × ℕ) × Code}
+                → checkStreamH T fs n m c ≡ just r → AllT GoodH (fst r)
+      stream-ok fs gf n zero    c refl = gf
+      stream-ok fs gf n (suc m) c e with bind-inv ((num >>=ₚ formH-tag) c) _ e
+      ... | (s , c₁) , _ , e₁ with bind-inv (checkStepH fs s) _ e₁
+      ... | f , e₂ , e₃ =
+            stream-ok (insertT fs n f) (allT-insert gf (step-okH fs gf s e₂) n) (suc n) m c₁
+              (trans (sym (forceF-id f (λ f′ → checkStreamH T (insertT fs n f′) (suc n) m c₁))) e₃)
+
+      goals-stream-ok : (fs : Tree (List ℕ × ℕ)) → AllT GoodH fs → (gs : List Tm) (k : ℕ) (c : Code)
+                      → goalsStreamH T fs gs k c ≡ just tt → All (Valid []) gs
+      goals-stream-ok fs gf []       zero    c refl = []
+      goals-stream-ok fs gf (g ∷ gs) (suc k) c e with bind-inv ((num >>=ₚ refH-tag) c) _ e
+      ... | (r , c₁) , _ , e₁ with bind-inv (resolveH fs r) _ e₁
+      ... | f , ef , e₂ with bind-inv (when (closed? (conv f) g) tt) _ e₂
+      ... | _ , ew , e₃ with when-inv (closed? (conv f) g) ew
+      ... | (h , j) , _ = closed-fact (conv f) h j (fst (resolveH-ok fs gf r ef)) ∷ goals-stream-ok fs gf gs k c₁ e₃
+      goals-stream-ok fs gf []       (suc k) c ()
+      goals-stream-ok fs gf (g ∷ gs) zero    c ()
+
+      run-ok : (goals : List Tm) (c : Code) → runH T goals c ≡ just tt → All (Valid []) goals
+      run-ok goals c e with bind-inv (num c) _ e
+      ... | (m , c₁) , _ , e₁ with bind-inv (checkStreamH T leaf 0 m c₁) _ e₁
+      ... | (fs , c₂) , e₂ , e₃ with bind-inv (num c₂) _ e₃
+      ... | (k , c₃) , _ , e₄ = goals-stream-ok fs (stream-ok leaf leaf 0 m c₁ e₂) goals k c₃ e₄
+
+    -- Main theorem for compact certificates: if Agda evaluates
+    -- `acceptsCodeH goals c` to `just tt`, every well-sorted ground instance
+    -- of every goal is derivable.
+    acceptsCodeH-sound : (goals : List Tm) (c : Code) → acceptsCodeH goals c ≡ just tt
+                       → All (λ g → ∀ γ → GW γ (λ x → Occ x g) → Der (sub γ g)) goals
+    acceptsCodeH-sound goals c e with bind-inv (tableP c) _ e
+    ... | (T , c′) , e₁ , e₂ = all-map closed (StreamSound.run-ok T (tableP-ok c e₁) goals c′ e₂)
 
 ------------------------------------------------------------------------
 -- Signatures given by tables, as in certificates exported from the Rust

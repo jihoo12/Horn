@@ -833,9 +833,9 @@ impl Agda<'_, '_> {
     }
 }
 
-/// Encodes a certificate as the `Code` that `certificateP` in
-/// agda/Schematic.agda decodes: a table of terms, then forms and results
-/// that refer to terms by table index.
+/// Encodes a certificate as the `Code` that `certificateH` in
+/// agda/Schematic.agda decodes for its hash-consed checker: a table of
+/// terms, then forms and results that refer to terms by table index.
 struct Encoder<'c, 's> {
     ck: &'c mut Checker<'s>,
     index: HashMap<u32, u32>,
@@ -888,12 +888,17 @@ impl Encoder<'_, '_> {
                     self.body.push(v);
                     self.put_term(t);
                 }
+                // The hashed checker takes the instance's judgment by index.
+                let (j, _) = self.ck.reference(x)?;
+                self.put_term(j);
             }
         }
         Ok(())
     }
 
-    fn form(&mut self, form: &Sexp) -> Result<()> {
+    /// Step `k`; a rule step always names its conclusion, which is the
+    /// judgment the checker gave fact `k`.
+    fn form(&mut self, k: usize, form: &Sexp) -> Result<()> {
         let spec = self.ck.spec;
         let base = spec.names.len() as u32;
         let xs = form.list()?;
@@ -946,13 +951,8 @@ impl Encoder<'_, '_> {
                     self.body.push(i);
                     self.put_term(t);
                 }
-                match stated {
-                    Some(j) => {
-                        self.body.push(1);
-                        self.put_term(j);
-                    }
-                    None => self.body.push(0),
-                }
+                let j = stated.unwrap_or(self.ck.facts[k].judgment);
+                self.put_term(j);
             }
         }
         Ok(())
@@ -1032,8 +1032,8 @@ fn export(
         body: Vec::new(),
     };
     enc.body.push(forms.len() as u32);
-    for form in forms {
-        enc.form(form)?;
+    for (k, form) in forms.iter().enumerate() {
+        enc.form(k, form)?;
     }
     enc.body.push(goals.len() as u32);
     for (name, _) in goals {
@@ -1069,14 +1069,24 @@ fn export(
     );
     s.push_str(&ag.defs);
     let _ = writeln!(s, "goals : List Tm\ngoals = {}\n", list(&goal_terms));
-    // The certificate as numbers, in chunks: Agda elaborates them quickly.
+    // The certificate as numbers, a thousand to a literal: Agda elaborates
+    // a long literal far more cheaply than as many list cells.
     let mut chunks = Vec::new();
     for (i, chunk) in code.chunks(1000).enumerate() {
-        let mut line = format!("code{i} : Code\ncode{i} =");
-        for n in chunk {
-            let _ = write!(line, " {n} ▸");
+        // Base-2³² digits, most significant first in the hexadecimal literal.
+        let mut hex = String::new();
+        for (k, n) in chunk.iter().rev().enumerate() {
+            let _ = if k == 0 {
+                write!(hex, "{n:x}")
+            } else {
+                write!(hex, "{n:08x}")
+            };
         }
-        let _ = writeln!(s, "{line} ε\n");
+        let _ = writeln!(
+            s,
+            "code{i} : Code\ncode{i} = pack {} 0x{hex} ε\n",
+            chunk.len()
+        );
         chunks.push(format!("code{i}"));
     }
     let _ = writeln!(s, "code : Code\ncode = {} ⊕ ε\n", chunks.join(" ⊕ "));
@@ -1085,10 +1095,10 @@ fn export(
     let _ = writeln!(
         s,
         "-- Every well-sorted ground instance of every goal is derivable. Agda\n\
-         -- checks `refl : acceptsCode goals code ≡ just tt` here by decoding\n\
+         -- checks `refl : acceptsCodeH goals code ≡ just tt` here by decoding\n\
          -- the certificate and running the modelled checker on it.\n\
          theorem : All (λ g → ∀ γ → GW γ (λ x → Occ x g) → Der (sub γ g)) goals\n\
-         theorem = acceptsCode-sound goals code refl"
+         theorem = acceptsCodeH-sound goals code refl"
     );
     w.write_all(s.as_bytes()).map_err(|e| e.to_string())
 }
