@@ -38,8 +38,30 @@ body, and `(path FAMILY LEFT RIGHT)` binds a dimension in its family only.
 `(papp PATH INTERVAL)` applies a path. Intervals are `i0`, `i1`, `(dim N)`,
 `(neg R)`, `(meet R S)` and `(join R S)`.
 
-This is an explicit core input format, not the final named-binder surface
-language. Source files cannot declare rules, axioms or theories. The `.hn`
+Named forms are also accepted:
+
+```text
+(check id (lam A (u 0) (lam x A x)) (pi A (u 0) (pi x A A)))
+(equal beta (app (lam x nat x) zero) zero nat)
+(equal path-beta (scope (i) ()) (papp (plam j nat zero) i) zero nat)
+```
+
+`(lam NAME DOMAIN BODY)` and `(pi NAME DOMAIN CODOMAIN)` bind an ordinary
+name in the body/codomain only. `(plam NAME FAMILY BODY)` binds a dimension
+in both family and body. `(path NAME FAMILY LEFT RIGHT)` binds a dimension
+in the family only. Bare term names and interval names resolve in separate
+namespaces, to the nearest binder. Anonymous forms still introduce binders,
+so mixing named forms with index forms does not capture outer names.
+
+A named scope is `(scope (DIMENSION-NAMES...) ((NAME TYPE)...))`. Both lists
+are oldest first. Each context type can refer to earlier context names and
+the dimension names, but not to its own name or later context entries. Names
+within either scope list must be distinct; local binders may shadow them.
+Binder names start with an ASCII letter or `_`, followed by ASCII letters,
+digits, `_`, `-`, `.` or `'`; built-in syntax/constant names are reserved.
+See [named.hcu](../examples/cubical/source/named.hcu).
+
+This remains a small prefix source format with explicit annotations. Source files cannot declare rules, axioms or theories. The `.hn`
 programming frontend and `.hcu` cubical frontend are not yet one source language.
 The source-to-core translation has no formal correctness proof; generic checking
 establishes the fixed elaborated judgments relative to the selected rules.

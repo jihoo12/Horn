@@ -1,0 +1,19 @@
+; Named ordinary binders elaborate to the same checked object terms.
+(check polymorphic-identity
+  (lam A (u 0) (lam x A x))
+  (pi A (u 0) (pi x A A)))
+(equal identity-beta (app (lam x nat x) zero) zero nat)
+
+; Dimension names have their own namespace.
+(check constant-path (plam i nat zero) (path i nat zero zero))
+(equal path-beta (scope (i) ()) (papp (plam j nat zero) i) zero nat)
+
+; Context names and dimension names are oldest first.
+(equal mixed-binders (scope (i) ((p (path nat zero zero))))
+  (app (lam x nat (plam j nat x)) (papp p i))
+  (plam j nat (papp p i))
+  (path j nat (papp p i) (papp p i)))
+
+(check dependent-context (scope (i) ((p (path (u 0) nat nat)) (x (papp p i))))
+  (plam j (papp p i) x)
+  (path j (papp p i) x x))
