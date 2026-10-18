@@ -48,7 +48,7 @@ fn run() -> Result<(), String> {
 }
 
 fn run_cubical(args: &[String]) -> Result<(), String> {
-    let usage = "usage: horn cubical list\n       horn cubical check NAME|all\n       horn cubical export NAME DIR\n       horn cubical run FILE [--emit NEW_DIR]";
+    let usage = "usage: horn cubical list\n       horn cubical check NAME|all\n       horn cubical export NAME DIR\n       horn cubical run FILE [--profile NAME] [--emit NEW_DIR]";
     let args: Vec<_> = args.iter().map(String::as_str).collect();
     if args == ["list"] {
         for example in cubical::EXAMPLES {
@@ -57,10 +57,26 @@ fn run_cubical(args: &[String]) -> Result<(), String> {
         return Ok(());
     }
     match args.as_slice() {
-        ["run", path] | ["run", path, "--emit", _] => {
+        ["run", path, options @ ..] => {
+            let (mut profile, mut output) = (None, None);
+            let mut i = 0;
+            while i < options.len() {
+                match options.get(i..i + 2) {
+                    Some(["--profile", name]) if profile.is_none() => {
+                        profile = Some(cubical::producer::Profile::parse(name)?);
+                    }
+                    Some(["--emit", dir]) if output.is_none() => output = Some(*dir),
+                    _ => return Err(usage.into()),
+                }
+                i += 2;
+            }
             let source = fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
-            let generated = cubical::source::run(&source).map_err(|e| format!("{path}: {e}"))?;
-            if let [_, _, _, dir] = args.as_slice() {
+            let generated = match profile {
+                Some(profile) => cubical::source::run_with_profile(&source, profile),
+                None => cubical::source::run(&source),
+            }
+            .map_err(|e| format!("{path}: {e}"))?;
+            if let Some(dir) = output {
                 fs::create_dir(dir)
                     .map_err(|e| format!("cannot create new directory {dir}: {e}"))?;
                 let dir = std::path::Path::new(dir);

@@ -1,6 +1,7 @@
 //! Bounded, untrusted producer for existing scoped cubical fragments. Every
 //! substitution and typing operation emits evidence for the ground kernel.
 mod composition;
+mod congruence;
 mod definitions;
 mod faces;
 mod glue;
@@ -17,8 +18,9 @@ use std::fmt::Write as _;
 pub const THEORY: &str = include_str!("../../theories/cubical/path.horn");
 const MAX_STEPS: usize = 50_000;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Profile {
+    #[default]
     Path,
     Faces,
     Systems,
@@ -26,11 +28,12 @@ pub enum Profile {
     Sigma,
     Equivalence,
     Glue,
+    Equality,
 }
 
 impl Profile {
-    pub fn theory(self) -> String {
-        let count = match self {
+    fn fragments(self) -> usize {
+        match self {
             Self::Path => 1,
             Self::Faces => 2,
             Self::Systems => 5,
@@ -38,8 +41,26 @@ impl Profile {
             Self::Sigma => 7,
             Self::Equivalence => 8,
             Self::Glue => 9,
-        };
-        super::FRAGMENTS[..count]
+            Self::Equality => 10,
+        }
+    }
+
+    pub fn parse(name: &str) -> Result<Self> {
+        match name {
+            "path" => Ok(Self::Path),
+            "faces" => Ok(Self::Faces),
+            "systems" => Ok(Self::Systems),
+            "composition" => Ok(Self::Composition),
+            "sigma" => Ok(Self::Sigma),
+            "equivalence" => Ok(Self::Equivalence),
+            "glue" => Ok(Self::Glue),
+            "equality" => Ok(Self::Equality),
+            _ => Err(format!("unknown fixed cubical profile {name}")),
+        }
+    }
+
+    pub fn theory(self) -> String {
+        super::FRAGMENTS[..self.fragments()]
             .iter()
             .map(|(_, source)| format!("{source}\n"))
             .collect()
@@ -75,6 +96,8 @@ type RestrictedInferenceKey = (usize, Vec<Term>, Face, Term);
 
 #[derive(Default)]
 struct Producer {
+    profile: Profile,
+    reduction_depth: usize,
     steps: Vec<(String, Vec<usize>, Sexp)>,
     known: BTreeMap<Sexp, usize>,
     inferred: BTreeMap<InferenceKey, (Term, usize)>,
@@ -836,6 +859,45 @@ impl Producer {
     }
 }
 
+impl Producer {
+    fn request_ctx(&mut self, d: usize, g: &[Term]) -> Result<usize> {
+        if self.profile < Profile::Equality {
+            return self.ctx(d, g);
+        }
+        let local = self.restricted_ctx(d, g, &Face::True)?;
+        self.fact(
+            "rctx.export",
+            vec![local],
+            "ctx",
+            vec![number(d), context(g)],
+        )
+    }
+
+    fn request_universe(&mut self, d: usize, g: &[Term], t: &Term) -> Result<(usize, usize)> {
+        if self.profile < Profile::Equality {
+            return self.universe(d, g, t);
+        }
+        let (level, restricted) = self.restricted_universe(d, g, &Face::True, t)?;
+        let id = self.has(
+            "rhas.export",
+            vec![restricted],
+            d,
+            g,
+            t,
+            &Term::Universe(level),
+        )?;
+        Ok((level, id))
+    }
+
+    fn request_check(&mut self, d: usize, g: &[Term], t: &Term, ty: &Term) -> Result<usize> {
+        if self.profile < Profile::Equality {
+            return self.check(d, g, t, ty);
+        }
+        let restricted = self.restricted_check(d, g, &Face::True, t, ty)?;
+        self.has("rhas.export", vec![restricted], d, g, t, ty)
+    }
+}
+
 /// Context types are stored oldest first, at their binding site. Ordinary
 /// variables and dimension variables are independent de Bruijn namespaces.
 #[derive(Clone, Debug)]
@@ -1055,13 +1117,23 @@ fn needs_glue(request: &Request) -> bool {
 /// Generate fresh evidence, fix goals from the requests (not from inferred
 /// answers), and accept only after the unchanged ground kernel replays it.
 pub fn produce(requests: &[Request]) -> Result<Generated> {
+    produce_selected(requests, None)
+}
+
+/// Select a fixed, audited fragment prefix, never caller-supplied rules.
+/// Requests requiring a larger prefix are rejected before generation.
+pub fn produce_with_profile(requests: &[Request], profile: Profile) -> Result<Generated> {
+    produce_selected(requests, Some(profile))
+}
+
+fn produce_selected(requests: &[Request], selected: Option<Profile>) -> Result<Generated> {
     if requests.is_empty() || requests.len() > 128 {
         return Err("expected 1..128 cubical requests".into());
     }
     for request in requests {
         validate(request).map_err(|e| format!("{}: {e}", request.name))?;
     }
-    let profile = if requests.iter().any(needs_glue) {
+    let required = if requests.iter().any(needs_glue) {
         Profile::Glue
     } else if requests.iter().any(needs_equivalence) {
         Profile::Equivalence
@@ -1081,9 +1153,18 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
     } else {
         Profile::Path
     };
+    let profile = selected.unwrap_or(required);
+    if profile.fragments() < required.fragments() {
+        return Err(format!(
+            "selected profile {profile:?} does not include the required {required:?} fragment"
+        ));
+    }
     let theory = profile.theory();
-    let mut p = Producer::default();
-    let lowered = if matches!(profile, Profile::Equivalence | Profile::Glue) {
+    let mut p = Producer {
+        profile,
+        ..Producer::default()
+    };
+    let lowered = if profile >= Profile::Equivalence {
         Some(
             requests
                 .iter()
@@ -1111,7 +1192,7 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
                     expansion,
                 } => {
                     p.definition_arguments((d, g), definition)?;
-                    p.universe(d, g, expansion)?;
+                    p.request_universe(d, g, expansion)?;
                     let (actual, id) = p.expand_definition(definition)?;
                     if actual.quote() != expansion.quote() {
                         return Err("definition expansion does not match the requested term".into());
@@ -1127,14 +1208,14 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
                     premise,
                     conclusion,
                 } => {
-                    p.ctx(d, g)?;
+                    p.request_ctx(d, g)?;
                     return Ok((
                         p.entails(d, premise, conclusion)?,
                         call("entails", [number(d), premise.quote(), conclusion.quote()]),
                     ));
                 }
                 Judgment::Local { face, left, right } => {
-                    p.ctx(d, g)?;
+                    p.request_ctx(d, g)?;
                     return Ok((
                         p.local(d, face, left, right)?,
                         call(
@@ -1185,15 +1266,15 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
             }
             let (id, pred, terms) = match &request.judgment {
                 Judgment::Has { term, ty } => {
-                    p.universe(d, g, ty)?;
+                    p.request_universe(d, g, ty)?;
                     (
-                        p.check(d, g, term, ty)?,
+                        p.request_check(d, g, term, ty)?,
                         "has",
                         vec![term.quote(), ty.quote()],
                     )
                 }
                 Judgment::Equal { left, right, ty } => {
-                    p.universe(d, g, ty)?;
+                    p.request_universe(d, g, ty)?;
                     (
                         if matches!(
                             profile,
@@ -1201,6 +1282,7 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
                                 | Profile::Sigma
                                 | Profile::Equivalence
                                 | Profile::Glue
+                                | Profile::Equality
                         ) {
                             let restricted =
                                 p.restricted_equal((d, g), &Face::True, left, right, ty)?;

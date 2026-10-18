@@ -286,6 +286,29 @@ impl Producer {
         phi: &Face,
         t: &Term,
     ) -> Result<Option<(Term, Term, usize)>> {
+        if self.reduction_depth >= 64 {
+            return Err("restricted reduction exceeded depth 64".into());
+        }
+        self.reduction_depth += 1;
+        let result = (|| {
+            if let Some(step) = self.restricted_reduce_root(scope, phi, t)? {
+                return Ok(Some(step));
+            }
+            if self.profile >= super::Profile::Equality {
+                return self.reduce_congruence(scope, phi, t);
+            }
+            Ok(None)
+        })();
+        self.reduction_depth -= 1;
+        result
+    }
+
+    fn restricted_reduce_root(
+        &mut self,
+        scope: (usize, &[Term]),
+        phi: &Face,
+        t: &Term,
+    ) -> Result<Option<(Term, Term, usize)>> {
         use Term::*;
         let (d, g) = scope;
         let (out, ty, refs, rule) = match t {

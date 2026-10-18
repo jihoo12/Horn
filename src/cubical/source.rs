@@ -412,3 +412,8 @@ pub fn parse(src: &str) -> Result<Vec<Request>> {
 pub fn run(src: &str) -> Result<Generated> {
     producer::produce(&parse(src)?)
 }
+
+/// Use one of the fixed theory prefixes; source still cannot declare rules.
+pub fn run_with_profile(src: &str, profile: producer::Profile) -> Result<Generated> {
+    producer::produce_with_profile(&parse(src)?, profile)
+}

@@ -11,7 +11,8 @@ selects the seven-fragment profile; see [dependent pairs](CUBICAL_SIGMA.md).
 Certified `contr`/`fiber`/`isequiv`/`equiv` abbreviations and expansion assertions
 select the eight-fragment profile; see [equivalence definitions](CUBICAL_EQUIVALENCE.md).
 Glue syntax selects the existing nine-fragment profile; see
-[Glue evidence](CUBICAL_GLUE.md).
+[Glue evidence](CUBICAL_GLUE.md). The explicit `--profile equality` option adds
+checked inner computation; see [congruence](CUBICAL_CONGRUENCE.md).
 No rules or kernel code are changed. Replay fresh output with its returned
 `Generated.theory`, which is also written by CLI export.
 

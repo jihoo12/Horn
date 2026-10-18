@@ -226,10 +226,26 @@ impl Producer {
         let (d, g) = scope;
         let left = self.restricted_check(d, g, phi, a, ty)?;
         let right = self.restricted_check(d, g, phi, b, ty)?;
+        let goal = call(
+            "req",
+            [
+                number(d),
+                context(g),
+                phi.quote(),
+                a.quote(),
+                b.quote(),
+                ty.quote(),
+            ],
+        );
+        if let Some(&id) = self.known.get(&goal) {
+            return Ok(id);
+        }
         if a.quote() == b.quote() {
             return self.restricted_evidence("req.refl", vec![left], scope, phi, (a, b), ty);
         }
-        if let Ok(global) = self.equal(d, g, a, b, ty) {
+        if self.profile < super::Profile::Equality
+            && let Ok(global) = self.equal(d, g, a, b, ty)
+        {
             let face = self.face(d, phi)?;
             return self.restricted_evidence(
                 "req.global",

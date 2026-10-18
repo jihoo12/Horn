@@ -210,20 +210,20 @@ impl Producer {
     ) -> Result<()> {
         use Definition::*;
         let (d, g) = scope;
-        self.ctx(d, g)?;
+        self.request_ctx(d, g)?;
         match def {
             Contr(x) => {
-                self.universe(d, g, x)?;
+                self.request_universe(d, g, x)?;
             }
             Equiv(a, b) | IsEquiv(a, b, _) | Fiber(a, b, _, _) => {
-                self.universe(d, g, a)?;
-                self.universe(d, g, b)?;
+                self.request_universe(d, g, a)?;
+                self.request_universe(d, g, b)?;
                 if let IsEquiv(_, _, f) | Fiber(_, _, f, _) = def {
                     let (b1, _) = self.transform(b, &Op::Shift(0))?;
-                    self.check(d, g, f, &Term::Pi(Box::new(a.clone()), Box::new(b1)))?;
+                    self.request_check(d, g, f, &Term::Pi(Box::new(a.clone()), Box::new(b1)))?;
                 }
                 if let Fiber(_, b, _, y) = def {
-                    self.check(d, g, y, b)?;
+                    self.request_check(d, g, y, b)?;
                 }
             }
         }

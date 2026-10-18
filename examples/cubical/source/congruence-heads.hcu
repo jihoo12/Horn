@@ -1,0 +1,22 @@
+; Run with --profile equality. The default smaller profiles stay unchanged.
+(equal projected-function
+  (app (fst (pair (sigma f (pi nat nat) nat) (lam x nat x) zero)) zero)
+  zero nat)
+(equal argument (scope () ((f (pi nat nat))))
+  (app f (app (lam x nat x) zero)) (app f zero) nat)
+(equal first-projection
+  (fst (app (lam p (sigma nat nat) p) (pair (sigma nat nat) zero zero))) zero nat)
+(equal dependent-second
+  (snd (app (lam p (sigma A (u 0) A) p) (pair (sigma A (u 0) A) nat zero))) zero nat)
+(equal unglue-argument (scope (i) ((e (equiv nat nat))))
+  (unglue (app (lam x (glue-type nat (at0 i) nat e) x)
+    (glue (glue-type nat (at0 i) nat e) zero (app (fst e) zero))))
+  (app (fst e) zero) nat)
+(equal path-argument (scope (i) ())
+  (papp (fst (pair (sigma p (path nat zero zero) nat) (plam j nat zero) zero)) i)
+  zero nat)
+(equal converted-equation (app (lam x nat x) zero) zero (app (lam A (u 0) A) nat))
+; A supplied isEquiv witness makes an equivalence whose function is computable.
+(check computable-glue (scope () ((w (isequiv nat nat (lam x nat x)))))
+  (glue (glue-type nat ft nat (pair (equiv nat nat) (lam x nat x) w)) zero zero)
+  (glue-type nat ft nat (pair (equiv nat nat) (lam x nat x) w)))

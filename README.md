@@ -31,7 +31,8 @@ also produce independently replayable certificates.
 [Dependent pairs](docs/CUBICAL_SIGMA.md) and
 [certified equivalence definitions](docs/CUBICAL_EQUIVALENCE.md) are supported
 in fresh source. [Glue typing and beta/face/eta evidence](docs/CUBICAL_GLUE.md)
-can also be generated. Univalence and ua-transport remain available through
+can also be generated. Opt into [checked inner computation](docs/CUBICAL_CONGRUENCE.md)
+with `--profile equality`. Univalence and ua-transport remain available through
 bundled replay; fresh ua/univalence generation is future work. See [CUBICAL.md](docs/CUBICAL.md) and the staged
 [integration plan](docs/INTEGRATION.md).
 

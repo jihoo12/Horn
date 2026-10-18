@@ -67,7 +67,9 @@ projections and beta/eta evidence are also generated; see
 [dependent pairs](CUBICAL_SIGMA.md). Equivalence definitions lower to the same
 core with explicit `def.*` certificates; see [their guide](CUBICAL_EQUIVALENCE.md).
 Fresh Glue formation, values and beta/face/eta equations now use the existing
-Glue fragment; see [Glue evidence](CUBICAL_GLUE.md). General congruence and
+Glue fragment; see [Glue evidence](CUBICAL_GLUE.md). An explicit equality
+profile now certifies inner application/projection/path/unglue computation;
+see [congruence](CUBICAL_CONGRUENCE.md). General congruence and
 dependent transport, type-directed composition and fresh ua/univalence producers and
 connection to the `.hn` programming frontend remain open. The theories,
 ground/schematic checkers and Agda models are unchanged.
