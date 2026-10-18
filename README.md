@@ -47,8 +47,9 @@ also produce independently replayable certificates.
 [certified equivalence definitions](docs/CUBICAL_EQUIVALENCE.md) are supported
 in fresh source. [Glue typing and beta/face/eta evidence](docs/CUBICAL_GLUE.md)
 can also be generated. Opt into [checked inner computation](docs/CUBICAL_CONGRUENCE.md)
-with `--profile equality`. Univalence and ua-transport remain available through
-bundled replay; fresh ua/univalence generation is future work. See [CUBICAL.md](docs/CUBICAL.md) and the staged
+with `--profile equality`. The `.hcu` producer does not build ua or univalence;
+the certificate engine moved from kamo3 does (`horn cubical generate`, and
+`horn cubical eval` scripts, above). See [CUBICAL.md](docs/CUBICAL.md) and the staged
 [integration plan](docs/INTEGRATION.md).
 
 ## What 0.3 adds: oracle certificates

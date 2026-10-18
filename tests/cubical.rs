@@ -26,13 +26,21 @@ fn transport_along_ua_of_not_computes_to_the_other_boolean() {
     assert_eq!(goals.len(), 3);
     assert!(goals[0].starts_with("(goal not-is-an-equivalence (rhas z nil ft (pair"));
     // Closed judgments in the empty context, ending in a boolean literal.
-    assert!(goals[1].starts_with("(goal transport-ua-not-true (req z nil ft (comp (glue-type bool"));
+    assert!(
+        goals[1].starts_with("(goal transport-ua-not-true (req z nil ft (comp (glue-type bool")
+    );
     assert!(goals[1].ends_with(" ff zero btrue) bfalse bool))"));
     assert!(goals[2].ends_with(" ff zero bfalse) btrue bool))"));
     let theory = cubical::theory();
     for (from, to) in [
-        (" ff zero btrue) bfalse bool))", " ff zero btrue) btrue bool))"),
-        (" ff zero bfalse) btrue bool))", " ff zero bfalse) bfalse bool))"),
+        (
+            " ff zero btrue) bfalse bool))",
+            " ff zero btrue) btrue bool))",
+        ),
+        (
+            " ff zero bfalse) btrue bool))",
+            " ff zero bfalse) bfalse bool))",
+        ),
     ] {
         let forged = example.goals.replace(from, to);
         assert_ne!(forged, example.goals);
@@ -146,8 +154,11 @@ fn the_core_theory_drops_the_unrestricted_layer_and_subsumed_rules() {
     assert!(!core.contains("(rule req.comp-nat-zero "));
     assert!(core.contains("(rule req.comp-nat "));
     // The core theory is a subset of the bundled one, rule by rule.
-    let full_forms: std::collections::HashSet<String> =
-        horn::sexp::parse(&full).unwrap().iter().map(|f| f.to_string()).collect();
+    let full_forms: std::collections::HashSet<String> = horn::sexp::parse(&full)
+        .unwrap()
+        .iter()
+        .map(|f| f.to_string())
+        .collect();
     for form in horn::sexp::parse(&core).unwrap() {
         assert!(full_forms.contains(&form.to_string()), "{form}");
     }

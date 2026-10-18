@@ -6,8 +6,6 @@
 /// Step bound for normalizing an expected type during checking.
 pub const FUEL_TYPES: usize = 10_000;
 
-pub mod term;
-pub mod data;
 pub mod canonical_code_frontend;
 pub mod canonical_map_frontend;
 pub mod canonical_ua_frontend;
@@ -16,9 +14,10 @@ pub mod compute_frontend;
 pub mod constant_equiv_frontend;
 pub mod constant_transport_frontend;
 pub mod contr_prop_frontend;
+pub mod data;
 pub mod deep_univalence_frontend;
-pub mod equivalence_frontend;
 pub mod equiv_ext_frontend;
+pub mod equivalence_frontend;
 pub mod face_frontend;
 pub mod frontend;
 pub mod glue_comp_frontend;
@@ -30,6 +29,7 @@ pub mod isequiv_prop_frontend;
 pub mod iso_equiv_frontend;
 pub mod path_frontend;
 pub mod restricted_frontend;
+pub mod term;
 pub mod to_pathp_frontend;
 pub mod transport_equiv_frontend;
 pub mod transport_frontend;

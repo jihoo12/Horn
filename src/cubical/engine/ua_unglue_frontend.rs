@@ -2,8 +2,8 @@
 use crate::cubical::engine::glue_fiber_frontend::{glue_fiber_extension, unglue_function};
 use crate::cubical::engine::path_frontend::{cons, u, v};
 use crate::cubical::engine::restricted_frontend::RestrictedProducer;
-use crate::cubical::engine::ua_frontend::ua_family;
 use crate::cubical::engine::term::{Result, atom, call};
+use crate::cubical::engine::ua_frontend::ua_family;
 
 pub fn ua_unglue_demo() -> Result<RestrictedProducer> {
     use crate::cubical::engine::face_frontend::Face;
@@ -68,7 +68,13 @@ pub fn ua_unglue_center_demo() -> Result<RestrictedProducer> {
         &atom("zero"),
         &v(0),
     )?;
-    let id = p.check(1, &g, &crate::cubical::engine::face_frontend::Face::True, &center, &fiber)?;
+    let id = p.check(
+        1,
+        &g,
+        &crate::cubical::engine::face_frontend::Face::True,
+        &center,
+        &fiber,
+    )?;
     p.f.path.p.result("ua-unglue-fiber-center", id);
     Ok(p)
 }

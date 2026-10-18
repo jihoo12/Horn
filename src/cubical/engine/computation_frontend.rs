@@ -143,7 +143,16 @@ impl RestrictedProducer {
         let family_head = shape(family)?.0;
         if matches!(
             family_head,
-            "system" | "ann" | "papp" | "app" | "fst" | "snd" | "bif" | "comp" | "unglue" | "natrec"
+            "system"
+                | "ann"
+                | "papp"
+                | "app"
+                | "fst"
+                | "snd"
+                | "bif"
+                | "comp"
+                | "unglue"
+                | "natrec"
                 | "s1rec"
         ) || crate::cubical::engine::data::by_elim(family_head).is_some()
         {
@@ -153,12 +162,29 @@ impl RestrictedProducer {
             let (family2, family_ty, efamily) = self.reduce(d + 1, &g2, &psi2, family)?;
             if family2 != *family {
                 let (ua, _) = self.infer(d + 1, &g2, &psi2, family)?;
-                let efamily =
-                    self.retype_eq(d + 1, &g2, &psi2, family, &family2, &family_ty, &ua, efamily)?;
+                let efamily = self.retype_eq(
+                    d + 1,
+                    &g2,
+                    &psi2,
+                    family,
+                    &family2,
+                    &family_ty,
+                    &ua,
+                    efamily,
+                )?;
                 let (phi2, phii) = self.f.path.ftransform(phi, &Op::DShift(0))?;
                 let tube_face = psi2.and(Face::parse(&phi2)?);
                 let tube_i = self.check(d + 1, &g2, &tube_face, tube, family)?;
-                let etube = self.eq(d + 1, &g2, &tube_face, tube, tube, family, "req.refl", vec![tube_i]);
+                let etube = self.eq(
+                    d + 1,
+                    &g2,
+                    &tube_face,
+                    tube,
+                    tube,
+                    family,
+                    "req.refl",
+                    vec![tube_i],
+                );
                 let (a0, a0i) = self.f.path.transform(family, &Op::DSubst(0, atom("i0")))?;
                 let base_i = self.check(d, g, psi, base, &a0)?;
                 let ebase = self.eq(d, g, psi, base, base, &a0, "req.refl", vec![base_i]);

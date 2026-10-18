@@ -2,8 +2,8 @@
 use crate::cubical::engine::face_frontend::Face;
 use crate::cubical::engine::path_frontend::{cons, dim, papp, path, u, v};
 use crate::cubical::engine::restricted_frontend::RestrictedProducer;
-use crate::cubical::engine::transport_frontend::transport_at;
 use crate::cubical::engine::term::{Result, Sexp, atom, call};
+use crate::cubical::engine::transport_frontend::transport_at;
 
 // Ordinary context x:A, A:U_l. The type A has no free dimensions.
 pub fn constant_line(l: usize) -> Sexp {

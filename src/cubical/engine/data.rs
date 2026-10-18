@@ -108,7 +108,11 @@ pub fn motive_index(symbol: &str) -> Option<usize> {
 
 /// `head` applied to `args`, or the atom when there are none.
 pub fn apply(head: &str, args: Vec<Sexp>) -> Sexp {
-    if args.is_empty() { atom(head) } else { call(head, args) }
+    if args.is_empty() {
+        atom(head)
+    } else {
+        call(head, args)
+    }
 }
 
 /// A rule template: `?`-variables, ground terms and applications.
@@ -144,9 +148,17 @@ pub enum Prem {
     /// `(rctx ?d ?g ?phi)`
     Ctx,
     /// `(rhas ?d Γ ?phi term ty)`, with Γ = `(cons ext ?g)` when extended.
-    Has { ext: Option<Tpl>, term: Tpl, ty: Tpl },
+    Has {
+        ext: Option<Tpl>,
+        term: Tpl,
+        ty: Tpl,
+    },
     /// `(shift from cutoff to)`, cutoff 0 or 1.
-    Shift { from: String, cutoff: usize, to: String },
+    Shift {
+        from: String,
+        cutoff: usize,
+        to: String,
+    },
     /// `(subst from z by to)`
     Subst { from: String, by: Tpl, to: String },
 }
@@ -176,13 +188,21 @@ impl Plan {
         let mut cur = from.to_owned();
         for _ in 0..times {
             let to = self.var();
-            self.prems.push(Prem::Shift { from: cur, cutoff, to: to.clone() });
+            self.prems.push(Prem::Shift {
+                from: cur,
+                cutoff,
+                to: to.clone(),
+            });
             cur = to;
         }
         cur
     }
     fn has(&mut self, term: Tpl, ty: Tpl) {
-        self.prems.push(Prem::Has { ext: None, term, ty });
+        self.prems.push(Prem::Has {
+            ext: None,
+            term,
+            ty,
+        });
     }
     pub fn text(&self, name: &str) -> String {
         let prems: Vec<String> = self
@@ -287,7 +307,9 @@ impl Data {
             ty: level.clone(),
         });
         let shifted = |p: &mut Plan, times: usize| -> Vec<Tpl> {
-            (0..self.params).map(|j| var(p.chain(&format!("A{j}"), 0, times))).collect()
+            (0..self.params)
+                .map(|j| var(p.chain(&format!("A{j}"), 0, times)))
+                .collect()
         };
         for (i, c) in self.ctors.iter().enumerate() {
             let (n, rec) = (c.args.len(), c.recursive());
@@ -312,7 +334,11 @@ impl Data {
             let fields = (0..n).map(|k| Tpl::Ground(v(n - 1 - k + r)));
             let applied = Tpl::app(&c.symbol, fields.collect());
             let cod = p.var();
-            p.prems.push(Prem::Subst { from: base, by: applied, to: cod.clone() });
+            p.prems.push(Prem::Subst {
+                from: base,
+                by: applied,
+                to: cod.clone(),
+            });
             let mut ty = var(cod);
             for ih in ihs.into_iter().rev() {
                 ty = Tpl::App("pi".into(), vec![ih, ty]);
@@ -323,7 +349,11 @@ impl Data {
             p.has(var(format!("m{i}")), ty);
         }
         p.has(var("x".into()), self.type_tpl(params.clone()));
-        p.prems.push(Prem::Subst { from: "p".into(), by: var("x".into()), to: "px".into() });
+        p.prems.push(Prem::Subst {
+            from: "p".into(),
+            by: var("x".into()),
+            to: "px".into(),
+        });
         p.has(var("px".into()), level);
         let mut args = params;
         args.push(var("p".into()));
@@ -352,7 +382,11 @@ impl Data {
             let xs: Vec<String> = (0..arity).map(|i| format!("?x{i}")).collect();
             let ys: Vec<String> = (0..arity).map(|i| format!("?y{i}")).collect();
             let term = |zs: &[String]| {
-                if zs.is_empty() { head.to_owned() } else { format!("({head} {})", zs.join(" ")) }
+                if zs.is_empty() {
+                    head.to_owned()
+                } else {
+                    format!("({head} {})", zs.join(" "))
+                }
             };
             let scope: Vec<String> = (0..arity)
                 .map(|i| {
@@ -360,7 +394,12 @@ impl Data {
                     format!("(scoped ?d {n} ?x{i})")
                 })
                 .collect();
-            let _ = writeln!(w, "(rule scope.{head} ({}) (scoped ?d ?n {}))", scope.join(" "), term(&xs));
+            let _ = writeln!(
+                w,
+                "(rule scope.{head} ({}) (scoped ?d ?n {}))",
+                scope.join(" "),
+                term(&xs)
+            );
             for op in ["shift", "subst", "dshift", "dsubst"] {
                 let r = if op.ends_with("subst") { " ?r" } else { "" };
                 let mut prems = Vec::new();
@@ -433,17 +472,29 @@ impl Data {
                 .zip(&b)
                 .zip(&c.args)
                 .map(|((x, y), ty)| {
-                    format!("(req ?d ?g ?phi {x} {y} {})", self.field_ty(ty, &params_tpl).text())
+                    format!(
+                        "(req ?d ?g ?phi {x} {y} {})",
+                        self.field_ty(ty, &params_tpl).text()
+                    )
                 })
                 .collect();
             let lhs = format!("({} {})", c.symbol, a.join(" "));
             let rhs = format!("({} {})", c.symbol, b.join(" "));
-            let _ = writeln!(w, "(rule req.{}-cong ({}) (req ?d ?g ?phi {lhs} {rhs} {ty_text}))", c.symbol, prems.join(" "));
+            let _ = writeln!(
+                w,
+                "(rule req.{}-cong ({}) (req ?d ?g ?phi {lhs} {rhs} {ty_text}))",
+                c.symbol,
+                prems.join(" ")
+            );
         }
         // Computation: one rule per constructor.
         for (i, c) in self.ctors.iter().enumerate() {
             let a: Vec<String> = (0..c.args.len()).map(|j| format!("?a{j}")).collect();
-            let scrutinee = if a.is_empty() { c.symbol.clone() } else { format!("({} {})", c.symbol, a.join(" ")) };
+            let scrutinee = if a.is_empty() {
+                c.symbol.clone()
+            } else {
+                format!("({} {})", c.symbol, a.join(" "))
+            };
             let mut rhs = format!("?m{i}");
             for x in &a {
                 rhs = format!("(app {rhs} {x})");
@@ -468,18 +519,30 @@ impl Data {
         );
         // Composition.
         if np == 0 {
-            let _ = writeln!(w, "(rule req.comp-{t} ((rhas ?d ?g ?psi (comp {t} ?phi ?t ?b) {t})) (req ?d ?g ?psi (comp {t} ?phi ?t ?b) ?b {t}))");
+            let _ = writeln!(
+                w,
+                "(rule req.comp-{t} ((rhas ?d ?g ?psi (comp {t} ?phi ?t ?b) {t})) (req ?d ?g ?psi (comp {t} ?phi ?t ?b) ?b {t}))"
+            );
         } else {
             for c in &self.ctors {
                 let a: Vec<String> = (0..c.args.len()).map(|j| format!("?a{j}")).collect();
                 let wrap = |xs: &[String]| {
-                    if xs.is_empty() { c.symbol.clone() } else { format!("({} {})", c.symbol, xs.join(" ")) }
+                    if xs.is_empty() {
+                        c.symbol.clone()
+                    } else {
+                        format!("({} {})", c.symbol, xs.join(" "))
+                    }
                 };
                 let lhs = format!("(comp {ty_text} ff ?t {})", wrap(&a));
                 let parts: Vec<String> = a
                     .iter()
                     .zip(&c.args)
-                    .map(|(x, ty)| format!("(comp {} ff zero {x})", self.field_ty(ty, &params_tpl).text()))
+                    .map(|(x, ty)| {
+                        format!(
+                            "(comp {} ff zero {x})",
+                            self.field_ty(ty, &params_tpl).text()
+                        )
+                    })
                     .collect();
                 let rhs = wrap(&parts);
                 let _ = writeln!(

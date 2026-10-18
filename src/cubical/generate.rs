@@ -12,7 +12,10 @@ use std::io::{BufReader, BufWriter, Write};
 /// Producer recursion follows the term structure, which is deep.
 const STACK_BYTES: usize = 1 << 30;
 
-pub const GENERATORS: &[(&str, fn() -> Result<RestrictedProducer>)] = &[
+/// Builds a bundled example's derivation.
+pub type Generator = fn() -> Result<RestrictedProducer>;
+
+pub const GENERATORS: &[(&str, Generator)] = &[
     ("univalence", deep_univalence_frontend::deep_univalence_demo),
     ("ua-transport", ua_transport_frontend::ua_transport_demo),
     ("canonicity", canonicity_frontend::canonicity_demo),

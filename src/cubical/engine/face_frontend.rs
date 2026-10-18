@@ -159,10 +159,10 @@ impl FaceProducer {
     }
     pub fn face(&mut self, d: usize, f: &Face) -> Result<usize> {
         if self.path.memoization_enabled()
-            && let Some(id) =
-                self.path
-                    .p
-                    .known_judgment(&call("face", [number(d), f.quote()]))
+            && let Some(id) = self
+                .path
+                .p
+                .known_judgment(&call("face", [number(d), f.quote()]))
         {
             return Ok(id);
         }

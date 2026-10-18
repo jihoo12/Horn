@@ -18,9 +18,9 @@ use crate::cubical::engine::canonical_map_frontend::{apply, canonical_map_at};
 use crate::cubical::engine::equiv_ext_frontend::{equiv_ext_line, equiv_ext_type};
 use crate::cubical::engine::path_frontend::{path, u, v};
 use crate::cubical::engine::restricted_frontend::RestrictedProducer;
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 use crate::cubical::engine::ua_beta_frontend::{beta_term, beta_type};
 use crate::cubical::engine::ua_frontend::{ua_term, ua_type};
-use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 /// `ua A B e` with A, B, e at v2, v1, v0.
 pub fn ua_e(p: &mut RestrictedProducer) -> Result<Sexp> {

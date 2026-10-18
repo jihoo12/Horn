@@ -39,20 +39,27 @@ pub fn not_involutive() -> Sexp {
 
 /// `(not, isoToIsEquiv bool bool not not inv inv) : Equiv bool bool`.
 pub fn not_equivalence(p: &mut RestrictedProducer) -> Result<Sexp> {
-    let lemma = call(
-        "ann",
-        [iso_equiv_term(p, 0, 0)?, iso_equiv_type(p, 0, 0)?],
-    );
-    let proof = [bool(), bool(), not(), not(), not_involutive(), not_involutive()]
-        .into_iter()
-        .fold(lemma, app);
+    let lemma = call("ann", [iso_equiv_term(p, 0, 0)?, iso_equiv_type(p, 0, 0)?]);
+    let proof = [
+        bool(),
+        bool(),
+        not(),
+        not(),
+        not_involutive(),
+        not_involutive(),
+    ]
+    .into_iter()
+    .fold(lemma, app);
     Ok(call("pair", [not(), proof]))
 }
 
 /// `ua e` at dimension 0, for a closed `e : Equiv A A`.
 pub fn ua_family(a: &Sexp, e: &Sexp) -> Sexp {
     let phi = Face::End(0, false).or(Face::End(0, true));
-    let types = system(&[(Face::End(0, false), a.clone()), (Face::End(0, true), a.clone())]);
+    let types = system(&[
+        (Face::End(0, false), a.clone()),
+        (Face::End(0, true), a.clone()),
+    ]);
     let equivs = system(&[
         (Face::End(0, false), e.clone()),
         (Face::End(0, true), identity_core()),

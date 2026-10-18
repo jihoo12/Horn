@@ -15,7 +15,11 @@ impl RestrictedProducer {
     ) -> Result<Option<(Sexp, String, Vec<usize>)>> {
         let s1 = atom("s1");
         Ok(Some(match shape(t)? {
-            ("s1", []) => (call("u", [atom("z")]), "rhas.s1".into(), vec![self.ctx(d, g, phi)?]),
+            ("s1", []) => (
+                call("u", [atom("z")]),
+                "rhas.s1".into(),
+                vec![self.ctx(d, g, phi)?],
+            ),
             ("base", []) => (s1, "rhas.base".into(), vec![self.ctx(d, g, phi)?]),
             ("loop", [r]) => {
                 let ctx = self.ctx(d, g, phi)?;
@@ -69,8 +73,9 @@ impl RestrictedProducer {
                         let eq = self.retype_eq(d, g, phi, t, b, a, ty, eq)?;
                         return Ok(Some((b.clone(), ty.clone(), eq)));
                     }
-                    ("loop", [r]) if self.f.endpoint(d, phi, r, false).is_err()
-                        && self.f.endpoint(d, phi, r, true).is_err() =>
+                    ("loop", [r])
+                        if self.f.endpoint(d, phi, r, false).is_err()
+                            && self.f.endpoint(d, phi, r, true).is_err() =>
                     {
                         let out = call("papp", [lp.clone(), r.clone()]);
                         let oi = self.check(d, g, phi, &out, a)?;

@@ -212,7 +212,13 @@ impl RestrictedProducer {
         if ah == "lam" && bh != "lam" && th == "pi" {
             let bi = self.check(d, g, phi, b, ty)?;
             let (b2, shift) = self.f.path.transform(b, &Op::Shift(0))?;
-            let rebuilt = call("lam", [call("app", [b2, crate::cubical::engine::path_frontend::v(0)])]);
+            let rebuilt = call(
+                "lam",
+                [call(
+                    "app",
+                    [b2, crate::cubical::engine::path_frontend::v(0)],
+                )],
+            );
             let ri = self.check(d, g, phi, &rebuilt, ty)?;
             let eta = self.eq(
                 d,

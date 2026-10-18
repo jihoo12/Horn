@@ -495,7 +495,9 @@ impl PathProducer {
     }
     pub fn interval(&mut self, d: usize, r: &Sexp) -> Result<usize> {
         if self.memoization_enabled()
-            && let Some(id) = self.p.known_judgment(&call("interval", [num(d), r.clone()]))
+            && let Some(id) = self
+                .p
+                .known_judgment(&call("interval", [num(d), r.clone()]))
         {
             return Ok(id);
         }

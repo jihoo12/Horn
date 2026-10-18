@@ -4,8 +4,8 @@
 pub mod ast;
 pub mod engine;
 pub mod generate;
-pub mod script;
 pub mod producer;
+pub mod script;
 pub mod source;
 
 /// Order matters: later fragments use declarations from earlier fragments.
@@ -65,10 +65,16 @@ pub fn core_theory() -> String {
         let Ok(xs) = form.list() else { return false };
         let head = xs.first().and_then(|h| h.atom().ok());
         match head {
-            Some("pred") => xs.get(1).and_then(|n| n.atom().ok()).is_some_and(|n| UNRESTRICTED.contains(&n)),
+            Some("pred") => xs
+                .get(1)
+                .and_then(|n| n.atom().ok())
+                .is_some_and(|n| UNRESTRICTED.contains(&n)),
             Some("rule") if xs.len() == 4 => {
                 let pred = |j: &crate::sexp::Sexp| {
-                    j.list().ok().and_then(|ys| ys.first()?.atom().ok()).is_some_and(|p| UNRESTRICTED.contains(&p))
+                    j.list()
+                        .ok()
+                        .and_then(|ys| ys.first()?.atom().ok())
+                        .is_some_and(|p| UNRESTRICTED.contains(&p))
                 };
                 pred(&xs[3]) || xs[2].list().is_ok_and(|ps| ps.iter().any(pred))
             }
@@ -85,10 +91,16 @@ pub fn core_theory() -> String {
     }
     // A rule that is an instance of another rule, with its premises among
     // the instance's, derives nothing new; drop it (req.comp-nat-zero).
-    let rules: Vec<&crate::sexp::Sexp> = kept.iter().map(|(_, f)| f).filter(|f| is_rule(f)).collect();
+    let rules: Vec<&crate::sexp::Sexp> =
+        kept.iter().map(|(_, f)| f).filter(|f| is_rule(f)).collect();
     let redundant: Vec<bool> = kept
         .iter()
-        .map(|(_, f)| is_rule(f) && rules.iter().any(|g| !std::ptr::eq(*g, f) && covers(g, f) && !covers(f, g)))
+        .map(|(_, f)| {
+            is_rule(f)
+                && rules
+                    .iter()
+                    .any(|g| !std::ptr::eq(*g, f) && covers(g, f) && !covers(f, g))
+        })
         .collect();
     let mut out = String::new();
     let mut last = "";
@@ -105,7 +117,8 @@ pub fn core_theory() -> String {
 }
 
 fn is_rule(f: &crate::sexp::Sexp) -> bool {
-    f.list().is_ok_and(|xs| xs.len() == 4 && xs[0].atom().ok() == Some("rule"))
+    f.list()
+        .is_ok_and(|xs| xs.len() == 4 && xs[0].atom().ok() == Some("rule"))
 }
 
 /// One-way matching of a rule pattern against a term whose `?` variables

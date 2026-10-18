@@ -67,8 +67,10 @@ is not formally verified by the Agda model. A separate bounded
 [producer and core source frontend](CUBICAL_PRODUCER.md) now generates fresh
 dependent-function/path, face/system, composition and Sigma certificates, with
 [certified equivalence definitions](CUBICAL_EQUIVALENCE.md). It also generates [Glue typing and beta/face/eta evidence](CUBICAL_GLUE.md),
-but does not yet generate new ua or univalence proofs. The ordinary `.hn` source language and cubical `.hcu`
-core source remain separate frontends. See [INTEGRATION.md](INTEGRATION.md) for
+but does not build ua or univalence proofs; the engine moved from kamo3 does
+(see [Regeneration inside Horn](#regeneration-inside-horn) and
+[cubical scripts](CUBICAL_SCRIPT.md)). The ordinary `.hn` source language,
+the `.hcu` core source and `.hcs` scripts remain separate frontends. See [INTEGRATION.md](INTEGRATION.md) for
 how to connect them without expanding the trusted kernel.
 
 ## Independent inspection
@@ -138,8 +140,6 @@ target/release/oracle-kernel THEORY examples/cubical/NAME.goals examples/cubical
 ```
 
 Only reproducing the import needs kamo3. The committed data, CLI, decoding,
-generic verification and tests are standalone. Fresh path, face/system,
-composition and Sigma producers and equivalence-definition lowering are now
-implemented in Horn. Fresh equivalence witnesses, Glue-directed composition, ua generation and
-migration of the cubical Agda reference remain later steps.
-kamo3 should not yet be deleted.
+generic verification and tests are standalone, and `horn cubical generate`
+regenerates all three bundled examples inside Horn. Migration of the
+cubical Agda reference remains a later step, so kamo3 stays as an archive.

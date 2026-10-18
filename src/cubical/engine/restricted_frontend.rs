@@ -1,11 +1,11 @@
 //! Untrusted deep-syntax restricted typing, systems, and composition producer.
 //! No Agda invocation, semantic univalence lemmas, or cubical kernel extensions.
+use super::FUEL_TYPES;
 use crate::cubical::engine::face_frontend::{Face, FaceProducer};
 use crate::cubical::engine::frontend::number as num;
 use crate::cubical::engine::path_frontend::{Op, cons, papp, path, u, v};
 use crate::cubical::engine::term::{Result, Sexp, atom, call};
 use std::collections::{BTreeMap, BTreeSet};
-use super::FUEL_TYPES;
 
 #[path = "computation_frontend.rs"]
 #[allow(dead_code)]
@@ -264,11 +264,11 @@ impl RestrictedProducer {
     }
     pub fn ctx(&mut self, d: usize, g: &Sexp, phi: &Face) -> Result<usize> {
         if self.f.path.memoization_enabled()
-            && let Some(id) =
-                self.f
-                    .path
-                    .p
-                    .known_judgment(&call("rctx", [num(d), g.clone(), phi.quote()]))
+            && let Some(id) = self
+                .f
+                .path
+                .p
+                .known_judgment(&call("rctx", [num(d), g.clone(), phi.quote()]))
         {
             return Ok(id);
         }
@@ -327,11 +327,11 @@ impl RestrictedProducer {
     }
     pub fn scope(&mut self, d: usize, n: usize, t: &Sexp) -> Result<usize> {
         if self.f.path.memoization_enabled()
-            && let Some(id) =
-                self.f
-                    .path
-                    .p
-                    .known_judgment(&call("scoped", [num(d), num(n), t.clone()]))
+            && let Some(id) = self
+                .f
+                .path
+                .p
+                .known_judgment(&call("scoped", [num(d), num(n), t.clone()]))
         {
             return Ok(id);
         }
@@ -489,7 +489,11 @@ impl RestrictedProducer {
             ("bool", []) => (u(0), "rhas.bool", vec![self.ctx(d, g, phi)?]),
             (head @ ("btrue" | "bfalse"), []) => (
                 atom("bool"),
-                if head == "btrue" { "rhas.btrue" } else { "rhas.bfalse" },
+                if head == "btrue" {
+                    "rhas.btrue"
+                } else {
+                    "rhas.bfalse"
+                },
                 vec![self.ctx(d, g, phi)?],
             ),
             ("suc", [x]) => {
@@ -514,7 +518,11 @@ impl RestrictedProducer {
                 let mi = self.check(d, g, phi, m, &nat)?;
                 let (pm, smi) = self.f.path.transform(p, &Op::Subst(0, m.clone()))?;
                 let ui = self.check(d, g, phi, &pm, &u(l))?;
-                (pm, "rhas.natrec", vec![pi, szi, zi, sh1, sh2, ssk, fi, mi, smi, ui])
+                (
+                    pm,
+                    "rhas.natrec",
+                    vec![pi, szi, zi, sh1, sh2, ssk, fi, mi, smi, ui],
+                )
             }
             ("bif", [p, tt, f, b]) => {
                 let gb = cons(atom("bool"), g.clone());
@@ -795,8 +803,7 @@ impl RestrictedProducer {
             return Ok(*id);
         }
         if self.certified_check_reuse {
-            let inferred_key =
-                call("rhas-key", [num(d), g.clone(), phi.quote(), t.clone()]);
+            let inferred_key = call("rhas-key", [num(d), g.clone(), phi.quote(), t.clone()]);
             if let Some((actual, id)) = self.inferred.get(&inferred_key)
                 && actual == expected
             {
@@ -882,8 +889,7 @@ impl RestrictedProducer {
         if let Some(former) = former
             && shape(expected)?.0 != former
             && let Ok((universe, _)) = self.infer(d, g, phi, expected)
-            && let Ok((target, _)) =
-                self.whnf(d, g, phi, expected, &universe, FUEL_TYPES)
+            && let Ok((target, _)) = self.whnf(d, g, phi, expected, &universe, FUEL_TYPES)
             && shape(&target)?.0 == former
         {
             let id = self.check(d, g, phi, t, &target)?;
@@ -969,7 +975,14 @@ impl RestrictedProducer {
 
     /// Infer the type of `t` and, if it is not yet a `former` type, bring it
     /// to weak-head normal form and convert the typing.
-    fn infer_as(&mut self, d: usize, g: &Sexp, phi: &Face, t: &Sexp, former: &str) -> Result<(Sexp, usize)> {
+    fn infer_as(
+        &mut self,
+        d: usize,
+        g: &Sexp,
+        phi: &Face,
+        t: &Sexp,
+        former: &str,
+    ) -> Result<(Sexp, usize)> {
         let (ty, id) = self.infer(d, g, phi, t)?;
         if shape(&ty)?.0 == former {
             return Ok((ty, id));
@@ -1842,11 +1855,7 @@ impl RestrictedProducer {
         if !self.reduct_types {
             return Ok(None);
         }
-        let known = self
-            .checked_forms
-            .get(t)
-            .cloned()
-            .unwrap_or_default();
+        let known = self.checked_forms.get(t).cloned().unwrap_or_default();
         for (d0, g0, a0) in known {
             let candidate = if d0 == d {
                 let mut tail = g.clone();

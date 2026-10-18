@@ -11,9 +11,9 @@
 use crate::cubical::engine::face_frontend::Face;
 use crate::cubical::engine::path_frontend::v;
 use crate::cubical::engine::restricted_frontend::RestrictedProducer;
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 use crate::cubical::engine::ua_frontend::ua_family;
 use crate::cubical::engine::ua_graph_frontend::{graph_context, mapped_x};
-use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 /// `transport^i (ua e i) x`, with the Glue family written directly.
 pub fn transport_ua() -> Sexp {

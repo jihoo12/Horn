@@ -3,10 +3,10 @@
 use crate::cubical::engine::face_frontend::Face;
 use crate::cubical::engine::path_frontend::{dim, papp, path, u, v};
 use crate::cubical::engine::restricted_frontend::RestrictedProducer;
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 use crate::cubical::engine::transport_frontend::transport_at;
 use crate::cubical::engine::ua_frontend::ua_family;
 use crate::cubical::engine::ua_graph_frontend::{graph_context, graph_line, mapped_x};
-use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 pub fn ua_at_x() -> Sexp {
     call("plam", [ua_family(1)])

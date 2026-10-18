@@ -9,7 +9,10 @@ fn transport_along_ua_of_not_evaluates_to_a_boolean() {
         .iter()
         .map(|e| format!("{} = {} : {}", e.name, e.value, e.ty))
         .collect();
-    assert_eq!(shown, ["not-true = bfalse : bool", "along-ua = bfalse : bool"]);
+    assert_eq!(
+        shown,
+        ["not-true = bfalse : bool", "along-ua = bfalse : bool"]
+    );
     assert_eq!(script.certified.checked.goals, 6);
 }
 
@@ -33,14 +36,20 @@ fn evaluation_is_certified_and_reported() {
         .collect();
     assert_eq!(
         shown,
-        ["t = bfalse : bool", "f = btrue : bool", "end = bfalse : bool"]
+        [
+            "t = bfalse : bool",
+            "f = btrue : bool",
+            "end = bfalse : bool"
+        ]
     );
     let c = &script.certified;
     assert_eq!(c.checked.goals, 6);
     oracle::check(&c.theory, &c.goals, &c.oracle).unwrap();
     // The goal states the computed value; another value is rejected.
-    let forged = c.goals.replace("(app (ann (lam (bif bool bfalse btrue (v z))) (pi bool bool)) btrue) bfalse bool)",
-        "(app (ann (lam (bif bool bfalse btrue (v z))) (pi bool bool)) btrue) btrue bool)");
+    let forged = c.goals.replace(
+        "(app (ann (lam (bif bool bfalse btrue (v z))) (pi bool bool)) btrue) bfalse bool)",
+        "(app (ann (lam (bif bool bfalse btrue (v z))) (pi bool bool)) btrue) btrue bool)",
+    );
     assert_ne!(forged, c.goals);
     assert!(oracle::check(&c.theory, &forged, &c.oracle).is_err());
 }
@@ -91,7 +100,10 @@ fn natural_number_programs_evaluate_and_induction_checks() {
         // 2 + 2 is not 5.
         "(check wrong (plam i 5) (path nat (app add 2 2) 5))",
     ] {
-        assert!(cubical::script::run(&format!("{add}\n{bad}")).is_err(), "{bad}");
+        assert!(
+            cubical::script::run(&format!("{add}\n{bad}")).is_err(),
+            "{bad}"
+        );
     }
 }
 
@@ -153,7 +165,10 @@ fn malformed_data_declarations_and_eliminations_fail() {
            (lam c color (elim color k (path color k red) ((plam i red) (plam i red)) c)))",
         "(eval x (red green))",
     ] {
-        assert!(cubical::script::run(&format!("{color}\n{bad}")).is_err(), "{bad}");
+        assert!(
+            cubical::script::run(&format!("{color}\n{bad}")).is_err(),
+            "{bad}"
+        );
     }
 }
 
@@ -208,7 +223,12 @@ fn univalence_one_universe_up_computes_on_data_results() {
         .map(|e| format!("{} = {} : {}", e.name, e.value, e.ty))
         .collect();
     assert_eq!(shown, ["applied = btrue : bool"]);
-    assert!(script.certified.goals.contains("(goal swap-path (rhas z nil ft"));
+    assert!(
+        script
+            .certified
+            .goals
+            .contains("(goal swap-path (rhas z nil ft")
+    );
 }
 
 #[test]
@@ -221,10 +241,17 @@ fn level_polymorphic_definitions_hold_at_every_level() {
         .collect();
     assert_eq!(
         shown,
-        ["on-bool = btrue : bool", "on-types = bool : (u 0)", "twice-not = btrue : bool"]
+        [
+            "on-bool = btrue : bool",
+            "on-types = bool : (u 0)",
+            "twice-not = btrue : bool"
+        ]
     );
     let names: Vec<_> = script.polymorphic.iter().map(|p| p.name.as_str()).collect();
-    assert_eq!(names, ["id", "const", "twice", "ua-poly", "apply-id", "univalence"]);
+    assert_eq!(
+        names,
+        ["id", "const", "twice", "ua-poly", "apply-id", "univalence"]
+    );
     let theory = &script.certified.theory;
     for p in &script.polymorphic {
         // Every schematic certificate states its goal for the variable L.
@@ -234,7 +261,11 @@ fn level_polymorphic_definitions_hold_at_every_level() {
     }
     // The univalence instance at L := 1 unfolds to a ground certificate that
     // the unchanged kernel accepts.
-    let uv = script.polymorphic.iter().find(|p| p.name == "univalence").unwrap();
+    let uv = script
+        .polymorphic
+        .iter()
+        .find(|p| p.name == "univalence")
+        .unwrap();
     let (mut goals, mut proof) = (Vec::new(), Vec::new());
     horn::schematic::instantiate(
         theory,
@@ -247,7 +278,10 @@ fn level_polymorphic_definitions_hold_at_every_level() {
     .unwrap();
     let report = horn::kernel::Theory::parse(theory)
         .unwrap()
-        .check(std::str::from_utf8(&goals).unwrap(), std::str::from_utf8(&proof).unwrap())
+        .check(
+            std::str::from_utf8(&goals).unwrap(),
+            std::str::from_utf8(&proof).unwrap(),
+        )
         .unwrap();
     assert_eq!(report.goals, 1);
 }
@@ -282,7 +316,11 @@ fn a_result_reports_the_rules_it_relies_on() {
     // Natural-number programs need none of the Glue rules.
     assert!(c.rules_used.iter().any(|r| r == "req.natrec-suc"));
     assert!(!c.rules_used.iter().any(|r| r.contains("glue")));
-    assert!(c.rules_used.len() < declared.len() / 2, "{}", c.rules_used.len());
+    assert!(
+        c.rules_used.len() < declared.len() / 2,
+        "{}",
+        c.rules_used.len()
+    );
 }
 
 #[test]

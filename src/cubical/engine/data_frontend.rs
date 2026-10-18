@@ -11,9 +11,17 @@ use std::collections::HashMap;
 
 fn inst(t: &Tpl, env: &HashMap<String, Sexp>) -> Result<Sexp> {
     Ok(match t {
-        Tpl::Var(v) => env.get(v).cloned().ok_or_else(|| format!("unbound plan variable {v}"))?,
+        Tpl::Var(v) => env
+            .get(v)
+            .cloned()
+            .ok_or_else(|| format!("unbound plan variable {v}"))?,
         Tpl::Ground(s) => s.clone(),
-        Tpl::App(h, xs) => call(h, xs.iter().map(|x| inst(x, env)).collect::<Result<Vec<_>>>()?),
+        Tpl::App(h, xs) => call(
+            h,
+            xs.iter()
+                .map(|x| inst(x, env))
+                .collect::<Result<Vec<_>>>()?,
+        ),
     })
 }
 
@@ -96,7 +104,11 @@ impl RestrictedProducer {
         } else if let Some((data, i)) = data::by_ctor(head) {
             let c = &data.ctors[i];
             if args.len() != c.args.len() {
-                return Err(format!("constructor {} expects {} fields", c.name, c.args.len()));
+                return Err(format!(
+                    "constructor {} expects {} fields",
+                    c.name,
+                    c.args.len()
+                ));
             }
             // Parameters come from the types of fields at a parameter.
             for (a, arg_ty) in args.iter().zip(&c.args) {
@@ -155,15 +167,23 @@ impl RestrictedProducer {
             expected.clone()
         } else {
             let (universe, _) = self.infer(d, g, phi, expected)?;
-            self.whnf(d, g, phi, expected, &universe, super::super::FUEL_TYPES)?.0
+            self.whnf(d, g, phi, expected, &universe, super::super::FUEL_TYPES)?
+                .0
         };
         let (th, params) = shape(&target)?;
         if th != data.ty {
-            return Err(format!("constructor {} checked against {expected}", data.ctors[i].name));
+            return Err(format!(
+                "constructor {} checked against {expected}",
+                data.ctors[i].name
+            ));
         }
         let c = &data.ctors[i];
         if args.len() != c.args.len() {
-            return Err(format!("constructor {} expects {} fields", c.name, c.args.len()));
+            return Err(format!(
+                "constructor {} expects {} fields",
+                c.name,
+                c.args.len()
+            ));
         }
         let mut env = HashMap::new();
         for (j, a) in params.iter().enumerate() {
@@ -302,7 +322,16 @@ impl RestrictedProducer {
             for (x, y) in ax.iter().zip(bx) {
                 refs.push(self.equality(d, g, phi, x, y, &u(0))?);
             }
-            let eq = self.eq(d, g, phi, a, b, &u(0), &format!("req.{}-cong", data.ty), refs);
+            let eq = self.eq(
+                d,
+                g,
+                phi,
+                a,
+                b,
+                &u(0),
+                &format!("req.{}-cong", data.ty),
+                refs,
+            );
             return Ok(Some(self.retype_eq(d, g, phi, a, b, &u(0), ty, eq)?));
         }
         if let Some((data, i)) = data::by_ctor(ah) {
@@ -318,7 +347,16 @@ impl RestrictedProducer {
                 refs.push(self.equality(d, g, phi, x, y, &field_ty)?);
             }
             let dty = ty.clone();
-            let eq = self.eq(d, g, phi, a, b, &dty, &format!("req.{}-cong", c.symbol), refs);
+            let eq = self.eq(
+                d,
+                g,
+                phi,
+                a,
+                b,
+                &dty,
+                &format!("req.{}-cong", c.symbol),
+                refs,
+            );
             return Ok(Some(self.retype_eq(d, g, phi, a, b, &dty, ty, eq)?));
         }
         if let Some(data) = data::by_elim(ah) {
@@ -364,7 +402,16 @@ impl RestrictedProducer {
                 return Ok(None);
             }
             let out = call(head, out);
-            let eq = self.eq(d, g, phi, w, &out, &u(0), &format!("req.{}-cong", data.ty), refs);
+            let eq = self.eq(
+                d,
+                g,
+                phi,
+                w,
+                &out,
+                &u(0),
+                &format!("req.{}-cong", data.ty),
+                refs,
+            );
             let eq = self.retype_eq(d, g, phi, w, &out, &u(0), ty, eq)?;
             return Ok(Some((out, eq)));
         }
@@ -388,7 +435,16 @@ impl RestrictedProducer {
             return Ok(None);
         }
         let out = call(head, out);
-        let eq = self.eq(d, g, phi, w, &out, ty, &format!("req.{}-cong", c.symbol), refs);
+        let eq = self.eq(
+            d,
+            g,
+            phi,
+            w,
+            &out,
+            ty,
+            &format!("req.{}-cong", c.symbol),
+            refs,
+        );
         Ok(Some((out, eq)))
     }
 }

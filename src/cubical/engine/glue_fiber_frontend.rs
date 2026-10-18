@@ -150,7 +150,10 @@ pub fn glue_fiber_contraction(p: &mut RestrictedProducer, gt: &Sexp, a: &Sexp) -
             fiber.clone(),
             call(
                 "pi",
-                [fiber1, crate::cubical::engine::path_frontend::path(family, v(1), v(0))],
+                [
+                    fiber1,
+                    crate::cubical::engine::path_frontend::path(family, v(1), v(0)),
+                ],
             ),
         ],
     );

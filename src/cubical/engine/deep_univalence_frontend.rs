@@ -29,10 +29,12 @@ use crate::cubical::engine::face_frontend::Face;
 use crate::cubical::engine::iso_equiv_frontend::{iso_equiv_term, iso_equiv_type};
 use crate::cubical::engine::path_frontend::{Op, cons, path, u, v};
 use crate::cubical::engine::restricted_frontend::RestrictedProducer;
-use crate::cubical::engine::ua_beta_frontend::{beta_term, beta_type};
-use crate::cubical::engine::ua_eta_frontend::{canonical_with, constant_equiv_type, evidence, square};
-use crate::cubical::engine::ua_frontend::{ua_term, ua_type};
 use crate::cubical::engine::term::{Result, Sexp, atom, call};
+use crate::cubical::engine::ua_beta_frontend::{beta_term, beta_type};
+use crate::cubical::engine::ua_eta_frontend::{
+    canonical_with, constant_equiv_type, evidence, square,
+};
+use crate::cubical::engine::ua_frontend::{ua_term, ua_type};
 
 /// `Equiv (Path U₀ A B) (Equiv A B)` in a context starting B, A.
 pub fn statement(p: &mut RestrictedProducer) -> Result<Sexp> {

@@ -2,7 +2,6 @@
 //! Equality search is deliberately limited to chains of root beta steps.
 use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
-
 #[derive(Clone, Debug)]
 pub enum E {
     U(usize),

@@ -25,14 +25,14 @@
 //! (`Π X Y f g s t. isEquiv f`) are closed library terms, checked like any
 //! definition; neither is an axiom. Definitions are closed and transparent.
 use super::engine::data::{self, ArgTy, Ctor, Data};
-use super::engine::face_frontend::Face;
 use super::engine::deep_univalence_frontend;
+use super::engine::face_frontend::Face;
 use super::engine::iso_equiv_frontend::{iso_equiv_term, iso_equiv_type};
 use super::engine::path_frontend::{dim, papp, path, v};
 use super::engine::restricted_frontend::RestrictedProducer;
+use super::engine::term::{Result, Sexp, atom, call, parse};
 use super::engine::ua_frontend::{ua_term, ua_type};
 use super::generate::{Regenerated, certify};
-use super::engine::term::{Result, Sexp, atom, call, parse};
 use std::collections::HashMap;
 
 const FUEL: usize = 100_000;
@@ -110,10 +110,46 @@ fn binder(s: &Sexp) -> Result<&str> {
 }
 
 const RESERVED: &[&str] = &[
-    "bool", "btrue", "bfalse", "nat", "zero", "i0", "i1", "u", "pi", "lam", "app", "sigma",
-    "pair", "fst", "snd", "path", "plam", "papp", "bif", "ann", "equiv", "transport", "neg",
-    "meet", "join", "ua", "iso-equiv", "suc", "natrec", "data", "elim", "ua-at",
-    "iso-equiv-at", "at", "def-poly", "univalence-at", "s1", "base", "loop", "s1rec",
+    "bool",
+    "btrue",
+    "bfalse",
+    "nat",
+    "zero",
+    "i0",
+    "i1",
+    "u",
+    "pi",
+    "lam",
+    "app",
+    "sigma",
+    "pair",
+    "fst",
+    "snd",
+    "path",
+    "plam",
+    "papp",
+    "bif",
+    "ann",
+    "equiv",
+    "transport",
+    "neg",
+    "meet",
+    "join",
+    "ua",
+    "iso-equiv",
+    "suc",
+    "natrec",
+    "data",
+    "elim",
+    "ua-at",
+    "iso-equiv-at",
+    "at",
+    "def-poly",
+    "univalence-at",
+    "s1",
+    "base",
+    "loop",
+    "s1rec",
 ];
 
 struct Elaborator {
@@ -151,7 +187,10 @@ fn generalize_definition(
     p.f.path.p.result(name, id);
     let goals = format!("(goal {name} {})\n", p.f.path.p.judgment(id));
     let mut proof = Vec::new();
-    p.f.path.p.write_reachable(&mut proof).map_err(|e| e.to_string())?;
+    p.f.path
+        .p
+        .write_reachable(&mut proof)
+        .map_err(|e| e.to_string())?;
     let (mut sg, mut sp) = (Vec::new(), Vec::new());
     crate::generalize::generalize(
         theory,
@@ -169,8 +208,16 @@ fn generalize_definition(
     let want = format!("(goal {name} {expected})");
     if !sg.lines().any(|l| l == want) {
         let got = sg.lines().find(|l| l.starts_with("(goal ")).unwrap_or("");
-        let at = got.bytes().zip(want.bytes()).take_while(|(a, b)| a == b).count();
-        let near = |s: &str| s.get(at.saturating_sub(60)..(at + 60).min(s.len())).unwrap_or("").to_owned();
+        let at = got
+            .bytes()
+            .zip(want.bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        let near = |s: &str| {
+            s.get(at.saturating_sub(60)..(at + 60).min(s.len()))
+                .unwrap_or("")
+                .to_owned()
+        };
         return Err(format!(
             "the proof does not generalize to the stated level: at byte {at}, got ...{}... but stated ...{}...",
             near(got),
@@ -261,7 +308,7 @@ impl Elaborator {
                         return Err(format!("numeral {n} is too large"));
                     }
                     Ok((0..n).fold(atom("zero"), |t, _| call("suc", [t])))
-                } else if let Some(i) = index(&names.ordinary, &**a) {
+                } else if let Some(i) = index(&names.ordinary, a) {
                     Ok(v(i))
                 } else if let Some(d) = data::by_name(a) {
                     if d.params == 0 {
@@ -320,9 +367,10 @@ impl Elaborator {
             }
             ("pair", [a, b]) => call("pair", [self.term(a, names)?, self.term(b, names)?]),
             (proj @ ("fst" | "snd"), [t]) => call(proj, [self.term(t, names)?]),
-            ("plam", [i, body]) => {
-                call("plam", [self.term(body, &names.with_dimension(binder(i)?))?])
-            }
+            ("plam", [i, body]) => call(
+                "plam",
+                [self.term(body, &names.with_dimension(binder(i)?))?],
+            ),
             ("path", [i, a, l, r]) => path(
                 self.term(a, &names.with_dimension(binder(i)?))?,
                 self.term(l, names)?,
@@ -338,7 +386,12 @@ impl Elaborator {
             ("loop", [r]) => call("loop", [self.interval(r, names)?]),
             ("s1rec", [a, b, l, x]) => call(
                 "s1rec",
-                [self.term(a, names)?, self.term(b, names)?, self.term(l, names)?, self.term(x, names)?],
+                [
+                    self.term(a, names)?,
+                    self.term(b, names)?,
+                    self.term(l, names)?,
+                    self.term(x, names)?,
+                ],
             ),
             (head @ ("bif" | "natrec"), [c, motive, t, f, b]) => call(
                 head,
@@ -372,7 +425,8 @@ impl Elaborator {
                 relevel(&call("ann", [t, ty]), &level)
             }
             ("elim", [ty, rest @ ..]) => {
-                let d = data::by_name(ty.atom()?).ok_or_else(|| format!("unknown data type {ty}"))?;
+                let d =
+                    data::by_name(ty.atom()?).ok_or_else(|| format!("unknown data type {ty}"))?;
                 // `(elim T k P (METHODS) x)`, or with parameters
                 // `(elim T (PARAMS) k P (METHODS) x)`.
                 let (params, k, motive, methods, x) = match rest {
@@ -404,9 +458,15 @@ impl Elaborator {
                 let (d, i) = data::by_ctor_name(c).unwrap();
                 let ctor = &d.ctors[i];
                 if args.len() != ctor.args.len() {
-                    return Err(format!("constructor {c} needs {} arguments", ctor.args.len()));
+                    return Err(format!(
+                        "constructor {c} needs {} arguments",
+                        ctor.args.len()
+                    ));
                 }
-                let args = args.iter().map(|a| self.term(a, names)).collect::<Result<Vec<_>>>()?;
+                let args = args
+                    .iter()
+                    .map(|a| self.term(a, names))
+                    .collect::<Result<Vec<_>>>()?;
                 data::apply(&ctor.symbol, args)
             }
             (n, args) if data::by_name(n).is_some() => {
@@ -414,7 +474,10 @@ impl Elaborator {
                 if args.len() != d.params {
                     return Err(format!("{n} needs {} type parameters", d.params));
                 }
-                let args = args.iter().map(|a| self.term(a, names)).collect::<Result<Vec<_>>>()?;
+                let args = args
+                    .iter()
+                    .map(|a| self.term(a, names))
+                    .collect::<Result<Vec<_>>>()?;
                 data::apply(&d.ty, args)
             }
             ("equiv", [a, b]) => {
@@ -467,13 +530,13 @@ impl Elaborator {
                 // itself at its own parameters (uniform recursion).
                 let own = Sexp::List(
                     std::iter::once(atom(name))
-                        .chain(params.iter().map(|p| atom(p)))
+                        .chain(params.iter().map(atom))
                         .collect(),
                 );
                 let arg = match a {
                     Sexp::Atom(n) if &**n == "bool" || &**n == "nat" => ArgTy::Closed(atom(n)),
                     Sexp::Atom(n) if &**n == name && params.is_empty() => ArgTy::Rec,
-                    _ if params.is_empty() == false && *a == own => ArgTy::Rec,
+                    _ if !params.is_empty() && *a == own => ArgTy::Rec,
                     Sexp::Atom(n) if params.contains(&&**n) => {
                         ArgTy::Param(params.iter().position(|p| *p == &**n).unwrap())
                     }
@@ -551,7 +614,9 @@ fn show(s: &Sexp) -> String {
     fn numeral(s: &Sexp) -> Option<usize> {
         match s {
             Sexp::Atom(a) if &**a == "zero" => Some(0),
-            Sexp::List(xs) if xs.len() == 2 && xs[0] == atom("suc") => numeral(&xs[1]).map(|n| n + 1),
+            Sexp::List(xs) if xs.len() == 2 && xs[0] == atom("suc") => {
+                numeral(&xs[1]).map(|n| n + 1)
+            }
             _ => None,
         }
     }
@@ -611,15 +676,16 @@ pub fn run(source: &str) -> Result<Script> {
                         return Err(format!("def-poly {name}: exactly one level parameter"));
                     };
                     let param = binder(param)?.to_owned();
-                    e.poly.insert(name.clone(), (param.clone(), ty.clone(), t.clone()));
+                    e.poly
+                        .insert(name.clone(), (param.clone(), ty.clone(), t.clone()));
                     // The instance at level 0 is an ordinary definition.
                     let (t0, ty0) = e.instance(&param, atom("z"), ty, t)?;
-                    let id = e
-                        .p
-                        .check(0, &nil, &top, &t0, &ty0)
-                        .map_err(|err| format!("def-poly {name}: {err}"))?;
+                    let id =
+                        e.p.check(0, &nil, &top, &t0, &ty0)
+                            .map_err(|err| format!("def-poly {name}: {err}"))?;
                     e.p.f.path.p.result(&name, id);
-                    e.defs.insert(name.clone(), call("ann", [t0.clone(), ty0.clone()]));
+                    e.defs
+                        .insert(name.clone(), call("ann", [t0.clone(), ty0.clone()]));
                     // The statement for every level, with L an eigenvariable.
                     let (tl, tyl) = e.instance(&param, atom("L"), ty, t)?;
                     let expected = call("rhas", [atom("z"), nil.clone(), atom("ft"), tl, tyl]);
@@ -633,20 +699,18 @@ pub fn run(source: &str) -> Result<Script> {
                     e.fresh(&name)?;
                     let ty = e.term(ty, &empty)?;
                     let t = e.term(t, &empty)?;
-                    let id = e
-                        .p
-                        .check(0, &nil, &top, &t, &ty)
-                        .map_err(|err| format!("def {name}: {err}"))?;
+                    let id =
+                        e.p.check(0, &nil, &top, &t, &ty)
+                            .map_err(|err| format!("def {name}: {err}"))?;
                     e.p.f.path.p.result(&name, id);
                     e.defs.insert(name, call("ann", [t, ty]));
                 }
                 ("check", [t, ty]) => {
                     let ty = e.term(ty, &empty)?;
                     let t = e.term(t, &empty)?;
-                    let id = e
-                        .p
-                        .check(0, &nil, &top, &t, &ty)
-                        .map_err(|err| format!("check {name}: {err}"))?;
+                    let id =
+                        e.p.check(0, &nil, &top, &t, &ty)
+                            .map_err(|err| format!("check {name}: {err}"))?;
                     e.p.f.path.p.result(&name, id);
                 }
                 ("eval", [t, rest @ ..]) if rest.len() <= 1 => {
@@ -658,13 +722,14 @@ pub fn run(source: &str) -> Result<Script> {
                             let fail = |err| format!("eval {name}: {err}");
                             let (ty, _) = e.p.infer(0, &nil, &top, &t).map_err(fail)?;
                             let (universe, _) = e.p.infer(0, &nil, &top, &ty).map_err(fail)?;
-                            e.p.value(0, &nil, &top, &ty, &universe, FUEL).map_err(fail)?.0
+                            e.p.value(0, &nil, &top, &ty, &universe, FUEL)
+                                .map_err(fail)?
+                                .0
                         }
                     };
-                    let (value, id) = e
-                        .p
-                        .value(0, &nil, &top, &t, &ty, FUEL)
-                        .map_err(|err| format!("eval {name}: {err}"))?;
+                    let (value, id) =
+                        e.p.value(0, &nil, &top, &t, &ty, FUEL)
+                            .map_err(|err| format!("eval {name}: {err}"))?;
                     e.p.f.path.p.result(&name, id);
                     evaluations.push(Evaluation {
                         name,
@@ -674,10 +739,9 @@ pub fn run(source: &str) -> Result<Script> {
                 }
                 ("equal", [a, b, ty]) => {
                     let (a, b, ty) = (e.term(a, &empty)?, e.term(b, &empty)?, e.term(ty, &empty)?);
-                    let id = e
-                        .p
-                        .equality(0, &nil, &top, &a, &b, &ty)
-                        .map_err(|err| format!("equal {name}: {err}"))?;
+                    let id =
+                        e.p.equality(0, &nil, &top, &a, &b, &ty)
+                            .map_err(|err| format!("equal {name}: {err}"))?;
                     e.p.f.path.p.result(&name, id);
                 }
                 _ => return Err(format!("invalid form {form}")),

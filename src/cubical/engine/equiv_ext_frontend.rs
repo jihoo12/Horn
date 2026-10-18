@@ -3,9 +3,9 @@ use crate::cubical::engine::face_frontend::Face;
 use crate::cubical::engine::isequiv_prop_frontend::{isequiv_prop_line, isequiv_prop_type};
 use crate::cubical::engine::path_frontend::{Op, dim, papp, path, u, v};
 use crate::cubical::engine::restricted_frontend::RestrictedProducer;
+use crate::cubical::engine::term::{Result, Sexp, atom, call};
 use crate::cubical::engine::to_pathp_frontend::{to_pathp_line, to_pathp_type};
 use crate::cubical::engine::transport_frontend::transport_at;
-use crate::cubical::engine::term::{Result, Sexp, atom, call};
 
 fn fst(t: Sexp) -> Sexp {
     call("fst", [t])
