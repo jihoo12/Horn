@@ -21,6 +21,9 @@ pub const GENERATORS: &[(&str, fn() -> Result<RestrictedProducer>)] = &[
 pub struct Regenerated {
     /// The theory the oracle was checked against.
     pub theory: String,
+    /// The theory rules the accepted derivation uses, sorted. Only these
+    /// rules' meaning matters for the goals; the rest of the theory does not.
+    pub rules_used: Vec<String>,
     pub goals: String,
     pub oracle: Vec<u8>,
     pub checked: Report,
@@ -78,15 +81,45 @@ pub fn certify<T: Send>(
         worker.join().map_err(|_| "producer panicked".to_string())?
     })?;
     let checked = oracle::check(&theory, &goals, &oracle)?;
+    let rules_used = rules_used(&theory, &goals, &oracle)?;
     Ok((
         Regenerated {
             goals,
             oracle,
             checked,
             theory,
+            rules_used,
         },
         extra,
     ))
+}
+
+/// The distinct rules named by the steps the oracle decodes to.
+pub fn rules_used(theory: &str, goals: &str, oracle: &[u8]) -> Result<Vec<String>> {
+    let mut text = Vec::new();
+    oracle::decode(theory, goals, oracle, &mut text)?;
+    let text = String::from_utf8(text).map_err(|e| e.to_string())?;
+    let mut rules: Vec<String> = text
+        .lines()
+        .filter_map(|l| l.strip_prefix("(step "))
+        .filter_map(|l| l.split_whitespace().nth(1))
+        .map(str::to_owned)
+        .collect();
+    rules.sort();
+    rules.dedup();
+    Ok(rules)
+}
+
+/// The number of rules a theory declares.
+pub fn rule_count(theory: &str) -> usize {
+    crate::sexp::parse(theory)
+        .map(|forms| {
+            forms
+                .iter()
+                .filter(|f| f.list().ok().and_then(|xs| xs.first()?.atom().ok()) == Some("rule"))
+                .count()
+        })
+        .unwrap_or(0)
 }
 
 pub fn regenerate(name: &str) -> Result<Regenerated> {

@@ -265,3 +265,22 @@ fn definitions_that_pin_their_level_are_not_polymorphic() {
         assert!(cubical::script::run(bad).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn a_result_reports_the_rules_it_relies_on() {
+    let script = cubical::script::run(include_str!("../examples/cubical/script/nat.hcs")).unwrap();
+    let c = &script.certified;
+    let declared: std::collections::HashSet<String> = horn::sexp::parse(&c.theory)
+        .unwrap()
+        .iter()
+        .filter_map(|f| {
+            let xs = f.list().ok()?;
+            (xs.first()?.atom().ok()? == "rule").then(|| xs[1].atom().unwrap().to_owned())
+        })
+        .collect();
+    assert!(c.rules_used.iter().all(|r| declared.contains(r)));
+    // Natural-number programs need none of the Glue rules.
+    assert!(c.rules_used.iter().any(|r| r == "req.natrec-suc"));
+    assert!(!c.rules_used.iter().any(|r| r.contains("glue")));
+    assert!(c.rules_used.len() < declared.len() / 2, "{}", c.rules_used.len());
+}
