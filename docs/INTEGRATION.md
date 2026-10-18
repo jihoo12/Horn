@@ -62,7 +62,9 @@ Systems certify every overlap and cover and preserve restricted goals on a
 partial base. Native restricted contexts, typing and bounded local type/equality
 conversion are supported, with explicit evidence for every conversion. Fresh
 composition typing and active-face computation use the unchanged composition
-fragment; see [its guide](CUBICAL_COMPOSITION.md). General congruence and
+fragment; see [its guide](CUBICAL_COMPOSITION.md). Dependent Sigma pairs,
+projections and beta/eta evidence are also generated; see
+[dependent pairs](CUBICAL_SIGMA.md). General congruence and
 dependent transport, type-directed composition/Glue/univalence producers and
 connection to the `.hn` programming frontend remain open. The theories,
 ground/schematic checkers and Agda models are unchanged.
@@ -72,7 +74,7 @@ ground/schematic checkers and Agda models are unchanged.
 1. Move cubical certificate producers behind a Horn-owned library API, one
    feature at a time. The bounded contexts/universes/functions/substitution/path
    generator, restricted inference and composition typing/face computation are
-   implemented. Continue with Sigma/equivalence evidence, type-directed
+   implemented. Continue with equivalence evidence, type-directed
    composition, Glue and ua. Named binders and bounded root conversion are
    implemented; stronger conversion still requires congruence evidence.
    Keep imported snapshot replay as an independent migration oracle. Do not

@@ -1,0 +1,23 @@
+; Sigma binds an ordinary variable in its second component type.
+(check dependent-type (sigma A (u 0) A) (u 1))
+(check dependent-pair (pair (sigma A (u 0) A) nat zero) (sigma A (u 0) A))
+(equal first-value (fst (pair (sigma A (u 0) A) nat zero)) nat (u 0))
+; snd's natural type is fst(pair...), not its first value. req.conv is explicit.
+(check second-type (snd (pair (sigma A (u 0) A) nat zero)) nat)
+(equal second-value (snd (pair (sigma A (u 0) A) nat zero)) zero nat)
+(equal eta (scope () ((p (sigma A (u 0) A))))
+  (pair (sigma A (u 0) A) (fst p) (snd p)) p (sigma A (u 0) A))
+(equal eta-reversed (scope () ((p (sigma A (u 0) A))))
+  p (pair (sigma A (u 0) A) (fst p) (snd p)) (sigma A (u 0) A))
+
+; Components may be typed only on the requested face.
+(check-on local-pair (scope (i) ((P (path (u 0) nat nat)) (x (papp P i))))
+  (at0 i) (pair (sigma nat nat) x zero) (sigma nat nat))
+(equal-on local-projection (scope (i) ((P (path (u 0) nat nat)) (x (papp P i))))
+  (at0 i) (fst (pair (sigma nat nat) x zero)) x nat)
+
+; Sigma pairs can be used as composition families/tubes.
+(equal comp-pair
+  (comp k (sigma nat nat) ft
+    (pair (sigma nat nat) zero zero) (pair (sigma nat nat) zero zero))
+  (pair (sigma nat nat) zero zero) (sigma nat nat))

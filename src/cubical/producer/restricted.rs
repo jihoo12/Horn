@@ -209,6 +209,11 @@ impl Producer {
                 let (_, u) = self.restricted_universe(d, g, phi, &out)?;
                 (out, vec![x, y, z, u], "rhas.papp")
             }
+            Sigma(..) | Pair(..) | Fst(..) | Snd(..) => {
+                let out = self.sigma_infer((d, g), phi, t)?;
+                self.restricted_inferred.insert(key, out.clone());
+                return Ok(out);
+            }
             Comp(..) => {
                 let out = self.composition_has((d, g), phi, t)?;
                 self.restricted_inferred.insert(key, out.clone());
@@ -260,6 +265,9 @@ impl Producer {
         use Term::*;
         let (d, g) = scope;
         let (out, ty, refs, rule) = match t {
+            Fst(p) | Snd(p) if matches!(p.as_ref(), Pair(..)) => {
+                return self.sigma_reduce(scope, phi, t);
+            }
             Comp(_, face, tube, _) => {
                 let (ty, typed) = self.composition_has(scope, phi, t)?;
                 let Ok(cover) = self.entails(d, phi, face) else {

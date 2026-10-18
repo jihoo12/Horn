@@ -3,6 +3,7 @@
 mod composition;
 mod faces;
 mod restricted;
+mod sigma;
 mod systems;
 
 use super::ast::{Face, Interval, Term, context, extend, number};
@@ -19,6 +20,7 @@ pub enum Profile {
     Faces,
     Systems,
     Composition,
+    Sigma,
 }
 
 impl Profile {
@@ -28,6 +30,7 @@ impl Profile {
             Self::Faces => 2,
             Self::Systems => 5,
             Self::Composition => 6,
+            Self::Sigma => 7,
         };
         super::FRAGMENTS[..count]
             .iter()
@@ -227,13 +230,20 @@ impl Producer {
                     (Var(n - 1), "v.gt")
                 }
             },
-            Pi(a, b) => {
+            Pi(a, b) | Sigma(a, b) => {
                 let (a, id) = self.transform(a, op)?;
                 refs.push(id);
                 let inner = self.under(op, false, &mut refs)?;
                 let (b, id) = self.transform(b, &inner)?;
                 refs.push(id);
-                (Pi(Box::new(a), Box::new(b)), "pi")
+                (
+                    if matches!(t, Pi(..)) {
+                        Pi(Box::new(a), Box::new(b))
+                    } else {
+                        Sigma(Box::new(a), Box::new(b))
+                    },
+                    if matches!(t, Pi(..)) { "pi" } else { "sigma" },
+                )
             }
             Lam(a, b) => {
                 // Domain is source metadata, absent from the quoted lambda.
@@ -242,6 +252,25 @@ impl Producer {
                 let (b, id) = self.transform(b, &inner)?;
                 refs.push(id);
                 (Lam(Box::new(a), Box::new(b)), "lam")
+            }
+            Pair(ty, a, b) => {
+                let (ty, _) = self.transform(ty, op)?;
+                let (a, x) = self.transform(a, op)?;
+                let (b, y) = self.transform(b, op)?;
+                refs.extend([x, y]);
+                (Pair(Box::new(ty), Box::new(a), Box::new(b)), "pair")
+            }
+            Fst(p) | Snd(p) => {
+                let (p, x) = self.transform(p, op)?;
+                refs.push(x);
+                (
+                    if matches!(t, Fst(..)) {
+                        Fst(Box::new(p))
+                    } else {
+                        Snd(Box::new(p))
+                    },
+                    if matches!(t, Fst(..)) { "fst" } else { "snd" },
+                )
             }
             App(f, a) => {
                 let (f, x) = self.transform(f, op)?;
@@ -587,6 +616,10 @@ impl Producer {
                     "type.plam",
                 )
             }
+            Sigma(..) | Pair(..) | Fst(..) | Snd(..) => {
+                let (ty, restricted) = self.sigma_infer((d, g), &Face::True, t)?;
+                (ty, vec![restricted], "rhas.export")
+            }
             Comp(..) => {
                 let (ty, restricted) = self.composition_has((d, g), &Face::True, t)?;
                 (ty, vec![restricted], "rhas.export")
@@ -637,7 +670,7 @@ impl Producer {
     fn reduce(&mut self, d: usize, g: &[Term], t: &Term) -> Result<Option<(Term, usize)>> {
         use Term::*;
         match t {
-            Comp(..) => {
+            Comp(..) | Fst(..) | Snd(..) => {
                 let Some((out, ty, step)) = self.restricted_reduce((d, g), &Face::True, t)? else {
                     return Ok(None);
                 };
@@ -852,15 +885,20 @@ fn validate(request: &Request) -> Result<()> {
             Term::Universe(n) | Term::Var(n) if *n > 32 => {
                 return Err("universe level or variable index exceeds 32".into());
             }
-            Term::Pi(a, b) | Term::Lam(a, b) | Term::App(a, b) | Term::PathLam(a, b) => {
+            Term::Pi(a, b)
+            | Term::Sigma(a, b)
+            | Term::Lam(a, b)
+            | Term::App(a, b)
+            | Term::PathLam(a, b) => {
                 term(a, depth + 1, nodes)?;
                 term(b, depth + 1, nodes)?;
             }
-            Term::Path(a, b, c) => {
+            Term::Path(a, b, c) | Term::Pair(a, b, c) => {
                 term(a, depth + 1, nodes)?;
                 term(b, depth + 1, nodes)?;
                 term(c, depth + 1, nodes)?;
             }
+            Term::Fst(p) | Term::Snd(p) => term(p, depth + 1, nodes)?,
             Term::PathApp(p, r) => {
                 term(p, depth + 1, nodes)?;
                 interval(r, depth + 1, nodes)?;
@@ -984,6 +1022,22 @@ fn needs_composition(request: &Request) -> bool {
     }
 }
 
+fn needs_sigma(request: &Request) -> bool {
+    if request.context.iter().any(Term::has_sigma) {
+        return true;
+    }
+    match &request.judgment {
+        Judgment::Has { term, ty } | Judgment::RestrictedHas { term, ty, .. } => {
+            term.has_sigma() || ty.has_sigma()
+        }
+        Judgment::Equal { left, right, ty }
+        | Judgment::RestrictedEqual {
+            left, right, ty, ..
+        } => left.has_sigma() || right.has_sigma() || ty.has_sigma(),
+        _ => false,
+    }
+}
+
 /// Generate fresh evidence, fix goals from the requests (not from inferred
 /// answers), and accept only after the unchanged ground kernel replays it.
 pub fn produce(requests: &[Request]) -> Result<Generated> {
@@ -993,7 +1047,9 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
     for request in requests {
         validate(request).map_err(|e| format!("{}: {e}", request.name))?;
     }
-    let profile = if requests.iter().any(needs_composition) {
+    let profile = if requests.iter().any(needs_sigma) {
+        Profile::Sigma
+    } else if requests.iter().any(needs_composition) {
         Profile::Composition
     } else if requests.iter().any(needs_systems) {
         Profile::Systems
@@ -1093,7 +1149,7 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
                 Judgment::Equal { left, right, ty } => {
                     p.universe(d, g, ty)?;
                     (
-                        if profile == Profile::Composition {
+                        if matches!(profile, Profile::Composition | Profile::Sigma) {
                             let restricted =
                                 p.restricted_equal((d, g), &Face::True, left, right, ty)?;
                             p.equality_step(

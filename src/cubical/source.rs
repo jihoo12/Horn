@@ -46,6 +46,7 @@ fn binder(s: &Sexp) -> Result<String> {
     if [
         "nat", "zero", "i0", "i1", "u", "v", "dim", "pi", "lam", "app", "path", "plam", "papp",
         "neg", "meet", "join", "scope", "ff", "ft", "at0", "at1", "fand", "for", "system", "comp",
+        "sigma", "pair", "fst", "snd",
     ]
     .contains(&name)
     {
@@ -144,10 +145,10 @@ fn ordinary_binder(
 ) -> Result<Term> {
     let domain = Box::new(term(a, depth + 1, names)?);
     let body = Box::new(term(b, depth + 1, &names.under(false, name)?)?);
-    Ok(if kind == "pi" {
-        Term::Pi(domain, body)
-    } else {
-        Term::Lam(domain, body)
+    Ok(match kind {
+        "pi" => Term::Pi(domain, body),
+        "sigma" => Term::Sigma(domain, body),
+        _ => Term::Lam(domain, body),
     })
 }
 
@@ -208,11 +209,16 @@ fn term(s: &Sexp, depth: usize, names: &Names) -> Result<Term> {
     Ok(match shape(s)? {
         ("u", [n]) => Term::Universe(number(n)?),
         ("v", [n]) => Term::Var(number(n)?),
-        (kind @ ("pi" | "lam"), [a, b]) => ordinary_binder(kind, None, a, b, depth, names)?,
-        (kind @ ("pi" | "lam"), [name, a, b]) => {
+        (kind @ ("pi" | "lam" | "sigma"), [a, b]) => {
+            ordinary_binder(kind, None, a, b, depth, names)?
+        }
+        (kind @ ("pi" | "lam" | "sigma"), [name, a, b]) => {
             ordinary_binder(kind, Some(name), a, b, depth, names)?
         }
         ("app", [f, a]) => Term::App(t(f)?, t(a)?),
+        ("pair", [ty, a, b]) => Term::Pair(t(ty)?, t(a)?, t(b)?),
+        ("fst", [p]) => Term::Fst(t(p)?),
+        ("snd", [p]) => Term::Snd(t(p)?),
         ("path", [a, b, c]) => path_type(None, a, b, c, depth, names)?,
         ("path", [name, a, b, c]) => path_type(Some(name), a, b, c, depth, names)?,
         ("plam", [a, b]) => path_binder(None, a, b, depth, names)?,

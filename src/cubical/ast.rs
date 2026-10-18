@@ -40,6 +40,10 @@ pub enum Term {
     Nat,
     Zero,
     Pi(Box<Term>, Box<Term>),
+    Sigma(Box<Term>, Box<Term>),
+    Pair(Box<Term>, Box<Term>, Box<Term>),
+    Fst(Box<Term>),
+    Snd(Box<Term>),
     Lam(Box<Term>, Box<Term>),
     App(Box<Term>, Box<Term>),
     Path(Box<Term>, Box<Term>, Box<Term>),
@@ -74,6 +78,10 @@ impl Term {
             Self::Nat => atom("nat"),
             Self::Zero => atom("zero"),
             Self::Pi(a, b) => call("pi", [a.quote(), b.quote()]),
+            Self::Sigma(a, b) => call("sigma", [a.quote(), b.quote()]),
+            Self::Pair(_, a, b) => call("pair", [a.quote(), b.quote()]),
+            Self::Fst(t) => call("fst", [t.quote()]),
+            Self::Snd(t) => call("snd", [t.quote()]),
             Self::Lam(_, body) => call("lam", [body.quote()]),
             Self::App(f, a) => call("app", [f.quote(), a.quote()]),
             Self::Path(a, b, c) => call("path", [a.quote(), b.quote(), c.quote()]),
@@ -105,34 +113,37 @@ pub(super) fn system(sides: &[(Face, Term)]) -> Sexp {
 }
 
 impl Term {
-    pub(super) fn has_system(&self) -> bool {
-        match self {
-            Self::System(..) | Self::Comp(..) => true,
-            Self::Pi(a, b) | Self::Lam(a, b) | Self::App(a, b) | Self::PathLam(a, b) => {
-                a.has_system() || b.has_system()
+    /// Source annotations participate in profile selection even when erased.
+    fn any(&self, f: &impl Fn(&Self) -> bool) -> bool {
+        f(self)
+            || match self {
+                Self::Pi(a, b)
+                | Self::Sigma(a, b)
+                | Self::Lam(a, b)
+                | Self::App(a, b)
+                | Self::PathLam(a, b) => a.any(f) || b.any(f),
+                Self::Pair(a, b, c) | Self::Path(a, b, c) => a.any(f) || b.any(f) || c.any(f),
+                Self::PathApp(p, _) | Self::Fst(p) | Self::Snd(p) => p.any(f),
+                Self::System(ty, sides) => ty.any(f) || sides.iter().any(|(_, t)| t.any(f)),
+                Self::Comp(a, _, tube, base) => a.any(f) || tube.any(f) || base.any(f),
+                _ => false,
             }
-            Self::Path(a, b, c) => a.has_system() || b.has_system() || c.has_system(),
-            Self::PathApp(p, _) => p.has_system(),
-            _ => false,
-        }
     }
-}
 
-impl Term {
+    pub(super) fn has_system(&self) -> bool {
+        self.any(&|t| matches!(t, Self::System(..) | Self::Comp(..)))
+    }
+
     pub(super) fn has_composition(&self) -> bool {
-        match self {
-            Self::Comp(..) => true,
-            Self::Pi(a, b) | Self::Lam(a, b) | Self::App(a, b) | Self::PathLam(a, b) => {
-                a.has_composition() || b.has_composition()
-            }
-            Self::Path(a, b, c) => {
-                a.has_composition() || b.has_composition() || c.has_composition()
-            }
-            Self::PathApp(p, _) => p.has_composition(),
-            Self::System(ty, sides) => {
-                ty.has_composition() || sides.iter().any(|(_, t)| t.has_composition())
-            }
-            _ => false,
-        }
+        self.any(&|t| matches!(t, Self::Comp(..)))
+    }
+
+    pub(super) fn has_sigma(&self) -> bool {
+        self.any(&|t| {
+            matches!(
+                t,
+                Self::Sigma(..) | Self::Pair(..) | Self::Fst(..) | Self::Snd(..)
+            )
+        })
     }
 }

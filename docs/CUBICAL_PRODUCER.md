@@ -6,7 +6,8 @@ uses the existing scoped-path fragment by default. Face assertions select
 the fixed path-plus-faces profile, while systems/restricted assertions select
 the five-fragment systems profile; see [face and system evidence](CUBICAL_FACES_SYSTEMS.md).
 Composition anywhere in the input selects the six-fragment composition profile;
-see [composition evidence](CUBICAL_COMPOSITION.md).
+see [composition evidence](CUBICAL_COMPOSITION.md). Sigma/pair/projection syntax
+selects the seven-fragment profile; see [dependent pairs](CUBICAL_SIGMA.md).
 No rules or kernel code are changed. Replay fresh output with its returned
 `Generated.theory`, which is also written by CLI export.
 
@@ -122,5 +123,5 @@ Native restricted inference and local type/equality conversion now use the
 existing restricted rules; see the face/system guide and restricted.hcu.
 Composition typing and active-face computation now have a fixed six-fragment
 profile; see [CUBICAL_COMPOSITION.md](CUBICAL_COMPOSITION.md). General congruence,
-type-directed composition, Glue and fresh univalence generation remain later
+type-directed composition, equivalence/Glue and fresh univalence generation remain later
 migration stages.
