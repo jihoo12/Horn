@@ -40,6 +40,9 @@ pub const FRAGMENTS: &[(&str, &str)] = &[
         "computation",
         include_str!("../theories/cubical/computation.horn"),
     ),
+    // Appended after the kamo3 snapshot; oracles encoded against the
+    // twelve fragments above decode unchanged (oracle format 2).
+    ("bool", include_str!("../theories/cubical/bool.horn")),
 ];
 
 pub fn theory() -> String {
@@ -68,5 +71,11 @@ pub const EXAMPLES: &[Example] = &[
         description: "judgmental transport along ua via Glue composition",
         goals: include_str!("../examples/cubical/ua-transport.goals"),
         oracle: include_bytes!("../examples/cubical/ua-transport.oracle"),
+    },
+    Example {
+        name: "canonicity",
+        description: "transport along ua of not on bool computes to a boolean",
+        goals: include_str!("../examples/cubical/canonicity.goals"),
+        oracle: include_bytes!("../examples/cubical/canonicity.oracle"),
     },
 ];

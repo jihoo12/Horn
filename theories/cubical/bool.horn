@@ -1,0 +1,71 @@
+; Booleans, appended after computation.horn: a closed data type with a
+; dependent eliminator, its computation rules, and its composition.
+; bif P t f b eliminates b : bool into the motive P, which binds one ordinary
+; variable of type bool; t and f are the branches at btrue and bfalse.
+; Declarative object theory only: no kernel algorithm or univalence rule.
+(ctor bool () Tm)
+(ctor btrue () Tm)
+(ctor bfalse () Tm)
+(ctor bif (Tm Tm Tm Tm) Tm)
+
+(rule scope.bool () (scoped ?d ?n bool))
+(rule scope.btrue () (scoped ?d ?n btrue))
+(rule scope.bfalse () (scoped ?d ?n bfalse))
+(rule scope.bif ((scoped ?d (s ?n) ?p) (scoped ?d ?n ?t) (scoped ?d ?n ?f)
+    (scoped ?d ?n ?b))
+  (scoped ?d ?n (bif ?p ?t ?f ?b)))
+
+(rule shift.bool () (shift bool ?k bool))
+(rule shift.btrue () (shift btrue ?k btrue))
+(rule shift.bfalse () (shift bfalse ?k bfalse))
+(rule shift.bif ((shift ?p (s ?k) ?p2) (shift ?t ?k ?t2) (shift ?f ?k ?f2)
+    (shift ?b ?k ?b2))
+  (shift (bif ?p ?t ?f ?b) ?k (bif ?p2 ?t2 ?f2 ?b2)))
+(rule subst.bool () (subst bool ?k ?r bool))
+(rule subst.btrue () (subst btrue ?k ?r btrue))
+(rule subst.bfalse () (subst bfalse ?k ?r bfalse))
+(rule subst.bif ((shift ?r z ?r2) (subst ?p (s ?k) ?r2 ?p2)
+    (subst ?t ?k ?r ?t2) (subst ?f ?k ?r ?f2) (subst ?b ?k ?r ?b2))
+  (subst (bif ?p ?t ?f ?b) ?k ?r (bif ?p2 ?t2 ?f2 ?b2)))
+; The motive's binder is ordinary, so dimension operations keep their cutoff.
+(rule dshift.bool () (dshift bool ?k bool))
+(rule dshift.btrue () (dshift btrue ?k btrue))
+(rule dshift.bfalse () (dshift bfalse ?k bfalse))
+(rule dshift.bif ((dshift ?p ?k ?p2) (dshift ?t ?k ?t2) (dshift ?f ?k ?f2)
+    (dshift ?b ?k ?b2))
+  (dshift (bif ?p ?t ?f ?b) ?k (bif ?p2 ?t2 ?f2 ?b2)))
+(rule dsubst.bool () (dsubst bool ?k ?r bool))
+(rule dsubst.btrue () (dsubst btrue ?k ?r btrue))
+(rule dsubst.bfalse () (dsubst bfalse ?k ?r bfalse))
+(rule dsubst.bif ((dsubst ?p ?k ?r ?p2) (dsubst ?t ?k ?r ?t2)
+    (dsubst ?f ?k ?r ?f2) (dsubst ?b ?k ?r ?b2))
+  (dsubst (bif ?p ?t ?f ?b) ?k ?r (bif ?p2 ?t2 ?f2 ?b2)))
+
+(rule rhas.bool ((rctx ?d ?g ?phi)) (rhas ?d ?g ?phi bool (u z)))
+(rule rhas.btrue ((rctx ?d ?g ?phi)) (rhas ?d ?g ?phi btrue bool))
+(rule rhas.bfalse ((rctx ?d ?g ?phi)) (rhas ?d ?g ?phi bfalse bool))
+(rule rhas.bif ((rhas ?d (cons bool ?g) ?phi ?p (u ?l))
+    (subst ?p z btrue ?pt) (rhas ?d ?g ?phi ?t ?pt)
+    (subst ?p z bfalse ?pf) (rhas ?d ?g ?phi ?f ?pf)
+    (rhas ?d ?g ?phi ?b bool) (subst ?p z ?b ?pb) (rhas ?d ?g ?phi ?pb (u ?l)))
+  (rhas ?d ?g ?phi (bif ?p ?t ?f ?b) ?pb))
+
+; Computation, at the type the whole elimination already has.
+(rule req.bif-true ((rhas ?d ?g ?phi (bif ?p ?t ?f btrue) ?a) (rhas ?d ?g ?phi ?t ?a))
+  (req ?d ?g ?phi (bif ?p ?t ?f btrue) ?t ?a))
+(rule req.bif-false ((rhas ?d ?g ?phi (bif ?p ?t ?f bfalse) ?a) (rhas ?d ?g ?phi ?f ?a))
+  (req ?d ?g ?phi (bif ?p ?t ?f bfalse) ?f ?a))
+(rule req.bif-cong ((rhas ?d ?g ?phi (bif ?p ?t ?f ?b) ?a)
+    (rhas ?d ?g ?phi (bif ?p2 ?t2 ?f2 ?b2) ?a)
+    (req ?d (cons bool ?g) ?phi ?p ?p2 (u ?l))
+    (subst ?p z btrue ?pt) (req ?d ?g ?phi ?t ?t2 ?pt)
+    (subst ?p z bfalse ?pf) (req ?d ?g ?phi ?f ?f2 ?pf)
+    (req ?d ?g ?phi ?b ?b2 bool))
+  (req ?d ?g ?phi (bif ?p ?t ?f ?b) (bif ?p2 ?t2 ?f2 ?b2) ?a))
+
+; Composition in the constant type bool returns its base. bool is discrete:
+; in the cubical-set model it is the constant presheaf 2, every line in it is
+; degenerate, so the identity is a composition structure. The typing premise
+; already requires the tube to agree with the base on phi at i0.
+(rule req.comp-bool ((rhas ?d ?g ?psi (comp bool ?phi ?t ?b) bool))
+  (req ?d ?g ?psi (comp bool ?phi ?t ?b) ?b bool))

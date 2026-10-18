@@ -19,15 +19,23 @@
     "examples/ua-transport.goals": "9c465a537d972d2ee92013e0b14285a6f3bf2adee0e7c9352c2df7b28d8a1e95",
     "examples/ua-transport.proof.gz": "d40bb0e0be0f364625b4549bcf59463d5e5acefe6e9543a0023ef13ef13ec028"
   },
-  "oracle_format": "horn-oracle 1",
+  "oracle_format": "horn-oracle 2",
   "artifacts": {
     "examples/cubical/deep-univalence.oracle": {
-      "sha256": "6d8b9384131abb9c6a5138bb74580c7d3bea886a53cb092b8321eaef5e725929",
-      "bytes": 35830
+      "sha256": "30b3ff5f96cb0553fd84c3f40db77f131bb2cdcdb200a1c0ee61aa1a5bed2e1f",
+      "bytes": 35838
     },
     "examples/cubical/ua-transport.oracle": {
-      "sha256": "adfb0dd7852ed316e310069410c90bc8f858b4aeaadc7d6774b6f272a2c116ce",
-      "bytes": 4086
+      "sha256": "b927403711a4f6f80b6a37615fe5298ef936f8f25ffe30d60db48e9d7c5dafc6",
+      "bytes": 4094
+    },
+    "examples/cubical/canonicity.oracle": {
+      "sha256": "3c0dbdff63293ba1142cffab2f9101cfb2f619eebb5602cfe7b160c40e9f519e",
+      "bytes": 51822
     }
+  },
+  "canonicity": {
+    "theory": "theories/cubical/bool.horn (new in Horn, appended after the kamo3 fragments)",
+    "producer": "kamo3 restricted producer extended with bool (research/canonicity, uncommitted at generation time); being moved into Horn"
   }
 }

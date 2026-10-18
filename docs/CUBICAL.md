@@ -11,8 +11,9 @@ cargo run --release --locked --offline --bin horn -- cubical check all
 
 | Example | Fixed goals | Checked steps | Oracle bytes |
 | --- | ---: | ---: | ---: |
-| `univalence` | 2 | 185,673 | 35,830 |
-| `ua-transport` | 1 | 18,849 | 4,086 |
+| `univalence` | 2 | 185,673 | 35,838 |
+| `ua-transport` | 1 | 18,849 | 4,094 |
+| `canonicity` | 3 | 231,279 | 51,822 |
 
 `univalence` checks univalence at U0,
 `Π A B:U₀. Equiv (Path U₀ A B) (Equiv A B)`, and that its function component
@@ -26,6 +27,18 @@ Glue composition. There is no assumed judgmental regularity eliminating the
 two constant transports. This is evidence for computational behavior in the
 selected rules, not a general implementation of computational univalence at
 all universe levels.
+
+`canonicity` checks, in the empty context, that `not = λb. bif bool bfalse btrue b`
+is an equivalence (by the closed isoToIsEquiv lemma) and that
+`transport (ua not) btrue ≡ bfalse` and `transport (ua not) bfalse ≡ btrue`
+at type `bool`. Transport along ua computes all the way to a boolean literal:
+Glue composition, then bool's composition, which returns its base. That rule
+is sound because bool is discrete (the constant presheaf 2 in the cubical-set
+model). It uses the thirteenth fragment, [bool.horn](../theories/cubical/bool.horn),
+which is new in Horn and not a kamo3 snapshot.
+
+Oracles use format 2, which records the theory size they were encoded
+against; appending fragments does not change how existing oracles decode.
 
 ## Acceptance and trust
 
