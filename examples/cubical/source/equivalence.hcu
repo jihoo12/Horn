@@ -1,0 +1,25 @@
+; These are definitions over Pi/Sigma/Path, not new type constructors or axioms.
+(expand contr-expansion (contr nat) (sigma c nat (pi x nat (path nat c x))))
+(expand fiber-expansion (fiber nat nat (lam x nat x) zero)
+  (sigma a nat (path nat (app (lam x nat x) a) zero)))
+(expand isequiv-expansion (isequiv nat nat (lam x nat x))
+  (pi b nat (contr (fiber nat nat (lam x nat x) b))))
+(expand equiv-expansion (equiv nat nat)
+  (sigma f (pi a nat nat) (isequiv nat nat f)))
+
+; Formation does not claim that any function is an equivalence.
+(check contr-type (contr nat) (u 0))
+(check fiber-type (fiber nat nat (lam x nat x) zero) (u 0))
+(check isequiv-type (isequiv nat nat (lam x nat x)) (u 0))
+(check equiv-type (equiv nat nat) (u 0))
+(check generic-levels (scope () ((A (u 0)) (B (u 1)))) (equiv A B) (u 1))
+
+; An equivalence contains an ordinary function with a usable first projection.
+(check forward (scope () ((e (equiv nat nat)))) (app (fst e) zero) nat)
+; Construct a pair from an explicitly supplied isEquiv witness.
+(check supplied-witness (scope () ((w (isequiv nat nat (lam x nat x)))))
+  (pair (equiv nat nat) (lam x nat x) w) (equiv nat nat))
+
+; The fiber endpoint has the right type only under its face.
+(check-on local-fiber (scope (i) ((P (path (u 0) nat nat)) (x (papp P i))))
+  (at0 i) (fiber nat nat (lam y nat y) x) (u 0))

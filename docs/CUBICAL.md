@@ -47,7 +47,8 @@ This checks derivability from the rules; the cubical rules' mathematical
 adequacy and semantic soundness remain separate obligations. The Rust kernel
 is not formally verified by the Agda model. A separate bounded
 [producer and core source frontend](CUBICAL_PRODUCER.md) now generates fresh
-dependent-function and path certificates. It does not yet generate new Glue
+dependent-function/path, face/system, composition and Sigma certificates, with
+[certified equivalence definitions](CUBICAL_EQUIVALENCE.md). It does not yet generate new Glue
 or univalence proofs. The ordinary `.hn` source language and cubical `.hcu`
 core source remain separate frontends. See [INTEGRATION.md](INTEGRATION.md) for
 how to connect them without expanding the trusted kernel.
@@ -94,6 +95,8 @@ target/release/oracle-kernel THEORY examples/cubical/NAME.goals examples/cubical
 ```
 
 Only reproducing the import needs kamo3. The committed data, CLI, decoding,
-generic verification and tests are standalone. The producer for the basic scoped-path fragment is now implemented in Horn;
-migration of higher features and the Agda reference remains a later step.
+generic verification and tests are standalone. Fresh path, face/system,
+composition and Sigma producers and equivalence-definition lowering are now
+implemented in Horn. Fresh equivalence witnesses, Glue/ua generation and
+migration of the cubical Agda reference remain later steps.
 kamo3 should not yet be deleted.

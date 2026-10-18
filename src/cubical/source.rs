@@ -1,7 +1,7 @@
 //! A small explicit core source format for fresh certificate generation.
 //! This is separate from the ordinary `.hn` surface language for now.
 use super::{
-    ast::{Face, Interval, Term},
+    ast::{Definition, Face, Interval, Term},
     producer::{self, Generated, Judgment, Request},
 };
 use crate::sexp::{self, Result, Sexp};
@@ -46,7 +46,7 @@ fn binder(s: &Sexp) -> Result<String> {
     if [
         "nat", "zero", "i0", "i1", "u", "v", "dim", "pi", "lam", "app", "path", "plam", "papp",
         "neg", "meet", "join", "scope", "ff", "ft", "at0", "at1", "fand", "for", "system", "comp",
-        "sigma", "pair", "fst", "snd",
+        "sigma", "pair", "fst", "snd", "contr", "fiber", "isequiv", "equiv",
     ]
     .contains(&name)
     {
@@ -208,6 +208,14 @@ fn term(s: &Sexp, depth: usize, names: &Names) -> Result<Term> {
     let t = |s| term(s, depth + 1, names).map(Box::new);
     Ok(match shape(s)? {
         ("u", [n]) => Term::Universe(number(n)?),
+        ("contr", [x]) => Term::Defined(Box::new(Definition::Contr(*t(x)?))),
+        ("fiber", [a, b, f, y]) => {
+            Term::Defined(Box::new(Definition::Fiber(*t(a)?, *t(b)?, *t(f)?, *t(y)?)))
+        }
+        ("isequiv", [a, b, f]) => {
+            Term::Defined(Box::new(Definition::IsEquiv(*t(a)?, *t(b)?, *t(f)?)))
+        }
+        ("equiv", [a, b]) => Term::Defined(Box::new(Definition::Equiv(*t(a)?, *t(b)?))),
         ("v", [n]) => Term::Var(number(n)?),
         (kind @ ("pi" | "lam" | "sigma"), [a, b]) => {
             ordinary_binder(kind, None, a, b, depth, names)?
@@ -319,6 +327,10 @@ pub fn parse(src: &str) -> Result<Vec<Request>> {
                 }
                 let dimensions = names.dimensions.len();
                 let judgment = match (kind, fields) {
+                    ("expand", [def, expected]) => {
+                        let Term::Defined(definition) = term(def, 0, &names)? else { return Err("expand requires contr/fiber/isequiv/equiv syntax".into()); };
+                        Judgment::Definition { definition: *definition, expansion: term(expected, 0, &names)? }
+                    },
                     ("check", [t, ty]) => Judgment::Has {
                         term: term(t, 0, &names)?,
                         ty: term(ty, 0, &names)?,
@@ -341,7 +353,7 @@ pub fn parse(src: &str) -> Result<Vec<Request>> {
                     ("equal-on", [phi,a,b,ty]) => Judgment::RestrictedEqual { face: face(phi,0,&names)?, left: term(a,0,&names)?, right: term(b,0,&names)?, ty: term(ty,0,&names)? },
                     _ => {
                         return Err(
-                            "expected check/equal/entails/local/check-on/equal-on assertion with optional scope"
+                            "expected check/equal/entails/local/check-on/equal-on/expand assertion with optional scope"
                                 .into(),
                         );
                     }

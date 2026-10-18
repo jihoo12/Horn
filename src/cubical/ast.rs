@@ -33,8 +33,50 @@ impl Face {
     }
 }
 
+/// Source abbreviations. The producer lowers these with checked def.* facts;
+/// none is an object-theory constructor or an equivalence axiom.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Definition {
+    Contr(Term),
+    Fiber(Term, Term, Term, Term),
+    IsEquiv(Term, Term, Term),
+    Equiv(Term, Term),
+}
+
+impl Definition {
+    pub(super) fn arguments(&self) -> Vec<&Term> {
+        match self {
+            Self::Contr(x) => vec![x],
+            Self::Fiber(a, b, f, y) => vec![a, b, f, y],
+            Self::IsEquiv(a, b, f) => vec![a, b, f],
+            Self::Equiv(a, b) => vec![a, b],
+        }
+    }
+
+    pub(super) fn predicate(&self) -> &'static str {
+        match self {
+            Self::Contr(_) => "contrdef",
+            Self::Fiber(..) => "fiberdef",
+            Self::IsEquiv(..) => "isequivdef",
+            Self::Equiv(..) => "equivdef",
+        }
+    }
+
+    /// Surface quotation, before elaboration. Object proofs use expanded terms.
+    fn quote(&self) -> Sexp {
+        let head = match self {
+            Self::Contr(_) => "contr",
+            Self::Fiber(..) => "fiber",
+            Self::IsEquiv(..) => "isequiv",
+            Self::Equiv(..) => "equiv",
+        };
+        call(head, self.arguments().into_iter().map(Term::quote))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Term {
+    Defined(Box<Definition>),
     Universe(usize),
     Var(usize),
     Nat,
@@ -73,6 +115,7 @@ impl Interval {
 impl Term {
     pub fn quote(&self) -> Sexp {
         match self {
+            Self::Defined(def) => def.quote(),
             Self::Universe(l) => call("u", [number(*l)]),
             Self::Var(n) => call("v", [number(*n)]),
             Self::Nat => atom("nat"),
@@ -117,6 +160,7 @@ impl Term {
     fn any(&self, f: &impl Fn(&Self) -> bool) -> bool {
         f(self)
             || match self {
+                Self::Defined(def) => def.arguments().into_iter().any(|t| t.any(f)),
                 Self::Pi(a, b)
                 | Self::Sigma(a, b)
                 | Self::Lam(a, b)
@@ -128,6 +172,10 @@ impl Term {
                 Self::Comp(a, _, tube, base) => a.any(f) || tube.any(f) || base.any(f),
                 _ => false,
             }
+    }
+
+    pub(super) fn has_definition(&self) -> bool {
+        self.any(&|t| matches!(t, Self::Defined(..)))
     }
 
     pub(super) fn has_system(&self) -> bool {

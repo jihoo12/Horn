@@ -6,7 +6,8 @@ cargo run --release --locked --offline --bin horn -- cubical run examples/cubica
 
 `(sigma DOMAIN BODY)` and `(sigma NAME DOMAIN BODY)` bind an ordinary variable
 in BODY. A pair is `(pair SIGMA_TYPE FIRST SECOND)`; its annotation is source
-metadata and must be a literal Sigma type in this subset. The annotation is
+metadata and must elaborate to a literal Sigma type in this subset.
+The certified `fiber`/`equiv` abbreviations also elaborate to Sigma types. The annotation is
 erased from the object term, but both type fields and both components are
 checked. The second component is checked against BODY with FIRST substituted.
 `(fst PAIR)` and `(snd PAIR)` infer their types, exposing a reducible Sigma head
@@ -45,6 +46,7 @@ object theory or Agda model was changed.
 This remains bounded root computation, not complete definitional equality.
 There is no general Sigma/pair/projection congruence search, no Sigma-directed
 composition reduction and no universe cumulativity. Pair annotation heads
-must be literal Sigma syntax; arbitrary convertible annotations are not
+must elaborate to literal Sigma syntax; arbitrary convertible annotations are not
 inferred. Source, conversion, face-search and proof-size bounds still apply.
-Equivalence definitions and fresh Glue/ua production are separate increments.
+[Equivalence definitions](CUBICAL_EQUIVALENCE.md) are now certified source
+abbreviations; fresh Glue/ua production remains a separate increment.

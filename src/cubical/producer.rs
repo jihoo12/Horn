@@ -1,12 +1,14 @@
 //! Bounded, untrusted producer for existing scoped cubical fragments. Every
 //! substitution and typing operation emits evidence for the ground kernel.
 mod composition;
+mod definitions;
 mod faces;
 mod restricted;
 mod sigma;
+mod syntax;
 mod systems;
 
-use super::ast::{Face, Interval, Term, context, extend, number};
+use super::ast::{Definition, Face, Interval, Term, context, extend, number};
 use crate::sexp::{Result, Sexp, call};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -21,6 +23,7 @@ pub enum Profile {
     Systems,
     Composition,
     Sigma,
+    Equivalence,
 }
 
 impl Profile {
@@ -31,6 +34,7 @@ impl Profile {
             Self::Systems => 5,
             Self::Composition => 6,
             Self::Sigma => 7,
+            Self::Equivalence => 8,
         };
         super::FRAGMENTS[..count]
             .iter()
@@ -211,6 +215,7 @@ impl Producer {
         let k = op.cutoff();
         let mut refs = Vec::new();
         let (out, suffix) = match t {
+            Defined(_) => return Err("unexpanded definition reached the core producer".into()),
             Universe(l) => (Universe(*l), "u"),
             Nat => (Nat, "nat"),
             Zero => (Zero, "zero"),
@@ -552,6 +557,7 @@ impl Producer {
             return Ok(out.clone());
         }
         let (ty, refs, rule) = match t {
+            Defined(_) => return Err("unexpanded definition reached the core producer".into()),
             Universe(l) => (Universe(l + 1), vec![self.ctx(d, g)?], "type.u"),
             Nat => (Universe(0), vec![self.ctx(d, g)?], "type.nat"),
             Zero => (Nat, vec![self.ctx(d, g)?], "type.zero"),
@@ -805,6 +811,10 @@ pub struct Request {
 
 #[derive(Clone, Debug)]
 pub enum Judgment {
+    Definition {
+        definition: Definition,
+        expansion: Term,
+    },
     Has {
         term: Term,
         ty: Term,
@@ -847,82 +857,7 @@ pub struct Generated {
 /// Validate producer syntax before recursive inference/quotation. These are
 /// resource bounds, not new logical premises or claims of completeness.
 fn validate(request: &Request) -> Result<()> {
-    fn interval(r: &Interval, depth: usize, nodes: &mut usize) -> Result<()> {
-        limits(depth, nodes)?;
-        match r {
-            Interval::Var(n) if *n > 32 => return Err("dimension index exceeds 32".into()),
-            Interval::Neg(a) => interval(a, depth + 1, nodes)?,
-            Interval::Meet(a, b) | Interval::Join(a, b) => {
-                interval(a, depth + 1, nodes)?;
-                interval(b, depth + 1, nodes)?;
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-    fn face(f: &Face, depth: usize, nodes: &mut usize) -> Result<()> {
-        limits(depth, nodes)?;
-        match f {
-            Face::End(n, _) if *n > 32 => return Err("face dimension index exceeds 32".into()),
-            Face::And(a, b) | Face::Or(a, b) => {
-                face(a, depth + 1, nodes)?;
-                face(b, depth + 1, nodes)?;
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-    fn limits(depth: usize, nodes: &mut usize) -> Result<()> {
-        *nodes += 1;
-        if depth > 32 || *nodes > 10_000 {
-            return Err("cubical syntax exceeds depth 32 or 10000 nodes".into());
-        }
-        Ok(())
-    }
-    fn term(t: &Term, depth: usize, nodes: &mut usize) -> Result<()> {
-        limits(depth, nodes)?;
-        match t {
-            Term::Universe(n) | Term::Var(n) if *n > 32 => {
-                return Err("universe level or variable index exceeds 32".into());
-            }
-            Term::Pi(a, b)
-            | Term::Sigma(a, b)
-            | Term::Lam(a, b)
-            | Term::App(a, b)
-            | Term::PathLam(a, b) => {
-                term(a, depth + 1, nodes)?;
-                term(b, depth + 1, nodes)?;
-            }
-            Term::Path(a, b, c) | Term::Pair(a, b, c) => {
-                term(a, depth + 1, nodes)?;
-                term(b, depth + 1, nodes)?;
-                term(c, depth + 1, nodes)?;
-            }
-            Term::Fst(p) | Term::Snd(p) => term(p, depth + 1, nodes)?,
-            Term::PathApp(p, r) => {
-                term(p, depth + 1, nodes)?;
-                interval(r, depth + 1, nodes)?;
-            }
-            Term::Comp(a, phi, tube, base) => {
-                term(a, depth + 1, nodes)?;
-                face(phi, depth + 1, nodes)?;
-                term(tube, depth + 1, nodes)?;
-                term(base, depth + 1, nodes)?;
-            }
-            Term::System(ty, sides) => {
-                if sides.len() > 16 {
-                    return Err("system exceeds 16 branches".into());
-                }
-                term(ty, depth + 1, nodes)?;
-                for (f, t) in sides {
-                    face(f, depth + 1, nodes)?;
-                    term(t, depth + 1, nodes)?;
-                }
-            }
-            _ => {}
-        }
-        Ok(())
-    }
+    use syntax::{face, interval, term};
     if request.dimensions > 32 || request.context.len() > 32 {
         return Err("scope exceeds 32 variables or dimensions".into());
     }
@@ -964,9 +899,6 @@ fn validate(request: &Request) -> Result<()> {
             interval(left, 0, &mut nodes)?;
             interval(right, 0, &mut nodes)?;
         }
-        Judgment::RestrictedHas { .. } | Judgment::RestrictedEqual { .. } => {}
-    }
-    match &request.judgment {
         Judgment::RestrictedHas {
             face: phi,
             term: t,
@@ -987,7 +919,15 @@ fn validate(request: &Request) -> Result<()> {
             term(right, 0, &mut nodes)?;
             term(ty, 0, &mut nodes)?;
         }
-        _ => {}
+        Judgment::Definition {
+            definition,
+            expansion,
+        } => {
+            for arg in definition.arguments() {
+                term(arg, 0, &mut nodes)?;
+            }
+            term(expansion, 0, &mut nodes)?;
+        }
     }
     Ok(())
 }
@@ -1038,6 +978,23 @@ fn needs_sigma(request: &Request) -> bool {
     }
 }
 
+fn needs_equivalence(request: &Request) -> bool {
+    if request.context.iter().any(Term::has_definition) {
+        return true;
+    }
+    match &request.judgment {
+        Judgment::Definition { .. } => true,
+        Judgment::Has { term, ty } | Judgment::RestrictedHas { term, ty, .. } => {
+            term.has_definition() || ty.has_definition()
+        }
+        Judgment::Equal { left, right, ty }
+        | Judgment::RestrictedEqual {
+            left, right, ty, ..
+        } => left.has_definition() || right.has_definition() || ty.has_definition(),
+        _ => false,
+    }
+}
+
 /// Generate fresh evidence, fix goals from the requests (not from inferred
 /// answers), and accept only after the unchanged ground kernel replays it.
 pub fn produce(requests: &[Request]) -> Result<Generated> {
@@ -1047,7 +1004,9 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
     for request in requests {
         validate(request).map_err(|e| format!("{}: {e}", request.name))?;
     }
-    let profile = if requests.iter().any(needs_sigma) {
+    let profile = if requests.iter().any(needs_equivalence) {
+        Profile::Equivalence
+    } else if requests.iter().any(needs_sigma) {
         Profile::Sigma
     } else if requests.iter().any(needs_composition) {
         Profile::Composition
@@ -1065,6 +1024,17 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
     };
     let theory = profile.theory();
     let mut p = Producer::default();
+    let lowered = if profile == Profile::Equivalence {
+        Some(
+            requests
+                .iter()
+                .map(|r| p.lower_request(r))
+                .collect::<Result<Vec<_>>>()?,
+        )
+    } else {
+        None
+    };
+    let requests = lowered.as_deref().unwrap_or(requests);
     let mut goals = String::new();
     let mut results = Vec::new();
     let mut names = std::collections::BTreeSet::new();
@@ -1077,6 +1047,23 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
         let prefix = [number(d), context(g)];
         let run = |p: &mut Producer| -> Result<(usize, Sexp)> {
             match &request.judgment {
+                Judgment::Definition {
+                    definition,
+                    expansion,
+                } => {
+                    p.definition_arguments((d, g), definition)?;
+                    p.universe(d, g, expansion)?;
+                    let (actual, id) = p.expand_definition(definition)?;
+                    if actual.quote() != expansion.quote() {
+                        return Err("definition expansion does not match the requested term".into());
+                    }
+                    let args = definition
+                        .arguments()
+                        .into_iter()
+                        .map(Term::quote)
+                        .chain([expansion.quote()]);
+                    return Ok((id, call(definition.predicate(), args)));
+                }
                 Judgment::Entails {
                     premise,
                     conclusion,
@@ -1149,7 +1136,10 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
                 Judgment::Equal { left, right, ty } => {
                     p.universe(d, g, ty)?;
                     (
-                        if matches!(profile, Profile::Composition | Profile::Sigma) {
+                        if matches!(
+                            profile,
+                            Profile::Composition | Profile::Sigma | Profile::Equivalence
+                        ) {
                             let restricted =
                                 p.restricted_equal((d, g), &Face::True, left, right, ty)?;
                             p.equality_step(

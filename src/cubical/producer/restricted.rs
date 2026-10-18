@@ -122,6 +122,7 @@ impl Producer {
             return Ok((ty, id));
         }
         let (ty, refs, rule) = match t {
+            Defined(_) => return Err("unexpanded definition reached restricted inference".into()),
             Universe(l) => (
                 Universe(l + 1),
                 vec![self.restricted_ctx(d, g, phi)?],

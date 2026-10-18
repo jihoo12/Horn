@@ -27,7 +27,10 @@ local interval evidence and coherent systems are also generated from source
 with explicit overlap/coverage checks and local type conversion; see
 [faces and systems](docs/CUBICAL_FACES_SYSTEMS.md). Fresh
 [composition typing and active-face computation](docs/CUBICAL_COMPOSITION.md)
-also produce independently replayable certificates. Glue and univalence are currently
+also produce independently replayable certificates.
+[Dependent pairs](docs/CUBICAL_SIGMA.md) and
+[certified equivalence definitions](docs/CUBICAL_EQUIVALENCE.md) are supported
+in fresh source. Glue and univalence are currently
 available through bundled replay, while their fresh producers remain future work. See [CUBICAL.md](docs/CUBICAL.md) and the staged
 [integration plan](docs/INTEGRATION.md).
 
@@ -196,8 +199,9 @@ entire historical benchmark corpus.
 Extracted from the private [kamo3](https://github.com/jihoo12/kamo3) repository at commit
 `6a226630910b34ac89dc77f08a22fe956340aecf`. The extraction preserved the core
 files byte-for-byte; subsequent parser optimization is covered by differential
-tests against that baseline. Cubical rules, certificate producers,
-Agda references, and mathematical research remain in kamo3. Upstream links are
+tests against that baseline. The initial extraction left cubical research in
+kamo3; Horn now carries the explicit theory snapshots, replay data and fresh
+producers documented above. Upstream links are
 provenance references for authorized readers; access is not required to use or
 review Horn's implementation, input format, trust contract, or standalone tests.
 
