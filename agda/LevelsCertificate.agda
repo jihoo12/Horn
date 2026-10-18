@@ -76,15 +76,17 @@ t17 = node 5 (t16 ∷ t10 ∷ [])
 goals : List Tm
 goals = t17 ∷ []
 
+steps0 : List Form
+steps0 = ruleF 0 ([]) ([]) (just t1) ∷ ruleF 2 (ref 0 ∷ []) ([]) (just t3) ∷ hypF t6 ∷ ruleF 2 (ref 2 ∷ []) ([]) (just t8) ∷ inductF 0 t11 ((1 , []) ∷ (3 , 1 ∷ []) ∷ []) ∷ ruleF 3 ([]) ([]) (just t13) ∷ ruleF 4 (ref 5 ∷ ref 5 ∷ ref 4 ∷ []) ([]) (just t15) ∷ ruleF 4 (ref 5 ∷ ref 6 ∷ ref 4 ∷ []) ([]) (just t17) ∷ []
+
 certificate : List Form
-certificate = ruleF 0 ([]) ([]) (just t1) ∷ ruleF 2 (ref 0 ∷ []) ([]) (just t3) ∷ hypF t6 ∷ ruleF 2 (ref 2 ∷ []) ([]) (just t8) ∷ inductF 0 t11 ((1 , []) ∷ (3 , 1 ∷ []) ∷ []) ∷ ruleF 3 ([]) ([]) (just t13) ∷ ruleF 4 (ref 5 ∷ ref 5 ∷ ref 4 ∷ []) ([]) (just t15) ∷ ruleF 4 (ref 5 ∷ ref 6 ∷ ref 4 ∷ []) ([]) (just t17) ∷ []
+certificate = concat (steps0 ∷ [])
 
 results : List Ref
 results = ref 7 ∷ []
 
-accepted : accepts goals certificate results ≡ just tt
-accepted = refl
-
--- Every well-sorted ground instance of every goal is derivable.
+-- Every well-sorted ground instance of every goal is derivable. Agda
+-- checks `refl : accepts goals certificate results ≡ just tt` here by
+-- running the modelled checker on the certificate.
 theorem : All (λ g → ∀ γ → GW γ (λ x → Occ x g) → Der (sub γ g)) goals
-theorem = accepts-sound goals certificate results accepted
+theorem = accepts-sound goals certificate results refl

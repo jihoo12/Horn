@@ -997,21 +997,27 @@ fn export(
     );
     s.push_str(&ag.defs);
     let _ = writeln!(s, "goals : List Tm\ngoals = {}\n", list(&goal_terms));
+    // Agda elaborates a long list literal slowly, so the steps go in chunks.
+    let mut chunks = Vec::new();
+    for (i, chunk) in steps.chunks(64).enumerate() {
+        let _ = writeln!(s, "steps{i} : List Form\nsteps{i} = {}\n", list(chunk));
+        chunks.push(format!("steps{i}"));
+    }
     let _ = writeln!(
         s,
-        "certificate : List Form\ncertificate = {}\n",
-        list(&steps)
+        "certificate : List Form\ncertificate = concat ({})\n",
+        list(&chunks)
     );
     let _ = writeln!(s, "results : List Ref\nresults = {}\n", list(&result_refs));
+    // Passing `refl` directly makes Agda run the checker once; a separate
+    // `accepted` lemma would be evaluated again when applied.
     let _ = writeln!(
         s,
-        "accepted : accepts goals certificate results ≡ just tt\naccepted = refl\n"
-    );
-    let _ = writeln!(
-        s,
-        "-- Every well-sorted ground instance of every goal is derivable.\n\
+        "-- Every well-sorted ground instance of every goal is derivable. Agda\n\
+         -- checks `refl : accepts goals certificate results ≡ just tt` here by\n\
+         -- running the modelled checker on the certificate.\n\
          theorem : All (λ g → ∀ γ → GW γ (λ x → Occ x g) → Der (sub γ g)) goals\n\
-         theorem = accepts-sound goals certificate results accepted"
+         theorem = accepts-sound goals certificate results refl"
     );
     w.write_all(s.as_bytes()).map_err(|e| e.to_string())
 }
