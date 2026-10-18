@@ -1,0 +1,13 @@
+; Face implication is a free distributive lattice, not Boolean reasoning.
+(entails ex-falso (scope (i) ()) ff (at0 i))
+(entails endpoint-clash (scope (i) ()) (fand (at0 i) (at1 i)) ff)
+(entails weaken (scope (i j) ()) (at0 i) (for (at0 i) (at1 j)))
+(entails distribute (scope (i j) ())
+  (fand (at0 i) (for (at0 j) (at1 j)))
+  (for (fand (at0 i) (at0 j)) (fand (at0 i) (at1 j))))
+
+(local endpoint (scope (i) ()) (at0 i) i i0)
+(local meet-endpoint (scope (i j) ()) (at0 i) (meet i j) i0)
+(local neg-endpoint (scope (i) ()) (at0 i) (neg i) i1)
+(local structural (scope (i j) ()) (at0 i) (meet i j) (meet i0 j))
+(local shared-endpoint (scope (i j) ()) (fand (at0 i) (at0 j)) i j)

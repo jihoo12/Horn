@@ -13,6 +13,27 @@ pub enum Interval {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Face {
+    False,
+    True,
+    End(usize, bool),
+    And(Box<Face>, Box<Face>),
+    Or(Box<Face>, Box<Face>),
+}
+
+impl Face {
+    pub fn quote(&self) -> Sexp {
+        match self {
+            Self::False => atom("ff"),
+            Self::True => atom("ft"),
+            Self::End(n, one) => call(if *one { "at1" } else { "at0" }, [number(*n)]),
+            Self::And(a, b) => call("fand", [a.quote(), b.quote()]),
+            Self::Or(a, b) => call("for", [a.quote(), b.quote()]),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Term {
     Universe(usize),
     Var(usize),

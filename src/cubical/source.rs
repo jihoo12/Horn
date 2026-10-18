@@ -1,7 +1,7 @@
 //! A small explicit core source format for fresh certificate generation.
 //! This is separate from the ordinary `.hn` surface language for now.
 use super::{
-    ast::{Interval, Term},
+    ast::{Face, Interval, Term},
     producer::{self, Generated, Judgment, Request},
 };
 use crate::sexp::{self, Result, Sexp};
@@ -45,7 +45,7 @@ fn binder(s: &Sexp) -> Result<String> {
     }
     if [
         "nat", "zero", "i0", "i1", "u", "v", "dim", "pi", "lam", "app", "path", "plam", "papp",
-        "neg", "meet", "join", "scope",
+        "neg", "meet", "join", "scope", "ff", "ft", "at0", "at1", "fand", "for",
     ]
     .contains(&name)
     {
@@ -103,6 +103,34 @@ fn interval(s: &Sexp, depth: usize, names: &Names) -> Result<Interval> {
         ("meet", [a, b]) => Interval::Meet(r(a)?, r(b)?),
         ("join", [a, b]) => Interval::Join(r(a)?, r(b)?),
         _ => return Err(format!("invalid interval expression {s}")),
+    })
+}
+
+fn face(s: &Sexp, depth: usize, names: &Names) -> Result<Face> {
+    if depth > 32 {
+        return Err("face nesting exceeds 32".into());
+    }
+    if let Sexp::Atom(a) = s {
+        return match a.as_str() {
+            "ff" => Ok(Face::False),
+            "ft" => Ok(Face::True),
+            _ => Err(format!("unknown face {a}")),
+        };
+    }
+    let f = |s| face(s, depth + 1, names).map(Box::new);
+    Ok(match shape(s)? {
+        (kind @ ("at0" | "at1"), [n]) => {
+            let text = n.atom()?;
+            let index = if text.bytes().all(|c| c.is_ascii_digit()) {
+                number(n)?
+            } else {
+                names.lookup(text, true)?
+            };
+            Face::End(index, kind == "at1")
+        }
+        ("fand", [a, b]) => Face::And(f(a)?, f(b)?),
+        ("for", [a, b]) => Face::Or(f(a)?, f(b)?),
+        _ => return Err(format!("invalid face expression {s}")),
     })
 }
 
@@ -239,27 +267,58 @@ pub fn parse(src: &str) -> Result<Vec<Request>> {
     if forms.is_empty() || forms.len() > 128 {
         return Err("expected 1..128 cubical assertions".into());
     }
-    forms.iter().enumerate().map(|(i, form)| {
-        let assertion = || -> Result<Request> {
-            let (kind, fields) = shape(form)?;
-            let (name, mut fields) = fields.split_first().ok_or("assertion requires a name")?;
-            let name = name.atom()?.to_owned();
-            let (mut names, mut context) = (Names::default(), Vec::new());
-            if let Some(Sexp::List(spec)) = fields.first()
-                && spec.first().is_some_and(|s| s == &sexp::atom("scope")) {
-                (names, context) = scope(&fields[0])?;
-                fields = &fields[1..];
-            }
-            let dimensions = names.dimensions.len();
-            let judgment = match (kind, fields) {
-                ("check", [t, ty]) => Judgment::Has { term: term(t, 0, &names)?, ty: term(ty, 0, &names)? },
-                ("equal", [left, right, ty]) => Judgment::Equal { left: term(left, 0, &names)?, right: term(right, 0, &names)?, ty: term(ty, 0, &names)? },
-                _ => return Err("expected (check NAME [SCOPE] TERM TYPE) or (equal NAME [SCOPE] LEFT RIGHT TYPE)".into()),
+    forms
+        .iter()
+        .enumerate()
+        .map(|(i, form)| {
+            let assertion = || -> Result<Request> {
+                let (kind, fields) = shape(form)?;
+                let (name, mut fields) = fields.split_first().ok_or("assertion requires a name")?;
+                let name = name.atom()?.to_owned();
+                let (mut names, mut context) = (Names::default(), Vec::new());
+                if let Some(Sexp::List(spec)) = fields.first()
+                    && spec.first().is_some_and(|s| s == &sexp::atom("scope"))
+                {
+                    (names, context) = scope(&fields[0])?;
+                    fields = &fields[1..];
+                }
+                let dimensions = names.dimensions.len();
+                let judgment = match (kind, fields) {
+                    ("check", [t, ty]) => Judgment::Has {
+                        term: term(t, 0, &names)?,
+                        ty: term(ty, 0, &names)?,
+                    },
+                    ("equal", [left, right, ty]) => Judgment::Equal {
+                        left: term(left, 0, &names)?,
+                        right: term(right, 0, &names)?,
+                        ty: term(ty, 0, &names)?,
+                    },
+                    ("entails", [a, b]) => Judgment::Entails {
+                        premise: face(a, 0, &names)?,
+                        conclusion: face(b, 0, &names)?,
+                    },
+                    ("local", [phi, r, s]) => Judgment::Local {
+                        face: face(phi, 0, &names)?,
+                        left: interval(r, 0, &names)?,
+                        right: interval(s, 0, &names)?,
+                    },
+                    _ => {
+                        return Err(
+                            "expected check/equal/entails/local assertion with optional scope"
+                                .into(),
+                        );
+                    }
+                };
+                Ok(Request {
+                    name,
+                    dimensions,
+                    context,
+                    judgment,
+                })
             };
-            Ok(Request { name, dimensions, context, judgment })
-        };
-        assertion().map_err(|e| format!("assertion {}: {e}", i + 1))
-    }).collect()
+            assertion().map_err(|e| format!("assertion {}: {e}", i + 1))
+        })
+        .collect()
 }
 
 /// Parse a source file, generate fresh evidence and check its fixed goals.

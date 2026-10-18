@@ -65,7 +65,7 @@ fn run_cubical(args: &[String]) -> Result<(), String> {
                     .map_err(|e| format!("cannot create new directory {dir}: {e}"))?;
                 let dir = std::path::Path::new(dir);
                 for (name, contents) in [
-                    ("theory.horn", cubical::producer::THEORY),
+                    ("theory.horn", generated.theory.as_str()),
                     ("goals", generated.goals.as_str()),
                     ("proof", generated.proof.as_str()),
                 ] {

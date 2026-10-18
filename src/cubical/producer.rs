@@ -1,12 +1,33 @@
 //! Small, untrusted producer for the existing scoped path theory. Every
 //! substitution and typing operation emits evidence for the ground kernel.
-use super::ast::{Interval, Term, context, extend, number};
+mod faces;
+
+use super::ast::{Face, Interval, Term, context, extend, number};
 use crate::sexp::{Result, Sexp, call};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 pub const THEORY: &str = include_str!("../../theories/cubical/path.horn");
 const MAX_STEPS: usize = 50_000;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Profile {
+    Path,
+    Faces,
+}
+
+impl Profile {
+    pub fn theory(self) -> String {
+        let count = match self {
+            Self::Path => 1,
+            Self::Faces => 2,
+        };
+        super::FRAGMENTS[..count]
+            .iter()
+            .map(|(_, source)| format!("{source}\n"))
+            .collect()
+    }
+}
 
 #[derive(Clone)]
 enum Op {
@@ -40,6 +61,7 @@ struct Producer {
     known: BTreeMap<Sexp, usize>,
     inferred: BTreeMap<InferenceKey, (Term, usize)>,
     conversion_depth: usize,
+    face_work: usize,
 }
 
 impl Producer {
@@ -699,11 +721,29 @@ pub struct Request {
 
 #[derive(Clone, Debug)]
 pub enum Judgment {
-    Has { term: Term, ty: Term },
-    Equal { left: Term, right: Term, ty: Term },
+    Has {
+        term: Term,
+        ty: Term,
+    },
+    Equal {
+        left: Term,
+        right: Term,
+        ty: Term,
+    },
+    Entails {
+        premise: Face,
+        conclusion: Face,
+    },
+    Local {
+        face: Face,
+        left: Interval,
+        right: Interval,
+    },
 }
 
 pub struct Generated {
+    pub profile: Profile,
+    pub theory: String,
     pub goals: String,
     pub proof: String,
     pub checked: crate::kernel::Report,
@@ -720,6 +760,18 @@ fn validate(request: &Request) -> Result<()> {
             Interval::Meet(a, b) | Interval::Join(a, b) => {
                 interval(a, depth + 1, nodes)?;
                 interval(b, depth + 1, nodes)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    fn face(f: &Face, depth: usize, nodes: &mut usize) -> Result<()> {
+        limits(depth, nodes)?;
+        match f {
+            Face::End(n, _) if *n > 32 => return Err("face dimension index exceeds 32".into()),
+            Face::And(a, b) | Face::Or(a, b) => {
+                face(a, depth + 1, nodes)?;
+                face(b, depth + 1, nodes)?;
             }
             _ => {}
         }
@@ -780,6 +832,22 @@ fn validate(request: &Request) -> Result<()> {
             term(right, 0, &mut nodes)?;
             term(ty, 0, &mut nodes)?;
         }
+        Judgment::Entails {
+            premise,
+            conclusion,
+        } => {
+            face(premise, 0, &mut nodes)?;
+            face(conclusion, 0, &mut nodes)?;
+        }
+        Judgment::Local {
+            face: phi,
+            left,
+            right,
+        } => {
+            face(phi, 0, &mut nodes)?;
+            interval(left, 0, &mut nodes)?;
+            interval(right, 0, &mut nodes)?;
+        }
     }
     Ok(())
 }
@@ -790,12 +858,25 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
     if requests.is_empty() || requests.len() > 128 {
         return Err("expected 1..128 cubical requests".into());
     }
+    for request in requests {
+        validate(request).map_err(|e| format!("{}: {e}", request.name))?;
+    }
+    let profile = if requests.iter().any(|r| {
+        matches!(
+            r.judgment,
+            Judgment::Entails { .. } | Judgment::Local { .. }
+        )
+    }) {
+        Profile::Faces
+    } else {
+        Profile::Path
+    };
+    let theory = profile.theory();
     let mut p = Producer::default();
     let mut goals = String::new();
     let mut results = Vec::new();
     let mut names = std::collections::BTreeSet::new();
     for request in requests {
-        validate(request).map_err(|e| format!("{}: {e}", request.name))?;
         if !names.insert(&request.name) {
             return Err(format!("duplicate goal name {}", request.name));
         }
@@ -803,6 +884,29 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
         let g = &request.context;
         let prefix = [number(d), context(g)];
         let run = |p: &mut Producer| -> Result<(usize, Sexp)> {
+            match &request.judgment {
+                Judgment::Entails {
+                    premise,
+                    conclusion,
+                } => {
+                    p.ctx(d, g)?;
+                    return Ok((
+                        p.entails(d, premise, conclusion)?,
+                        call("entails", [number(d), premise.quote(), conclusion.quote()]),
+                    ));
+                }
+                Judgment::Local { face, left, right } => {
+                    p.ctx(d, g)?;
+                    return Ok((
+                        p.local(d, face, left, right)?,
+                        call(
+                            "local",
+                            [number(d), face.quote(), left.quote(), right.quote()],
+                        ),
+                    ));
+                }
+                _ => {}
+            }
             let (id, pred, terms) = match &request.judgment {
                 Judgment::Has { term, ty } => {
                     p.universe(d, g, ty)?;
@@ -820,6 +924,7 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
                         vec![left.quote(), right.quote(), ty.quote()],
                     )
                 }
+                _ => unreachable!("face requests handled above"),
             };
             Ok((id, call(pred, prefix.iter().cloned().chain(terms))))
         };
@@ -835,10 +940,12 @@ pub fn produce(requests: &[Request]) -> Result<Generated> {
     for (name, id) in results {
         let _ = writeln!(proof, "(result {name} {id})");
     }
-    let checked = crate::kernel::Theory::parse(THEORY)?
+    let checked = crate::kernel::Theory::parse(&theory)?
         .check(&goals, &proof)
         .map_err(|e| format!("generated certificate rejected: {e}"))?;
     Ok(Generated {
+        profile,
+        theory,
         goals,
         proof,
         checked,

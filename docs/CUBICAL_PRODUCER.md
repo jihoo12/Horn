@@ -2,8 +2,10 @@
 
 `cubical::producer::produce` constructs new certificates from typed requests.
 It does not load the frozen univalence oracles or use kamo3 at runtime. It
-uses only the existing `theories/cubical/path.horn` fragment, an explicit
-subset of the full cubical package, and changes no rules or kernel code.
+uses the existing scoped-path fragment by default. Face assertions select
+the fixed path-plus-faces profile; see [face evidence](CUBICAL_FACES_SYSTEMS.md).
+No rules or kernel code are changed. Replay fresh output with its returned
+`Generated.theory`, which is also written by CLI export.
 
 
 ## Core source files
