@@ -83,9 +83,29 @@ cargo run --release --locked --offline --bin kernel -- \
 
 The last two commands materialize the full proof and are optional. Normal
 checking streams and does not create the approximately 277 MB original proof.
-That avoids re-running kamo3's producer whose combined generation/checking
+kamo3's combined generation/checking
 unit test exceeded this environment's 8 GiB limit; this is not a fix for the
 producer's memory consumption.
+
+## Regeneration inside Horn
+
+`cubical::engine` is kamo3's certificate producer, moved into this
+repository (with the bool extension), so every bundled example can be
+regenerated without kamo3 or its older pinned kernel:
+
+```sh
+cargo run --release --locked --offline --bin horn -- cubical generate canonicity
+```
+
+The derivation streams from the producer into the oracle encoder through a
+pipe and is never written out; the oracle is then checked as usual. The
+engine is untrusted: only the kernel's acceptance counts.
+
+| Example | Time | Peak memory |
+| --- | ---: | ---: |
+| `ua-transport` | 5 s | 0.1 GB |
+| `canonicity` | 185 s | 2.3 GB |
+| `univalence` | 60 s | 1.1 GB |
 
 ## Provenance and reproduction
 

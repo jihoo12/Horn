@@ -48,7 +48,7 @@ fn run() -> Result<(), String> {
 }
 
 fn run_cubical(args: &[String]) -> Result<(), String> {
-    let usage = "usage: horn cubical list\n       horn cubical check NAME|all\n       horn cubical export NAME DIR\n       horn cubical run FILE [--profile NAME] [--emit NEW_DIR]";
+    let usage = "usage: horn cubical list\n       horn cubical check NAME|all\n       horn cubical export NAME DIR\n       horn cubical run FILE [--profile NAME] [--emit NEW_DIR]\n       horn cubical generate NAME [--emit NEW_DIR]";
     let args: Vec<_> = args.iter().map(String::as_str).collect();
     if args == ["list"] {
         for example in cubical::EXAMPLES {
@@ -91,6 +91,40 @@ fn run_cubical(args: &[String]) -> Result<(), String> {
             println!(
                 "ACCEPT (generated cubical): {} goals, {} proof steps",
                 generated.checked.goals, generated.checked.steps
+            );
+        }
+        ["generate", name, rest @ ..] => {
+            let output = match rest {
+                [] => None,
+                ["--emit", dir] => Some(*dir),
+                _ => return Err(usage.into()),
+            };
+            if let Some(dir) = output {
+                // Refuse before the long generation, not after it.
+                if std::path::Path::new(dir).exists() {
+                    return Err(format!("{dir} already exists"));
+                }
+            }
+            let generated = cubical::generate::regenerate(name)?;
+            if let Some(dir) = output {
+                fs::create_dir(dir)
+                    .map_err(|e| format!("cannot create new directory {dir}: {e}"))?;
+                let dir = std::path::Path::new(dir);
+                fs::write(dir.join("goals"), &generated.goals).map_err(|e| e.to_string())?;
+                fs::write(dir.join("proof.oracle"), &generated.oracle)
+                    .map_err(|e| e.to_string())?;
+            }
+            let bundled = cubical::EXAMPLES.iter().find(|e| e.name == *name);
+            println!(
+                "ACCEPT (regenerated cubical {name}): {} goals, {} proof steps, {} oracle bytes{}",
+                generated.checked.goals,
+                generated.checked.steps,
+                generated.oracle.len(),
+                match bundled {
+                    Some(e) if e.goals == generated.goals => ", same goals as the bundled example",
+                    Some(_) => ", goals DIFFER from the bundled example",
+                    None => "",
+                }
             );
         }
         ["check", name] => {
