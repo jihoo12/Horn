@@ -32,8 +32,9 @@ term algebra. `horn-generalize` turns an existing ground proof into one, and
 any ground instance unfolds into an ordinary certificate for the unchanged
 kernel. kamo3's univalence proof at U₀ holds for every level `L`, with a
 few inductions on `max`; so do 49 other ordinary goals and all three large
-certificates, including the 4 GB ua-unglue one. The prototype's inference
-forms are proved sound in [agda/Schematic.agda](agda/Schematic.agda). See
+certificates, including the 4 GB ua-unglue one. Its checking algorithm is
+modelled and proved sound in [agda/Schematic.agda](agda/Schematic.agda), and
+an accepted certificate can be exported for that model to re-check. See
 [SCHEMATIC.md](docs/SCHEMATIC.md).
 
 ## What 0.2 changes

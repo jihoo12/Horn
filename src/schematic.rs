@@ -39,6 +39,7 @@ use crate::lex::Lexer;
 use crate::oracle::{Pat, Spec, Store};
 use crate::sexp::{Result, Sexp, parse, read};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::fmt::Write as _;
 use std::io::{BufRead, Write};
 
 const PROP: u32 = u32::MAX;
@@ -73,7 +74,7 @@ pub struct Report {
 }
 
 pub fn check(theory: &str, goals: &str, proof: impl BufRead) -> Result<Report> {
-    process(theory, goals, proof, None)
+    process(theory, goals, proof, Mode::Check)
 }
 
 /// Check a schematic certificate, then write a ground goals file and an
@@ -88,12 +89,35 @@ pub fn instantiate(
     goals_out: &mut dyn Write,
     proof_out: &mut dyn Write,
 ) -> Result<Report> {
-    process(theory, goals, proof, Some((bindings, goals_out, proof_out)))
+    process(
+        theory,
+        goals,
+        proof,
+        Mode::Instantiate(bindings, goals_out, proof_out),
+    )
 }
 
-type Out<'a> = (&'a [(String, String)], &'a mut dyn Write, &'a mut dyn Write);
+/// Check a schematic certificate, then write it as an Agda module for
+/// `agda/Schematic.agda`, whose proved-sound model of this checker then
+/// evaluates it independently. The translation is untrusted, but Agda
+/// accepting the module does not depend on this checker.
+pub fn export_agda(
+    theory: &str,
+    goals: &str,
+    proof: impl BufRead,
+    module: &str,
+    out: &mut dyn Write,
+) -> Result<Report> {
+    process(theory, goals, proof, Mode::Agda(module, out))
+}
 
-fn process(theory: &str, goals: &str, proof: impl BufRead, out: Option<Out>) -> Result<Report> {
+enum Mode<'a> {
+    Check,
+    Instantiate(&'a [(String, String)], &'a mut dyn Write, &'a mut dyn Write),
+    Agda(&'a str, &'a mut dyn Write),
+}
+
+fn process(theory: &str, goals: &str, proof: impl BufRead, out: Mode) -> Result<Report> {
     // The kernel's parser validates declarations and rule sorts.
     kernel::Theory::parse(theory)?;
     let spec = Spec::parse(theory)?;
@@ -114,7 +138,7 @@ fn process(theory: &str, goals: &str, proof: impl BufRead, out: Option<Out>) -> 
     };
     let mut report = Report::default();
     let mut expected = BTreeMap::new();
-    let keep = out.is_some();
+    let keep = !matches!(out, Mode::Check);
     let mut forms = Vec::new();
     let mut results = Vec::new();
     for form in parse(goals)? {
@@ -205,7 +229,9 @@ fn process(theory: &str, goals: &str, proof: impl BufRead, out: Option<Out>) -> 
         return Err(format!("missing results: {:?}", expected.keys()));
     }
     report.steps = ck.facts.len();
-    if let Some((bindings, goals_out, proof_out)) = out {
+    if let Mode::Agda(module, w) = out {
+        export(&mut ck, &forms, &goal_list, &results, module, w)?;
+    } else if let Mode::Instantiate(bindings, goals_out, proof_out) = out {
         let mut sigma = HashMap::new();
         for (v, t) in bindings {
             let v = ck.var(&Sexp::Atom(v.clone()))?;
@@ -778,4 +804,214 @@ impl Checker<'_> {
         });
         Ok(())
     }
+}
+
+/// Writes Agda terms, one definition per distinct compound node.
+struct Agda<'c, 's> {
+    ck: &'c mut Checker<'s>,
+    names: HashMap<u32, String>,
+    defs: String,
+}
+
+impl Agda<'_, '_> {
+    fn term(&mut self, id: u32) -> String {
+        if let Some(n) = self.names.get(&id) {
+            return n.clone();
+        }
+        let node = self.ck.arena.node(id).to_vec();
+        let base = self.ck.spec.names.len() as u32;
+        let text = if node[0] >= base {
+            format!("var {}", node[0] - base)
+        } else {
+            let args: Vec<String> = node[1..].iter().map(|&a| self.term(a)).collect();
+            format!("node {} ({})", node[0], list(&args))
+        };
+        let name = format!("t{}", self.names.len());
+        let _ = writeln!(self.defs, "{name} : Tm\n{name} = {text}\n");
+        self.names.insert(id, name.clone());
+        name
+    }
+
+    fn reference(&mut self, x: &Sexp) -> Result<String> {
+        Ok(match x {
+            Sexp::Atom(n) => format!("ref {n}"),
+            Sexp::List(xs) => {
+                let base = self.ck.spec.names.len() as u32;
+                let mut pairs = Vec::new();
+                for b in &xs[1..] {
+                    let ys = b.list()?;
+                    let v = self.ck.var(&ys[0])? - base;
+                    let t = self.ck.term(&ys[1], None)?;
+                    pairs.push(format!("({v} , {})", self.term(t)));
+                }
+                format!("at {} ({})", xs[0].atom()?, list(&pairs))
+            }
+        })
+    }
+}
+
+fn list(items: &[String]) -> String {
+    let mut s = String::new();
+    for i in items {
+        s.push_str(i);
+        s.push_str(" ∷ ");
+    }
+    s.push_str("[]");
+    s
+}
+
+fn pattern(p: &Pat) -> String {
+    match p {
+        Pat::Var(v) => format!("var {v}"),
+        Pat::App(h, args) => {
+            let args: Vec<String> = args.iter().map(pattern).collect();
+            format!("node {h} ({})", list(&args))
+        }
+    }
+}
+
+fn export(
+    ck: &mut Checker,
+    forms: &[Sexp],
+    goals: &[(String, u32)],
+    results: &[(String, Sexp)],
+    module: &str,
+    w: &mut dyn Write,
+) -> Result<()> {
+    let spec = ck.spec;
+    let nsorts = spec.sorts.len() as u32;
+    let nsym = spec.names.len() as u32;
+    // Each predicate gets a sort of its own; `junk` exceeds every sort.
+    let out_t: Vec<String> = (0..nsym)
+        .map(|i| match ck.output[i as usize] {
+            PROP => (nsorts + i).to_string(),
+            s => s.to_string(),
+        })
+        .collect();
+    let ins_t: Vec<String> = spec
+        .inputs
+        .iter()
+        .map(|xs| {
+            format!(
+                "({})",
+                list(&xs.iter().map(u32::to_string).collect::<Vec<_>>())
+            )
+        })
+        .collect();
+    let var_t: Vec<String> = ck.output[nsym as usize..]
+        .iter()
+        .map(u32::to_string)
+        .collect();
+    let rules: Vec<String> = spec
+        .rules
+        .iter()
+        .map(|r| {
+            let prem: Vec<String> = r.premises.iter().map(pattern).collect();
+            let rs: Vec<String> = r.vars.iter().map(|(_, s)| s.to_string()).collect();
+            format!(
+                "rule ({}) ({}) (λ y → nth ({}) y 0)",
+                list(&prem),
+                pattern(&r.conclusion),
+                list(&rs)
+            )
+        })
+        .collect();
+    let mut ag = Agda {
+        ck,
+        names: HashMap::new(),
+        defs: String::new(),
+    };
+    let mut steps = Vec::new();
+    for form in forms {
+        let xs = form.list()?;
+        steps.push(match xs[0].atom()? {
+            "hyp" => {
+                let j = ag.ck.judgment(&xs[2])?;
+                format!("hypF {}", ag.term(j))
+            }
+            "induct" => {
+                let x = ag.ck.var(&xs[2])? - nsym;
+                let j = ag.ck.judgment(&xs[3])?;
+                let j = ag.term(j);
+                let mut cases = Vec::new();
+                for case in xs[4].list()? {
+                    let ys = case.list()?;
+                    let vars: Vec<String> = ys[1..]
+                        .iter()
+                        .map(|y| ag.ck.var(y).map(|v| (v - nsym).to_string()))
+                        .collect::<Result<_>>()?;
+                    cases.push(format!("({} , {})", ys[0].atom()?, list(&vars)));
+                }
+                format!("inductF {x} {j} ({})", list(&cases))
+            }
+            _ => {
+                let r = spec.rule(xs[2].atom()?)?;
+                let rule = &spec.rules[r as usize];
+                let mut refs = Vec::new();
+                for x in xs[3].list()? {
+                    refs.push(ag.reference(x)?);
+                }
+                let mut binds = Vec::new();
+                let mut stated = "nothing".to_owned();
+                for item in &xs[4..] {
+                    let ys = item.list()?;
+                    let head = ys[0].atom()?;
+                    if head.starts_with('?') && ys.len() == 2 {
+                        let i = rule
+                            .vars
+                            .iter()
+                            .position(|(v, _)| v == head)
+                            .ok_or("unknown variable")?;
+                        let t = ag.ck.term(&ys[1], None)?;
+                        binds.push(format!("({i} , {})", ag.term(t)));
+                    } else {
+                        let j = ag.ck.judgment(item)?;
+                        stated = format!("(just {})", ag.term(j));
+                    }
+                }
+                format!("ruleF {r} ({}) ({}) {stated}", list(&refs), list(&binds))
+            }
+        });
+    }
+    let goal_terms: Vec<String> = goals.iter().map(|&(_, j)| ag.term(j)).collect();
+    let mut result_refs = Vec::new();
+    for (name, _) in goals {
+        let r = results
+            .iter()
+            .find(|(n, _)| n == name)
+            .ok_or("missing result")?;
+        result_refs.push(ag.reference(&r.1)?);
+    }
+    let mut s = String::new();
+    let _ = writeln!(s, "{{-# OPTIONS --safe --without-K #-}}");
+    let _ = writeln!(s, "-- Generated by `schematic-kernel --agda`; do not edit.");
+    let _ = writeln!(s, "module {module} where\n\nopen import Schematic\n");
+    let _ = writeln!(s, "outT : List ℕ\noutT = {}\n", list(&out_t));
+    let _ = writeln!(s, "insT : List (List ℕ)\ninsT = {}\n", list(&ins_t));
+    let _ = writeln!(s, "varT : List ℕ\nvarT = {}\n", list(&var_t));
+    let _ = writeln!(s, "rules : List Rule\nrules = {}\n", list(&rules));
+    let _ = writeln!(s, "open Tables outT insT varT {} rules", nsorts + nsym);
+    let _ = writeln!(
+        s,
+        "open Algorithm (witness (all? ruleWF? rules) tt) ctors (complete-from (witness junk? tt))\n"
+    );
+    s.push_str(&ag.defs);
+    let _ = writeln!(s, "goals : List Tm\ngoals = {}\n", list(&goal_terms));
+    let _ = writeln!(
+        s,
+        "certificate : List Form\ncertificate = {}\n",
+        list(&steps)
+    );
+    let _ = writeln!(s, "results : List Ref\nresults = {}\n", list(&result_refs));
+    let _ = writeln!(
+        s,
+        "accepted : accepts goals certificate results ≡ just tt\naccepted = refl\n"
+    );
+    let _ = writeln!(
+        s,
+        "-- Every well-sorted ground instance of every goal is derivable.\n\
+         theorem : All (λ g → ∀ γ → GW γ (λ x → Occ x g) → Der (sub γ g)) goals\n\
+         theorem = accepts-sound goals certificate results accepted"
+    );
+    w.write_all(s.as_bytes()).map_err(|e| e.to_string())
 }

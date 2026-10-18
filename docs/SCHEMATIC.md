@@ -226,11 +226,44 @@ Rust comes from a `hyp` step, so this loses nothing. Parsing, names, `def`
 and hash-consing are not modelled, and no proof connects the Rust code to
 the model.
 
+### Checking Rust output with the Agda model
+
+No proof connects the Rust code to the model, but a certificate the Rust
+checker accepted can be checked by the model too.
+`schematic-kernel --agda MODULE THEORY GOALS PROOF OUT.agda` writes it as an
+Agda module that states `accepts goals certificate results ≡ just tt` and
+proves it by `refl`. The model's `accepts` is the algorithm proved sound
+above, so Agda accepting the module gives the soundness theorem for that
+certificate without trusting `src/schematic.rs`. The exporter is untrusted:
+a wrong translation can only make the module state a different theorem,
+which its goals list shows. Rule well-formedness and constructor
+completeness are decided inside Agda too.
+
+[agda/LevelsCertificate.agda](../agda/LevelsCertificate.agda) is the export
+of the levels example; `nix flake check` checks it, and a test keeps it in
+sync with the Rust output. Changing the goal in it makes Agda reject it
+(`nothing != just tt`).
+
+On kamo3's level-generalized certificates, with its 412-rule theory:
+
+| Certificate | Steps | Agda module | Agda check |
+| --- | ---: | ---: | ---: |
+| constant-transport | 318 | 180 kB | 5 s |
+| transport | 588 | 215 kB | 7.6 s |
+| to-pathp | 1,564 | 354 kB | 20 s |
+| homotopy | 4,038 | 708 kB | 117 s |
+| contr-prop | 4,579 | 785 kB | 162 s |
+
+The time grows roughly quadratically: the model looks facts up by unary
+index in a list it extends at the end. Certificates of tens of thousands of
+steps would need a model with cheaper fact access.
+
 ## What this does and does not establish
 
 - The schematic checker is a prototype outside the trusted kernel. Its
-  checking algorithm is modelled and proved sound in Agda (next section),
-  but no proof connects the Rust code to that model. Instances at concrete levels are checked
+  checking algorithm is modelled and proved sound in Agda (above), but no
+  proof connects the Rust code to that model; individual certificates can
+  be re-checked by the model instead. Instances at concrete levels are checked
   by the unchanged kernel and do not depend on either.
 - A goal over `L` is a schema: it states every ground instance. It is not an
   internal universe-polymorphic term of the object theory.
@@ -243,13 +276,15 @@ the model.
 ## Next steps
 
 1. Decide whether the kernel adopts schematic checking. Connecting either
-   Agda model to the Rust code (by extraction and differential testing, or
-   by verifying the Rust) remains open for both kernels.
-2. Let kamo3 producers build at a symbolic level directly, instead of
+   Agda model to the Rust code (by verifying the Rust, or by differential
+   testing on a broad corpus) remains open for both kernels.
+2. Make the model's fact access cheap enough to re-check the large kamo3
+   certificates in Agda.
+3. Let kamo3 producers build at a symbolic level directly, instead of
    generalizing a level-0 proof afterwards.
-3. Several eigenvariables, with lemmas such as `max i j k → max j i k`
+4. Several eigenvariables, with lemmas such as `max i j k → max j i k`
    proved by induction.
-4. Use the same mechanism for other admissible rules that kamo3 currently
+5. Use the same mechanism for other admissible rules that kamo3 currently
    re-derives on ground numerals (de Bruijn index arithmetic).
 
 ## Reproduce

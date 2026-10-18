@@ -1,0 +1,2 @@
+(var L N)
+(goal arrow-of-universes (type (arrow (u L) (arrow (u L) (u L))) (s L)))

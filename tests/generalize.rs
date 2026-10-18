@@ -3,7 +3,7 @@
 //! ground kernel accepts.
 use horn::generalize::generalize;
 use horn::kernel::Theory;
-use horn::schematic::{check, instantiate};
+use horn::schematic::{check, export_agda, instantiate};
 
 const THEORY: &str = include_str!("../examples/levels.horn");
 const GOALS: &str = include_str!("../examples/levels.goals");
@@ -80,4 +80,22 @@ fn a_rule_that_pins_the_level_keeps_the_goal_ground() {
     assert_eq!(rigid, ["arrow-of-universes"]);
     assert!(goals_out.contains("(type (arrow (u z) (arrow (u z) (u z))) (s z))"));
     check(&theory, &goals_out, proof_out.as_bytes()).unwrap();
+}
+
+#[test]
+fn the_committed_schematic_example_and_its_agda_export_are_current() {
+    let (goals, proof, _) = emit(THEORY, GOALS, PROOF);
+    assert_eq!(goals, include_str!("../examples/levels.schematic.goals"));
+    assert_eq!(proof, include_str!("../examples/levels.schematic.proof"));
+    let mut out = Vec::new();
+    export_agda(
+        THEORY,
+        &goals,
+        proof.as_bytes(),
+        "LevelsCertificate",
+        &mut out,
+    )
+    .unwrap();
+    let agda = String::from_utf8(out).unwrap();
+    assert_eq!(agda, include_str!("../agda/LevelsCertificate.agda"));
 }

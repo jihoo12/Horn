@@ -793,23 +793,26 @@ module Calculus (Sg : Signature) (R : List Rule) where
   -- judgments.
 
   mutual
-    ws? : (t : Tm) (s : ℕ) → Dec (WS t s)
-    ws? (var x) s with vs x ≟ s
+    wsv? : (srt : ℕ → ℕ) (t : Tm) (s : ℕ) → Dec (WSv srt t s)
+    wsv? srt (var x) s with srt x ≟ s
     ... | yes refl = yes var
     ... | no ne    = no (λ { var → ne refl })
-    ws? (node f ts) s with out f ≟ s | wss? ts (ins f)
+    wsv? srt (node f ts) s with out f ≟ s | wssv? srt ts (ins f)
     ... | yes e | yes w = yes (node e w)
     ... | no ne | _     = no (λ { (node e _) → ne e })
     ... | yes _ | no nw = no (λ { (node _ w) → nw w })
 
-    wss? : (ts : List Tm) (ss : List ℕ) → Dec (WSs ts ss)
-    wss? []       []       = yes []
-    wss? []       (s ∷ ss) = no (λ ())
-    wss? (t ∷ ts) []       = no (λ ())
-    wss? (t ∷ ts) (s ∷ ss) with ws? t s | wss? ts ss
+    wssv? : (srt : ℕ → ℕ) (ts : List Tm) (ss : List ℕ) → Dec (WSsv srt ts ss)
+    wssv? srt []       []       = yes []
+    wssv? srt []       (s ∷ ss) = no (λ ())
+    wssv? srt (t ∷ ts) []       = no (λ ())
+    wssv? srt (t ∷ ts) (s ∷ ss) with wsv? srt t s | wssv? srt ts ss
     ... | yes w | yes ws = yes (w ∷ ws)
     ... | no nw | _      = no (λ { (w ∷ _) → nw w })
     ... | yes _ | no nws = no (λ { (_ ∷ ws) → nws ws })
+
+  ws? : (t : Tm) (s : ℕ) → Dec (WS t s)
+  ws? = wsv? vs
 
   -- Partial assignments of rule variables.
   Env : Set
@@ -959,9 +962,20 @@ module Calculus (Sg : Signature) (R : List Rule) where
   RuleWF : Rule → Set
   RuleWF r = All (PatWF r) (prem r) × PatWF r (concl r)
 
+  isNode? : (p : Tm) → Dec (IsNode p)
+  isNode? (var _)    = no (λ ())
+  isNode? (node _ _) = yes tt
+
+  patWF? : (r : Rule) (p : Tm) → Dec (PatWF r p)
+  patWF? r p = isNode? p ×? wsv? (rs r) p (headSort p)
+
+  ruleWF? : (r : Rule) → Dec (RuleWF r)
+  ruleWF? r = all? (patWF? r) (prem r) ×? patWF? r (concl r)
+
   -- `ctors s` lists the constructors of sort s; the checker relies on it
-  -- naming every one (in Rust it is built from the declarations).
-  module Algorithm (wf : All RuleWF R) (ctors : ℕ → List ℕ) (complete : ∀ c → c ∈ ctors (out c)) where
+  -- naming every one for the sorts of eigenvariables (in Rust it is built
+  -- from the declarations).
+  module Algorithm (wf : All RuleWF R) (ctors : ℕ → List ℕ) (complete : ∀ c x → out c ≡ vs x → c ∈ ctors (vs x)) where
 
     Fact : Set
     Fact = List Tm × Tm
@@ -1372,7 +1386,7 @@ module Calculus (Sg : Signature) (R : List Rule) where
     ... | _ , ec , refl =
           Induction.induction X J (vars-occ J mX)
             (λ c ce → all-∈ (cases-ok fs (all-map fst gf) X J (ctors (vs X)) ks ec)
-                            (transport (λ s → c ∈ ctors s) ce (complete c)))
+                            (complete c X ce))
           , (headSort J , wJ)
 
     step-ok : (fs : List Fact) → All Good fs → (s : Form) {f : Fact} → checkStep fs s ≡ just f → Good f
@@ -1408,6 +1422,82 @@ module Calculus (Sg : Signature) (R : List Rule) where
     accepts-sound goals forms results e with bind-inv (checkSteps [] forms) _ e
     ... | fs , e₁ , e₂ =
           all-map closed (goals-ok fs (all-map fst (steps-ok [] [] forms e₁)) goals results e₂)
+
+------------------------------------------------------------------------
+-- Signatures given by tables, as in certificates exported from the Rust
+-- checker (`schematic-kernel --agda`). A decision that evaluates to `yes`
+-- supplies its proof through `witness`.
+
+T? : {P : Set} → Dec P → Set
+T? (yes _) = ⊤
+T? (no _)  = ⊥
+
+witness : {P : Set} (d : Dec P) → T? d → P
+witness (yes p) _ = p
+witness (no _)  ()
+
+nth : {A : Set} → List A → ℕ → A → A
+nth []       i       d = d
+nth (x ∷ xs) zero    d = x
+nth (x ∷ xs) (suc i) d = nth xs i d
+
+nth-∈ : {A : Set} (xs : List A) (i : ℕ) (d : A) → nth xs i d ∈ (d ∷ xs)
+nth-∈ []       i       d = here refl
+nth-∈ (x ∷ xs) zero    d = there (here refl)
+nth-∈ (x ∷ xs) (suc i) d with nth-∈ xs i d
+... | here e  = here e
+... | there m = there (there m)
+
+_+_ : ℕ → ℕ → ℕ
+zero  + n = n
+suc m + n = suc (m + n)
+
++-zero : (m : ℕ) → m + zero ≡ m
++-zero zero    = refl
++-zero (suc m) = cong suc (+-zero m)
+
++-suc : (m n : ℕ) → m + suc n ≡ suc (m + n)
++-suc zero    n = refl
++-suc (suc m) n = cong suc (+-suc m n)
+
+-- Positions k, k + 1, ... of the entries equal to s.
+indicesOf : ℕ → List ℕ → ℕ → List ℕ
+indicesOf k []       s = []
+indicesOf k (o ∷ os) s = pick (o ≟ s) (k ∷ indicesOf (suc k) os s) (indicesOf (suc k) os s)
+
+indicesOf-∈ : (junk s k : ℕ) (os : List ℕ) (i : ℕ) → nth os i junk ≡ s → ¬ (s ≡ junk)
+            → (k + i) ∈ indicesOf k os s
+indicesOf-∈ junk s k []       i       e n = ⊥-elim (n (sym e))
+indicesOf-∈ junk s k (o ∷ os) zero    e n with o ≟ s
+... | yes _ = here (+-zero k)
+... | no ne = ⊥-elim (ne e)
+indicesOf-∈ junk s k (o ∷ os) (suc i) e n with o ≟ s
+... | yes _ = there (shift (indicesOf-∈ junk s (suc k) os i e n))
+  where
+    shift : (suc k + i) ∈ indicesOf (suc k) os s → (k + suc i) ∈ indicesOf (suc k) os s
+    shift = transport (λ m → m ∈ indicesOf (suc k) os s) (sym (+-suc k i))
+... | no _  = transport (λ m → m ∈ indicesOf (suc k) os s) (sym (+-suc k i))
+                (indicesOf-∈ junk s (suc k) os i e n)
+
+-- `outT`, `insT`: sort and argument sorts of each symbol; symbols past the
+-- table have the sort `junk`. `varT`: sorts of eigenvariables (0 past it).
+module Tables (outT : List ℕ) (insT : List (List ℕ)) (varT : List ℕ) (junk : ℕ)
+              (rules : List Rule) where
+  sig : Signature
+  sig = record { out = λ c → nth outT c junk ; ins = λ c → nth insT c [] ; vs = λ x → nth varT x 0 }
+
+  open Signature sig public
+  open Calculus sig rules public
+
+  ctors : ℕ → List ℕ
+  ctors s = indicesOf 0 outT s
+
+  -- Complete for every eigenvariable sort, provided `junk` is not one.
+  complete-from : All (λ s → ¬ (s ≡ junk)) (0 ∷ varT) → (c x : ℕ) → out c ≡ vs x → c ∈ ctors (vs x)
+  complete-from ok c x e = indicesOf-∈ junk (vs x) 0 outT c e (all-∈ ok (nth-∈ varT x 0))
+
+  junk? : Dec (All (λ s → ¬ (s ≡ junk)) (0 ∷ varT))
+  junk? = all? (λ s → not? (s ≟ junk)) (0 ∷ varT)
 
 ------------------------------------------------------------------------
 -- Example: max l l l, admissible but not derivable, by induction on l.
@@ -1502,10 +1592,10 @@ private
     ctors 1             = []
     ctors (suc (suc n)) = suc (suc n) ∷ []
 
-    complete : ∀ c → c ∈ ctors (out c)
-    complete 0             = here refl
-    complete 1             = there (here refl)
-    complete (suc (suc n)) = here refl
+    complete : (c x : ℕ) → out c ≡ 0 → c ∈ ctors 0
+    complete 0             x e  = here refl
+    complete 1             x e  = there (here refl)
+    complete (suc (suc n)) x ()
 
     rules-wf : All RuleWF rules
     rules-wf = ([] , (tt , node refl (node refl [] ∷ var ∷ var ∷ [])))
@@ -1601,8 +1691,8 @@ private
     ctors 0       = []
     ctors (suc c) = c ∷ []
 
-    complete : ∀ c → c ∈ ctors (suc c)
-    complete c = here refl
+    complete : (c x : ℕ) → suc c ≡ 0 → c ∈ ctors 0
+    complete c x ()
 
     rules-wf : All RuleWF (intro ∷ elim ∷ [])
     rules-wf = ([] , (tt , node refl (var ∷ [])))
