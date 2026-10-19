@@ -82,6 +82,16 @@ impl Names {
     }
 }
 
+/// A face under one more dimension binder: every dimension index rises.
+fn shift_face(f: &Face) -> Face {
+    match f {
+        Face::False | Face::True => f.clone(),
+        Face::End(n, b) => Face::End(n + 1, *b),
+        Face::And(a, b) => shift_face(a).and(shift_face(b)),
+        Face::Or(a, b) => shift_face(a).or(shift_face(b)),
+    }
+}
+
 fn index(names: &[String], name: &str) -> Option<usize> {
     names.iter().rev().position(|n| n == name)
 }
@@ -340,11 +350,19 @@ impl Elaborator {
         names: &Names,
     ) -> Result<Sexp> {
         let inner = names.with_dimension(binder(j)?);
-        if homogeneous {
-            // The type is written outside j's scope; under it, it is shifted.
-            self.term(a, names)?;
-        }
-        let family = self.term(a, &inner)?;
+        // A homogeneous type and the branch faces are written outside j's
+        // scope: they are elaborated there and then shifted under j, so a
+        // binder j that shadows an outer dimension does not capture them.
+        let family = if homogeneous {
+            let outer = self.term(a, names)?;
+            self.p
+                .f
+                .path
+                .transform(&outer, &super::engine::path_frontend::Op::DShift(0))?
+                .0
+        } else {
+            self.term(a, &inner)?
+        };
         let Sexp::List(sides) = sides else {
             return Err("a composition needs a list of (FACE TERM) branches".into());
         };
@@ -358,7 +376,7 @@ impl Elaborator {
                 return Err(format!("a branch is (FACE TERM): {side}"));
             };
             let outer = self.face(phi, names)?;
-            let shifted = self.face(phi, &inner)?;
+            let shifted = shift_face(&outer);
             let t = self.term(t, &inner)?;
             system = call("side", [shifted.quote(), t, system]);
             extent = if extent == Face::False {

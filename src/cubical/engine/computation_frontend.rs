@@ -264,50 +264,14 @@ impl RestrictedProducer {
                 Ok(Some((base.clone(), ty.clone(), eq)))
             }
             ("nat", []) => {
-                let canonical = call(
-                    "comp",
-                    [atom("nat"), phi.clone(), atom("zero"), atom("zero")],
-                );
-                let prefix = if *t == canonical {
-                    None
-                } else {
-                    let Ok(eq) = self.congruence(d, g, psi, t, &canonical, &atom("nat")) else {
-                        // nat is discrete: any composition returns its base.
-                        let nat = atom("nat");
-                        let source = self.check(d, g, psi, t, &nat)?;
-                        let eq = self.eq(d, g, psi, t, base, &nat, "req.comp-nat", vec![source]);
-                        let eq = self.retype_eq(d, g, psi, t, base, &nat, ty, eq)?;
-                        return Ok(Some((base.clone(), ty.clone(), eq)));
-                    };
-                    Some(eq)
-                };
-                let ci = self.check(d, g, psi, &canonical, &atom("nat"))?;
-                let step = self.eq(
-                    d,
-                    g,
-                    psi,
-                    &canonical,
-                    &atom("zero"),
-                    &atom("nat"),
-                    "req.comp-nat-zero",
-                    vec![ci],
-                );
-                let eq = if let Some(prefix) = prefix {
-                    self.eq(
-                        d,
-                        g,
-                        psi,
-                        t,
-                        &atom("zero"),
-                        &atom("nat"),
-                        "req.trans",
-                        vec![prefix, step],
-                    )
-                } else {
-                    step
-                };
-                let eq = self.retype_eq(d, g, psi, t, &atom("zero"), &atom("nat"), ty, eq)?;
-                Ok(Some((atom("zero"), ty.clone(), eq)))
+                // nat is discrete: any composition returns its base. The
+                // snapshot's req.comp-nat-zero is an instance of this rule
+                // and is not in the core theory scripts are checked against.
+                let nat = atom("nat");
+                let source = self.check(d, g, psi, t, &nat)?;
+                let eq = self.eq(d, g, psi, t, base, &nat, "req.comp-nat", vec![source]);
+                let eq = self.retype_eq(d, g, psi, t, base, &nat, ty, eq)?;
+                Ok(Some((base.clone(), ty.clone(), eq)))
             }
             ("sigma", [a, b]) => {
                 let first_tube = call("fst", [tube.clone()]);

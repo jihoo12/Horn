@@ -455,3 +455,19 @@ fn path_constructors_are_restricted_to_closed_types_and_point_endpoints() {
         assert!(cubical::script::run(bad).is_err(), "{bad}");
     }
 }
+
+/// A composition binder may shadow an outer dimension: the branch faces and
+/// a homogeneous type are written outside its scope.
+#[test]
+fn composition_binders_do_not_capture_outer_faces_or_types() {
+    for source in [
+        "(check shadow-face (plam i (hcomp i nat (((= i 0) zero)) zero)) (path nat zero zero))",
+        "(check shadow-family
+           (lam P (path (u 0) nat nat) (plam i (lam x (papp P i) (hcomp i (papp P i) () x))))
+           (pi P (path (u 0) nat nat)
+             (path i (pi x (papp P i) (papp P i)) (lam x nat x) (lam x nat x))))",
+    ] {
+        let script = cubical::script::run(source).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(script.certified.checked.goals, 1);
+    }
+}
