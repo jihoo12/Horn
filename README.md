@@ -236,13 +236,13 @@ entire historical benchmark corpus.
 
 ## Origin and direction
 
-Extracted from the private [kamo3](https://github.com/jihoo12/kamo3) repository at commit
+Extracted from the private kamo3 repository (`jihoo12/kamo3`) at commit
 `6a226630910b34ac89dc77f08a22fe956340aecf`. The extraction preserved the core
 files byte-for-byte; subsequent parser optimization is covered by differential
 tests against that baseline. The initial extraction left cubical research in
 kamo3; Horn now carries the explicit theory snapshots, replay data and fresh
-producers documented above. Upstream links are
-provenance references for authorized readers; access is not required to use or
+producers documented above. Upstream revision identifiers are
+provenance references; access is not required to use or
 review Horn's implementation, input format, trust contract, or standalone tests.
 
 [PROVENANCE.md](docs/PROVENANCE.md) records the extraction boundary.
