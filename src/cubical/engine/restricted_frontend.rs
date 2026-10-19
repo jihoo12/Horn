@@ -61,6 +61,9 @@ pub struct RestrictedProducer {
     equality_active: BTreeSet<Sexp>,
     restriction_hints: Option<BTreeMap<Sexp, Vec<(Face, Sexp)>>>,
     closed_annotation_reuse: bool,
+    /// Type closed annotated terms once, in the empty context, and weaken
+    /// them to every other context with `rhas.closed`.
+    pub closed_term_reuse: bool,
     type_directed_composition: bool,
     certified_check_reuse: bool,
     typed_beta_reuse: bool,
@@ -477,6 +480,19 @@ impl RestrictedProducer {
             if t2 == *t {
                 return Ok((a, id));
             }
+        }
+        if self.closed_term_reuse
+            && (d, g, phi) != (0, &atom("nil"), &Face::True)
+            && matches!(shape(t)?.0, "ann")
+            && closed(t, 0, 0)
+        {
+            let nil = atom("nil");
+            let (ty, source) = self.infer(0, &nil, &Face::True, t)?;
+            let scoped = self.scope(0, 0, t)?;
+            let ctx = self.ctx(d, g, phi)?;
+            let id = self.has(d, g, phi, t, &ty, "rhas.closed", vec![source, scoped, ctx]);
+            self.remember(d, g, phi, t, &ty, id);
+            return Ok((ty, id));
         }
         let (ty, rule, refs) = match shape(t)? {
             ("ann", [t, a]) => {
@@ -2024,4 +2040,54 @@ pub fn restricted_demo() -> Result<RestrictedProducer> {
     let id = p.equality(1, &gq, &boundary, &comp, &zero, &a1)?;
     p.f.path.p.result("dependent-composition-boundary", id);
     Ok(p)
+}
+
+/// Whether `t` has no free variables (at or above `n`) and no free
+/// dimensions (at or above `d`). Mirrors the binders of `scope`; untrusted,
+/// since every use is certified by a `scoped` derivation.
+fn closed(t: &Sexp, n: usize, d: usize) -> bool {
+    fn face(f: &Sexp, d: usize) -> bool {
+        match f {
+            Sexp::Atom(_) => true,
+            Sexp::List(xs) => match (xs.first().and_then(|x| x.atom().ok()), &xs[1..]) {
+                (Some("at0" | "at1"), [k]) => natural(k).is_ok_and(|k| k < d),
+                (_, args) => args.iter().all(|x| face(x, d)),
+            },
+        }
+    }
+    fn system(s: &Sexp, n: usize, d: usize) -> bool {
+        match shape(s) {
+            Ok(("snil", [])) => true,
+            Ok(("side", [phi, t, rest])) => face(phi, d) && closed(t, n, d) && system(rest, n, d),
+            _ => false,
+        }
+    }
+    let Ok((head, args)) = shape(t) else {
+        return true;
+    };
+    match (head, args) {
+        ("v", [k]) => natural(k).is_ok_and(|k| k < n),
+        ("dim", [k]) => natural(k).is_ok_and(|k| k < d),
+        ("pi" | "sigma", [a, b]) => closed(a, n, d) && closed(b, n + 1, d),
+        ("lam", [b]) => closed(b, n + 1, d),
+        ("bif" | "natrec", [p, x, y, z]) => {
+            closed(p, n + 1, d) && closed(x, n, d) && closed(y, n, d) && closed(z, n, d)
+        }
+        ("plam", [b]) => closed(b, n, d + 1),
+        ("path", [a, b, c]) => closed(a, n, d + 1) && closed(b, n, d) && closed(c, n, d),
+        ("comp", [a, phi, tube, base]) => {
+            closed(a, n, d + 1) && face(phi, d) && closed(tube, n, d + 1) && closed(base, n, d)
+        }
+        ("glue-type", [a, phi, x, e]) => {
+            closed(a, n, d) && face(phi, d) && closed(x, n, d) && closed(e, n, d)
+        }
+        ("system", [s]) => system(s, n, d),
+        (h, xs) if crate::cubical::engine::data::is_declared(h) => {
+            let motive = crate::cubical::engine::data::motive_index(h);
+            xs.iter()
+                .enumerate()
+                .all(|(i, x)| closed(x, if Some(i) == motive { n + 1 } else { n }, d))
+        }
+        (_, xs) => xs.iter().all(|x| closed(x, n, d)),
+    }
 }

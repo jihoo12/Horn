@@ -8,6 +8,21 @@ The checker implements generic sorting and schema matching. Predicate names
 have no built-in meaning. It does not search for proofs or implement a native
 type theory, substitution engine, equality solver, or univalence primitive.
 
+## Composite loops: the circle's higher structure computes
+
+In [circle.hcs](examples/cubical/script/circle.hcs), path composition on the
+circle is an ordinary definition, and transporting along the universal cover
+over `loop · loop` evaluates to `2` (and over `loop · loop⁻¹` to `0`), as a
+kernel-checked certificate that the standalone `oracle-kernel` re-checks in
+5 s. A composition in `s1` is a formal point (the homogeneous composition
+constructor of Coquand, Huber and Mörtberg); one theory rule lets the
+recursor commute with it, and the rest runs through universe and Glue
+composition. Two further changes made that path usable and also made the
+other ua scripts 2 to 6 times faster, with about a third of the proof steps:
+the universe's line equivalence is now built directly from transports, and
+`rhas.closed` lets a closed library term be checked once instead of once per
+context. See [composite loops](docs/CUBICAL_SCRIPT.md#composite-loops).
+
 ## Certified evaluation through univalence
 
 In [binary.hcs](examples/cubical/script/binary.hcs), addition written once on

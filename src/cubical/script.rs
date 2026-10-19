@@ -150,6 +150,10 @@ const RESERVED: &[&str] = &[
     "base",
     "loop",
     "s1rec",
+    "hcomp",
+    "comp",
+    "and",
+    "or",
 ];
 
 struct Elaborator {
@@ -169,6 +173,7 @@ fn producer() -> RestrictedProducer {
     p.strengthen_typings();
     p.keep_reduct_types();
     p.enable_composition_computation();
+    p.closed_term_reuse = true;
     p
 }
 
@@ -294,6 +299,83 @@ impl Elaborator {
                 _ => Err(format!("invalid interval {s}")),
             },
         }
+    }
+
+    /// A face: `(= i 0)`, `(= i 1)`, `(and F G)`, `(or F G)`, `ff` or `ft`.
+    fn face(&self, s: &Sexp, names: &Names) -> Result<Face> {
+        let bad = || format!("invalid face {s}");
+        Ok(match s {
+            Sexp::Atom(a) if &**a == "ff" => Face::False,
+            Sexp::Atom(a) if &**a == "ft" => Face::True,
+            Sexp::Atom(_) => return Err(bad()),
+            Sexp::List(xs) => match (xs.first().map(Sexp::atom).transpose()?, &xs[1..]) {
+                (Some("="), [i, end]) => {
+                    let name = i.atom()?;
+                    let k = index(&names.dimensions, name)
+                        .ok_or_else(|| format!("unknown dimension {name}"))?;
+                    match end.atom()? {
+                        "0" => Face::End(k, false),
+                        "1" => Face::End(k, true),
+                        _ => return Err(bad()),
+                    }
+                }
+                (Some("and"), [a, b]) => self.face(a, names)?.and(self.face(b, names)?),
+                (Some("or"), [a, b]) => self.face(a, names)?.or(self.face(b, names)?),
+                _ => return Err(bad()),
+            },
+        })
+    }
+
+    /// `(comp j A ((FACE TERM) ...) BASE)`: composition along the line
+    /// `j ↦ A` of BASE with a system whose branches bind `j`; its face is
+    /// the disjunction of the branch faces. `hcomp` is the same in a type
+    /// that does not depend on `j`, written outside `j`'s scope.
+    fn composition(
+        &mut self,
+        homogeneous: bool,
+        j: &Sexp,
+        a: &Sexp,
+        sides: &Sexp,
+        base: &Sexp,
+        names: &Names,
+    ) -> Result<Sexp> {
+        let inner = names.with_dimension(binder(j)?);
+        if homogeneous {
+            // The type is written outside j's scope; under it, it is shifted.
+            self.term(a, names)?;
+        }
+        let family = self.term(a, &inner)?;
+        let Sexp::List(sides) = sides else {
+            return Err("a composition needs a list of (FACE TERM) branches".into());
+        };
+        let mut extent = Face::False;
+        let mut system = atom("snil");
+        for side in sides.iter().rev() {
+            let Sexp::List(pair) = side else {
+                return Err(format!("invalid branch {side}"));
+            };
+            let [phi, t] = &pair[..] else {
+                return Err(format!("a branch is (FACE TERM): {side}"));
+            };
+            let outer = self.face(phi, names)?;
+            let shifted = self.face(phi, &inner)?;
+            let t = self.term(t, &inner)?;
+            system = call("side", [shifted.quote(), t, system]);
+            extent = if extent == Face::False {
+                outer
+            } else {
+                outer.or(extent)
+            };
+        }
+        Ok(call(
+            "comp",
+            [
+                family,
+                extent.quote(),
+                call("system", [system]),
+                self.term(base, names)?,
+            ],
+        ))
     }
 
     fn term(&mut self, s: &Sexp, names: &Names) -> Result<Sexp> {
@@ -483,6 +565,9 @@ impl Elaborator {
             ("equiv", [a, b]) => {
                 let (a, b) = (self.term(a, names)?, self.term(b, names)?);
                 self.p.equiv_type(&a, &b)?.0
+            }
+            (kind @ ("hcomp" | "comp"), [j, a, sides, base]) => {
+                self.composition(kind == "hcomp", j, a, sides, base, names)?
             }
             ("transport", [i, a, x]) => call(
                 "comp",
