@@ -400,7 +400,7 @@ impl Elaborator {
                     }
                 } else if let Some((d, i)) = data::by_ctor_name(a) {
                     let c = &d.ctors[i];
-                    if c.args.is_empty() {
+                    if c.arity() == 0 {
                         Ok(atom(&c.symbol))
                     } else {
                         Err(format!("constructor {a} needs {} arguments", c.args.len()))
@@ -539,17 +539,18 @@ impl Elaborator {
                 // from the fields or from the expected type.
                 let (d, i) = data::by_ctor_name(c).unwrap();
                 let ctor = &d.ctors[i];
-                if args.len() != ctor.args.len() {
-                    return Err(format!(
-                        "constructor {c} needs {} arguments",
-                        ctor.args.len()
-                    ));
+                if args.len() != ctor.arity() {
+                    return Err(format!("constructor {c} needs {} arguments", ctor.arity()));
                 }
-                let args = args
+                let n = ctor.args.len();
+                let mut out = args[..n]
                     .iter()
                     .map(|a| self.term(a, names))
                     .collect::<Result<Vec<_>>>()?;
-                data::apply(&ctor.symbol, args)
+                if ctor.boundary.is_some() {
+                    out.push(self.interval(&args[n], names)?);
+                }
+                data::apply(&ctor.symbol, out)
             }
             (n, args) if data::by_name(n).is_some() => {
                 let d = data::by_name(n).unwrap();
@@ -602,6 +603,7 @@ impl Elaborator {
         }
         let ty = format!("ty/{name}");
         let mut out = Vec::new();
+        let mut sources = Vec::new();
         for c in ctors {
             let xs = c.list()?;
             let cname = xs.first().ok_or("empty constructor")?.atom()?;
@@ -609,8 +611,20 @@ impl Elaborator {
             if out.iter().any(|o: &Ctor| o.name == cname) {
                 return Err(format!("duplicate constructor {cname}"));
             }
+            // A path constructor ends with `(path LEFT RIGHT)`.
+            let (fields, boundary) = match xs.last() {
+                Some(Sexp::List(ys))
+                    if xs.len() > 1 && ys.first().is_some_and(|h| *h == atom("path")) =>
+                {
+                    let [_, l, r] = &ys[..] else {
+                        return Err(format!("constructor {cname}: expected (path LEFT RIGHT)"));
+                    };
+                    (&xs[1..xs.len() - 1], Some((l.clone(), r.clone())))
+                }
+                _ => (&xs[1..], None),
+            };
             let mut args = Vec::new();
-            for a in &xs[1..] {
+            for a in fields {
                 // Fields: discrete closed types, a parameter, or the type
                 // itself at its own parameters (uniform recursion).
                 let own = Sexp::List(
@@ -637,14 +651,37 @@ impl Elaborator {
                 };
                 args.push(arg);
             }
+            if boundary.is_some() {
+                if !params.is_empty() {
+                    return Err(format!(
+                        "{name}: path constructors need a type without parameters"
+                    ));
+                }
+                if args.iter().any(|a| !matches!(a, ArgTy::Closed(_))) {
+                    return Err(format!(
+                        "path constructor {cname}: fields must be bool, nat or earlier closed data types"
+                    ));
+                }
+            }
             out.push(Ctor {
                 name: cname.to_owned(),
                 symbol: format!("ctor/{name}/{cname}"),
                 args,
+                boundary: None,
             });
+            sources.push(boundary);
         }
         if out.is_empty() {
             return Err(format!("data {name} needs a constructor"));
+        }
+        // Endpoints are closed point terms of the type, elaborated once all
+        // constructors are known.
+        for i in 0..out.len() {
+            if let Some((l, r)) = &sources[i] {
+                let l = self.endpoint(l, &out)?;
+                let r = self.endpoint(r, &out)?;
+                out[i].boundary = Some((l, r));
+            }
         }
         let d = data::register(Data {
             name: name.to_owned(),
@@ -654,6 +691,34 @@ impl Elaborator {
             ctors: out,
         });
         Ok(d.theory())
+    }
+
+    /// A path constructor's endpoint: a point constructor of the type being
+    /// declared, applied to closed terms.
+    fn endpoint(&mut self, s: &Sexp, ctors: &[Ctor]) -> Result<Sexp> {
+        let (head, args) = match s {
+            Sexp::Atom(a) => (&**a, &[][..]),
+            Sexp::List(xs) if !xs.is_empty() => (xs[0].atom()?, &xs[1..]),
+            _ => return Err(format!("invalid endpoint {s}")),
+        };
+        let c = ctors
+            .iter()
+            .find(|c| c.name == head && c.boundary.is_none())
+            .ok_or_else(|| format!("endpoint {s} must be a point constructor of the type"))?;
+        if args.len() != c.args.len() {
+            return Err(format!(
+                "endpoint {s}: {head} needs {} arguments",
+                c.args.len()
+            ));
+        }
+        let mut out = Vec::new();
+        for (a, ty) in args.iter().zip(&c.args) {
+            out.push(match ty {
+                ArgTy::Rec => self.endpoint(a, ctors)?,
+                _ => self.term(a, &Names::default())?,
+            });
+        }
+        Ok(data::apply(&c.symbol, out))
     }
 
     fn fresh(&self, name: &str) -> Result<()> {

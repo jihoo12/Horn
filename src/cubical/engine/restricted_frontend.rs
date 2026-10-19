@@ -400,8 +400,13 @@ impl RestrictedProducer {
             ],
             (h, xs) if crate::cubical::engine::data::is_declared(h) => {
                 let motive = crate::cubical::engine::data::motive_index(h);
+                let interval = crate::cubical::engine::data::interval_index(h);
                 let mut refs = Vec::new();
                 for (i, x) in xs.iter().enumerate() {
+                    if Some(i) == interval {
+                        refs.push(self.f.path.interval(d, x)?);
+                        continue;
+                    }
                     let depth = if Some(i) == motive { n + 1 } else { n };
                     refs.push(self.scope(d, depth, x)?);
                 }

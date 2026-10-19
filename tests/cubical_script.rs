@@ -409,3 +409,49 @@ fn canonical_map_file_is_generated_and_typed_at_levels_0_1_2() {
     .unwrap();
     assert_eq!(certified.checked.goals, 3);
 }
+
+#[test]
+fn declared_higher_inductive_types_compute() {
+    let script = cubical::script::run(include_str!("../examples/cubical/script/hit.hcs")).unwrap();
+    let shown: Vec<_> = script
+        .evaluations
+        .iter()
+        .map(|e| format!("{} = {} : {}", e.name, e.value, e.ty))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            "once = (pos 1) : int",
+            "back = (negsuc 0) : int",
+            "merid-true = (pos 1) : int",
+            "merid-false = (pos 0) : int"
+        ]
+    );
+    let used = &script.certified.rules_used;
+    for rule in [
+        "req.elim/circle.ctor/circle/lp",
+        "req.ctor/susp/merid-1",
+        "req.elim/susp.hcomp",
+    ] {
+        assert!(used.iter().any(|r| r == rule), "{rule}");
+    }
+    // A higher inductive type is not discrete: no rule returns a base.
+    assert!(
+        !script
+            .certified
+            .theory
+            .contains("(rule req.comp-ty/circle ")
+    );
+}
+
+#[test]
+fn path_constructors_are_restricted_to_closed_types_and_point_endpoints() {
+    for bad in [
+        "(data (t A) (a) (p (path a a)))",
+        "(data t (a) (p t (path a a)))",
+        "(data t (a) (p (path a q)))",
+        "(data t (a) (p (path a a)) (q (path p a)))",
+    ] {
+        assert!(cubical::script::run(bad).is_err(), "{bad}");
+    }
+}

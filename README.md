@@ -23,6 +23,13 @@ the universe's line equivalence is now built directly from transports, and
 `rhas.closed` lets a closed library term be checked once instead of once per
 context. See [composite loops](docs/CUBICAL_SCRIPT.md#composite-loops).
 
+Higher inductive types can also be declared in a script, with path
+constructors such as `(data susp (north) (south) (merid bool (path north
+south)))`; their rules, including a dependent eliminator that commutes with
+formal compositions, are generated and shipped with the certificate. See
+[hit.hcs](examples/cubical/script/hit.hcs) and
+[declared higher inductive types](docs/CUBICAL_SCRIPT.md#declared-higher-inductive-types).
+
 ## Certified evaluation through univalence
 
 In [binary.hcs](examples/cubical/script/binary.hcs), addition written once on

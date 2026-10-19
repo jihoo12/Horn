@@ -20,6 +20,13 @@
 //!   the standard models of inductive families. Other compositions in a
 //!   parameterized type are left without a rule.
 //!
+//! - a type with a path constructor (a higher inductive type, closed) is
+//!   not discrete: a composition in it is a formal point, and the
+//!   eliminator commutes with it along the filler (CHM 2018).
+//!
+//! A path constructor has closed discrete fields and closed point endpoints;
+//! its terms take an interval after the fields.
+//!
 //! Constructor terms do not carry the parameters: they are read off the
 //! fields or the expected type, as for unannotated lambdas.
 use super::path_frontend::v;
@@ -42,9 +49,17 @@ pub struct Ctor {
     pub name: String,
     pub symbol: String,
     pub args: Vec<ArgTy>,
+    /// A path constructor's endpoints, closed point terms of the type. Its
+    /// terms take one interval argument after the fields.
+    pub boundary: Option<(Sexp, Sexp)>,
 }
 
 impl Ctor {
+    /// The number of arguments its terms take: fields, then an interval for
+    /// a path constructor.
+    pub fn arity(&self) -> usize {
+        self.args.len() + usize::from(self.boundary.is_some())
+    }
     pub fn recursive(&self) -> Vec<usize> {
         (0..self.args.len())
             .filter(|&k| matches!(self.args[k], ArgTy::Rec))
@@ -101,6 +116,12 @@ pub fn by_ctor_name(name: &str) -> Option<(Rc<Data>, usize)> {
 pub fn is_declared(symbol: &str) -> bool {
     by_type(symbol).is_some() || by_elim(symbol).is_some() || by_ctor(symbol).is_some()
 }
+/// The argument position of a path constructor's interval.
+pub fn interval_index(symbol: &str) -> Option<usize> {
+    let (data, i) = by_ctor(symbol)?;
+    let c = &data.ctors[i];
+    c.boundary.as_ref().map(|_| c.args.len())
+}
 /// The argument position of an eliminator's motive, which binds one variable.
 pub fn motive_index(symbol: &str) -> Option<usize> {
     by_elim(symbol).map(|d| d.params)
@@ -155,10 +176,14 @@ pub enum Prem {
     },
     /// `(shift from cutoff to)`, cutoff 0 or 1.
     Shift {
-        from: String,
+        from: Tpl,
         cutoff: usize,
         to: String,
     },
+    /// `(dshift from z to)`: room for one dimension.
+    DShift { from: String, to: String },
+    /// `(interval ?d ?i)`
+    Interval(String),
     /// `(subst from z by to)`
     Subst { from: String, by: Tpl, to: String },
 }
@@ -185,7 +210,12 @@ impl Plan {
     }
     /// Shift `from` `times` times at `cutoff`; the name of the result.
     fn chain(&mut self, from: &str, cutoff: usize, times: usize) -> String {
-        let mut cur = from.to_owned();
+        self.chain_tpl(var(from.to_owned()), cutoff, times)
+    }
+    /// Shift a template `times` times at `cutoff`. A template that is not a
+    /// variable is only named by a shift, so it needs `times > 0`.
+    fn chain_tpl(&mut self, from: Tpl, cutoff: usize, times: usize) -> String {
+        let mut cur = from;
         for _ in 0..times {
             let to = self.var();
             self.prems.push(Prem::Shift {
@@ -193,9 +223,12 @@ impl Plan {
                 cutoff,
                 to: to.clone(),
             });
-            cur = to;
+            cur = var(to);
         }
-        cur
+        match cur {
+            Tpl::Var(v) => v,
+            _ => panic!("chain_tpl names a template only by shifting it"),
+        }
     }
     fn has(&mut self, term: Tpl, ty: Tpl) {
         self.prems.push(Prem::Has {
@@ -219,8 +252,10 @@ impl Plan {
                 }
                 Prem::Shift { from, cutoff, to } => {
                     let c = if *cutoff == 0 { "z" } else { "(s z)" };
-                    format!("(shift ?{from} {c} ?{to})")
+                    format!("(shift {} {c} ?{to})", from.text())
                 }
+                Prem::DShift { from, to } => format!("(dshift ?{from} z ?{to})"),
+                Prem::Interval(i) => format!("(interval ?d ?{i})"),
                 Prem::Subst { from, by, to } => format!("(subst ?{from} z {} ?{to})", by.text()),
             })
             .collect();
@@ -238,6 +273,31 @@ fn var(name: String) -> Tpl {
 }
 
 impl Data {
+    /// The eliminator's value on a closed point term, by its computation
+    /// rules: `c a… ↦ m a… (elim … r)…` for the recursive fields `r`.
+    pub fn unfold(&self, t: &Sexp, methods: &[Tpl]) -> Tpl {
+        let (head, args): (&str, &[Sexp]) = match t {
+            Sexp::Atom(a) => (a, &[]),
+            Sexp::List(xs) => (xs[0].atom().unwrap_or(""), &xs[1..]),
+        };
+        let i = self
+            .ctors
+            .iter()
+            .position(|c| c.symbol == head)
+            .expect("endpoints are point constructors of the type");
+        let mut out = methods[i].clone();
+        for a in args {
+            out = Tpl::App("app".into(), vec![out, Tpl::Ground(a.clone())]);
+        }
+        for j in self.ctors[i].recursive() {
+            out = Tpl::App("app".into(), vec![out, self.unfold(&args[j], methods)]);
+        }
+        out
+    }
+    /// Whether the type has a path constructor.
+    pub fn is_higher(&self) -> bool {
+        self.ctors.iter().any(|c| c.boundary.is_some())
+    }
     fn params_tpl(&self) -> Vec<Tpl> {
         (0..self.params).map(|j| var(format!("A{j}"))).collect()
     }
@@ -284,7 +344,12 @@ impl Data {
             let ty = self.field_ty(a, &params);
             p.has(f.clone(), ty);
         }
-        p.term = Tpl::app(&c.symbol, fields);
+        let mut args = fields;
+        if c.boundary.is_some() {
+            p.prems.push(Prem::Interval("i".into()));
+            args.push(var("i".into()));
+        }
+        p.term = Tpl::app(&c.symbol, args);
         p.ty = self.type_tpl(params);
         p
     }
@@ -311,6 +376,9 @@ impl Data {
                 .map(|j| var(p.chain(&format!("A{j}"), 0, times)))
                 .collect()
         };
+        let methods: Vec<Tpl> = (0..self.ctors.len())
+            .map(|i| var(format!("m{i}")))
+            .collect();
         for (i, c) in self.ctors.iter().enumerate() {
             let (n, rec) = (c.args.len(), c.recursive());
             let r = rec.len();
@@ -318,6 +386,39 @@ impl Data {
             for (k, a) in c.args.iter().enumerate() {
                 let here = shifted(&mut p, k);
                 domains.push(self.field_ty(a, &here));
+            }
+            if let Some((left, right)) = &c.boundary {
+                // Π fields. PathP (i. P (c fields i)) (elim … left) (elim … right):
+                // the motive under the fields, then under one dimension.
+                let base = p.chain("p", 1, n);
+                let lifted = p.var();
+                p.prems.push(Prem::DShift {
+                    from: base,
+                    to: lifted.clone(),
+                });
+                let mut point: Vec<Tpl> = (0..n).map(|k| Tpl::Ground(v(n - 1 - k))).collect();
+                point.push(Tpl::Ground(call("dim", [atom("z")])));
+                let fam = p.var();
+                p.prems.push(Prem::Subst {
+                    from: lifted,
+                    by: Tpl::app(&c.symbol, point),
+                    to: fam.clone(),
+                });
+                // The endpoints are what the eliminator computes on them,
+                // spelled out with the methods: stating them with the
+                // eliminator itself would make its typing rule circular.
+                let mut ends = Vec::new();
+                for end in [left, right] {
+                    let e = self.unfold(end, &methods);
+                    ends.push(if n == 0 { e } else { var(p.chain_tpl(e, 0, n)) });
+                }
+                let [l, r] = <[Tpl; 2]>::try_from(ends).ok().unwrap();
+                let mut ty = Tpl::App("path".into(), vec![var(fam), l, r]);
+                for dom in domains.into_iter().rev() {
+                    ty = Tpl::App("pi".into(), vec![dom, ty]);
+                }
+                p.has(var(format!("m{i}")), ty);
+                continue;
             }
             let mut ihs = Vec::new();
             for (q, &j) in rec.iter().enumerate() {
@@ -374,11 +475,22 @@ impl Data {
         let tm = |n: usize| vec!["Tm"; n].join(" ");
         let _ = writeln!(w, "(ctor {t} ({}) Tm)", tm(np));
         for c in &self.ctors {
-            let _ = writeln!(w, "(ctor {} ({}) Tm)", c.symbol, tm(c.args.len()));
+            let sorts = if c.boundary.is_some() {
+                format!("{} I", tm(c.args.len())).trim().to_owned()
+            } else {
+                tm(c.args.len())
+            };
+            let _ = writeln!(w, "(ctor {} ({sorts}) Tm)", c.symbol);
         }
         let _ = writeln!(w, "(ctor {e} ({}) Tm)", tm(np + k + 2));
         // Structure: argumentwise, except the eliminator's motive binder.
-        let structural = |w: &mut String, head: &str, arity: usize, binder: Option<usize>| {
+        // A path constructor's interval argument is scoped as an interval,
+        // kept by ordinary operations and mapped by dimension operations.
+        let structural = |w: &mut String,
+                          head: &str,
+                          arity: usize,
+                          binder: Option<usize>,
+                          interval: Option<usize>| {
             let xs: Vec<String> = (0..arity).map(|i| format!("?x{i}")).collect();
             let ys: Vec<String> = (0..arity).map(|i| format!("?y{i}")).collect();
             let term = |zs: &[String]| {
@@ -390,6 +502,9 @@ impl Data {
             };
             let scope: Vec<String> = (0..arity)
                 .map(|i| {
+                    if Some(i) == interval {
+                        return format!("(interval ?d ?x{i})");
+                    }
                     let n = if Some(i) == binder { "(s ?n)" } else { "?n" };
                     format!("(scoped ?d {n} ?x{i})")
                 })
@@ -403,9 +518,16 @@ impl Data {
             for op in ["shift", "subst", "dshift", "dsubst"] {
                 let r = if op.ends_with("subst") { " ?r" } else { "" };
                 let mut prems = Vec::new();
+                let mut ys = ys.clone();
                 for i in 0..arity {
                     let ordinary = !op.starts_with('d') && Some(i) == binder;
-                    if ordinary && op == "subst" {
+                    if Some(i) == interval {
+                        match op {
+                            "dshift" => prems.push(format!("(ishift ?x{i} ?k ?y{i})")),
+                            "dsubst" => prems.push(format!("(isubst ?x{i} ?k ?r ?y{i})")),
+                            _ => ys[i] = format!("?x{i}"),
+                        }
+                    } else if ordinary && op == "subst" {
                         prems.push("(shift ?r z ?r2)".to_owned());
                         prems.push(format!("(subst ?x{i} (s ?k) ?r2 ?y{i})"));
                     } else if ordinary {
@@ -423,11 +545,12 @@ impl Data {
                 );
             }
         };
-        structural(w, t, np, None);
+        structural(w, t, np, None, None);
         for c in &self.ctors {
-            structural(w, &c.symbol, c.args.len(), None);
+            let interval = c.boundary.as_ref().map(|_| c.args.len());
+            structural(w, &c.symbol, c.arity(), None, interval);
         }
-        structural(w, e, np + k + 2, Some(np));
+        structural(w, e, np + k + 2, Some(np), None);
         // Typing, from the shared plans.
         w.push_str(&self.formation_plan().text(&format!("rhas.{t}")));
         for (i, c) in self.ctors.iter().enumerate() {
@@ -462,7 +585,7 @@ impl Data {
             );
         }
         for c in &self.ctors {
-            if c.args.is_empty() {
+            if c.args.is_empty() || c.boundary.is_some() {
                 continue;
             }
             let a: Vec<String> = (0..c.args.len()).map(|j| format!("?a{j}")).collect();
@@ -487,8 +610,86 @@ impl Data {
                 prems.join(" ")
             );
         }
-        // Computation: one rule per constructor.
+        // Path constructors: boundary, congruence and computation.
         for (i, c) in self.ctors.iter().enumerate() {
+            let Some((left, right)) = &c.boundary else {
+                continue;
+            };
+            let a: Vec<String> = (0..c.args.len()).map(|j| format!("?a{j}")).collect();
+            let b: Vec<String> = (0..c.args.len()).map(|j| format!("?b{j}")).collect();
+            let at = |xs: &[String], i: &str| {
+                let mut xs = xs.to_vec();
+                xs.push(i.to_owned());
+                format!("({} {})", c.symbol, xs.join(" "))
+            };
+            let point = at(&a, "?i");
+            for (end, value) in [("0", left), ("1", right)] {
+                let _ = writeln!(
+                    w,
+                    "(rule req.{}-{end} ((rhas ?d ?g ?phi {point} {ty_text}) (local ?d ?phi ?i i{end}) (rhas ?d ?g ?phi {value} {ty_text})) (req ?d ?g ?phi {point} {value} {ty_text}))",
+                    c.symbol
+                );
+            }
+            let mut prems: Vec<String> = a
+                .iter()
+                .zip(&b)
+                .zip(&c.args)
+                .map(|((x, y), ty)| {
+                    format!(
+                        "(req ?d ?g ?phi {x} {y} {})",
+                        self.field_ty(ty, &params_tpl).text()
+                    )
+                })
+                .collect();
+            prems.push(format!("(rhas ?d ?g ?phi {point} {ty_text})"));
+            prems.push("(local ?d ?phi ?i ?j)".into());
+            prems.push("(interval ?d ?j)".into());
+            let _ = writeln!(
+                w,
+                "(rule req.{}-cong ({}) (req ?d ?g ?phi {point} {} {ty_text}))",
+                c.symbol,
+                prems.join(" "),
+                at(&b, "?j")
+            );
+            let mut rhs = format!("?m{i}");
+            for x in &a {
+                rhs = format!("(app {rhs} {x})");
+            }
+            let rhs = format!("(papp {rhs} ?i)");
+            let lhs = head_args(&point);
+            let _ = writeln!(
+                w,
+                "(rule req.{e}.{} ((rhas ?d ?g ?phi {lhs} ?ty) (rhas ?d ?g ?phi {rhs} ?ty)) (req ?d ?g ?phi {lhs} {rhs} ?ty))",
+                c.symbol
+            );
+        }
+        // The eliminator on a formal composition (CHM 2018): composition in
+        // the motive along the filler, of the eliminator on tube and base.
+        if self.is_higher() {
+            let scrutinee = format!("(comp {t} ?phi ?t ?u)");
+            let shifted: Vec<String> = (0..k).map(|i| format!("?n{i}")).collect();
+            let mut prems = vec![
+                format!("(rhas ?d ?g ?psi {} ?ty)", head_args(&scrutinee)),
+                format!("(filldef {t} ?phi ?t ?u ?fill)"),
+                "(dshift ?p z ?p1)".to_owned(),
+                "(subst ?p1 z ?fill ?pf)".to_owned(),
+            ];
+            prems.extend((0..k).map(|i| format!("(dshift ?m{i} z ?n{i})")));
+            let tube = format!("({e} ?p1 {} ?t)", shifted.join(" "));
+            let rhs = format!("(comp ?pf ?phi {tube} {})", head_args("?u"));
+            prems.push(format!("(rhas ?d ?g ?psi {rhs} ?ty)"));
+            let _ = writeln!(
+                w,
+                "(rule req.{e}.hcomp ({}) (req ?d ?g ?psi {} {rhs} ?ty))",
+                prems.join(" "),
+                head_args(&scrutinee)
+            );
+        }
+        // Computation: one rule per point constructor.
+        for (i, c) in self.ctors.iter().enumerate() {
+            if c.boundary.is_some() {
+                continue;
+            }
             let a: Vec<String> = (0..c.args.len()).map(|j| format!("?a{j}")).collect();
             let scrutinee = if a.is_empty() {
                 c.symbol.clone()
@@ -517,8 +718,11 @@ impl Data {
             head_args("?x"),
             head_args("?x2")
         );
-        // Composition.
-        if np == 0 {
+        // Composition. A higher inductive type is not discrete: a
+        // composition in it is a formal point, taken apart by the
+        // eliminator's hcomp rule above.
+        if self.is_higher() {
+        } else if np == 0 {
             let _ = writeln!(
                 w,
                 "(rule req.comp-{t} ((rhas ?d ?g ?psi (comp {t} ?phi ?t ?b) {t})) (req ?d ?g ?psi (comp {t} ?phi ?t ?b) ?b {t}))"

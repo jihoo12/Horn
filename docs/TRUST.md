@@ -123,6 +123,7 @@ reports them (`relies on N of M rules`, and `--emit` writes `rules-used`):
 | `data.hcs`: declared types and ua | 335 of 463 (50 generated) |
 | `binary.hcs`: addition moved to binary numbers | 338 of 436 (37 generated) |
 | `circle.hcs`: winding numbers, including `loop · loop` | 355 of 429 (28 generated) |
+| `hit.hcs`: declared circle and suspension | 399 of 498 (89 generated) |
 | ua-transport, univalence, canonicity (bundled, snapshot theory) | 253, 267, 297 of 396 |
 
 The first seven scripts together use 337 rules (measured before the circle

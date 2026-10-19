@@ -99,8 +99,8 @@ strict positivity is immediate. Composition rules depend on parameters:
   and stay unevaluated; the transports that ua needs all use the empty face.
 
 The type (in its parameters), its constructors and its eliminator also get
-congruence rules. Indices, function-typed fields and
-higher constructors are not supported in declarations; the circle is built in.
+congruence rules. Indices and function-typed fields are not supported;
+path constructors are (below).
 
 ## Programs move along equivalences
 
@@ -191,6 +191,45 @@ Two changes make that run in a minute instead of not finishing:
   equivalence, which were otherwise re-checked at every dimension depth and
   face they were used under.
 
+## Declared higher inductive types
+
+A constructor whose last item is `(path LEFT RIGHT)` is a path constructor
+([hit.hcs](../examples/cubical/script/hit.hcs), about 2 s). Its endpoints are
+closed point terms of the type; it may have fields (bool, nat, earlier
+closed data types), and its terms take an interval after them:
+
+```text
+(data circle (pt) (lp (path pt pt)))
+(data susp (north) (south) (merid bool (path north south)))
+(eval merid-true (app wind (plam i (app to-circle (merid btrue i)))))   ; (pos 1) : int
+```
+
+For a path constructor the declaration also generates:
+
+- typing with an interval premise, and scope/shift/substitution rules that
+  map the interval by dimension operations only;
+- its boundary, `(c a… r) ≡ LEFT` when `r = 0` holds under the face, and
+  `≡ RIGHT` when `r = 1`, and congruence in the fields and the interval;
+- an eliminator method of type `Π a…. PathP (i. P (c a… i)) e₀ e₁`, where
+  `e₀`, `e₁` are the eliminator's values on the endpoints spelled out with
+  the methods (stating them with the eliminator would make its typing rule
+  circular), and the computation `elim … (c a… r) ≡ (m a…) @ r`;
+- instead of a composition rule, the eliminator on a formal composition
+  (CHM 2018), `req.E.hcomp`:
+
+```text
+elim P m… (hcomp^j_T [φ ↦ u] u0)
+  ≡ comp^j (P (hfill^j [φ ↦ u] u0)) [φ ↦ elim P m… u] (elim P m… u0)
+```
+
+with the filler given by `filldef`, so the motive may depend on the point.
+A type with a path constructor is not discrete, so it gets no rule that
+returns a composition's base. With the declared circle, `wind (lp · lp)`
+also computes to `(pos 2)` (about 60 s), through this dependent rule
+rather than the built-in `s1rec` one. Path constructors need a type without
+parameters, fields that are closed discrete types, and point endpoints;
+higher-dimensional constructors (a torus's square) are not supported.
+
 ## Universe levels
 
 `ua` and `iso-equiv` are the prelude at level 0; `(ua-at L)` and
@@ -257,7 +296,8 @@ It is not meant to become Lean 4. Its distinguishing commitments are:
 ## Forms
 
 - `(data NAME (CTOR FIELD-TYPE...) ...)` or `(data (NAME PARAM...) ...)`: a data
-  type (above). Constructors
+  type (above); a constructor `(CTOR FIELD-TYPE... (path LEFT RIGHT))` is a
+  path constructor, applied as `(CTOR a... r)`. Constructors
   apply like functions; `(elim NAME k P (METHODS...) x)` eliminates `x` into
   the motive `P` over `k : NAME`, with one method per constructor taking its
   arguments and then one induction hypothesis per recursive argument.
