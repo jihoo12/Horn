@@ -21,6 +21,15 @@ fn run() -> Result<(), String> {
                 stats.depth,
                 stats.oracle_bytes
             );
+            if stats.choices > 0 {
+                eprintln!(
+                    "model: {} choices among several candidates, most probable taken {} ({:.1}%), ranks {:?}",
+                    stats.choices,
+                    stats.top1,
+                    100.0 * stats.top1 as f64 / stats.choices as f64,
+                    stats.rank_hist
+                );
+            }
         }
         Some("decode") if args.len() == 6 => {
             let oracle = fs::read(&args[4]).map_err(|e| e.to_string())?;

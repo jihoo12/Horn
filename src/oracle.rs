@@ -515,6 +515,12 @@ pub struct Stats {
     /// Deepest subgoal nesting reached.
     pub depth: usize,
     pub oracle_bytes: usize,
+    /// Choices among two or more candidates (encoding only), and how often
+    /// the model's most probable candidate, at that point of the run, was
+    /// the one taken; `rank_hist[k]` counts choices taken at rank k (capped).
+    pub choices: usize,
+    pub top1: usize,
+    pub rank_hist: [usize; 8],
 }
 
 struct Engine<'s, 'w> {
@@ -536,6 +542,35 @@ struct Engine<'s, 'w> {
     truth: Option<Truth>,
     out: Option<Output<'w>>,
     stats: Stats,
+    /// Search mode: the certificate lines found so far, and the judgments
+    /// derived in order, so that a failed attempt can be undone.
+    lines: Vec<String>,
+    added: Vec<u32>,
+    open_goals: std::collections::HashSet<String>,
+    /// Search training: counts (taken, offered) per candidate under a
+    /// richer context that also sees the head symbols of the goal's
+    /// arguments. Not used for oracle coding.
+    rich: Option<Map<u64, (u32, u32)>>,
+    /// Search training: per (predicate, argument position), how often the
+    /// argument was already ground when a subgoal was solved, out of how
+    /// many subgoals. Positions almost always ground act as inputs.
+    modes: Map<(u32, usize), (u32, u32)>,
+}
+
+/// Limits for model-guided search.
+pub struct SearchLimits {
+    /// Candidate attempts, over the whole search.
+    pub attempts: usize,
+    /// Subgoal nesting.
+    pub depth: usize,
+}
+
+struct Checkpoint {
+    trail: usize,
+    mark: (usize, usize, usize),
+    added: usize,
+    lines: usize,
+    steps: usize,
 }
 
 impl<'s, 'w> Engine<'s, 'w> {
@@ -556,7 +591,313 @@ impl<'s, 'w> Engine<'s, 'w> {
             truth: None,
             out: None,
             stats: Stats::default(),
+            lines: Vec::new(),
+            added: Vec::new(),
+            open_goals: std::collections::HashSet::new(),
+            rich: None,
+            modes: Map::default(),
         }
+    }
+
+    /// Whether every argument position that the corpus treats as an input
+    /// is ground in `goal`.
+    fn inputs_ready(&mut self, goal: T) -> bool {
+        let goal = self.deref(goal);
+        let Some((pred, n)) = self.head(goal) else {
+            return true;
+        };
+        for k in 0..n {
+            let input = matches!(self.modes.get(&(pred, k)),
+                Some(&(ground, total)) if total >= 20 && f64::from(ground) >= 0.75 * f64::from(total));
+            if input && self.ground(self.arg(goal, k)).is_none() {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// The head symbols of a goal's arguments (or "open" for a variable).
+    fn shape_feature(&self, goal: T) -> u64 {
+        let goal = self.deref(goal);
+        let Some((pred, n)) = self.head(goal) else {
+            return 0;
+        };
+        let mut parts = vec![u64::from(pred)];
+        for k in 0..n {
+            let a = self.deref(self.arg(goal, k));
+            parts.push(match self.head(a) {
+                Some((h, _)) => u64::from(h) + 1,
+                None => 0,
+            });
+        }
+        mix(&parts)
+    }
+
+    fn rich_context(&self, goal: T, base: u64) -> u64 {
+        mix(&[7, base, self.shape_feature(goal)])
+    }
+
+    fn checkpoint(&self) -> Checkpoint {
+        Checkpoint {
+            trail: self.trail.len(),
+            mark: self.mark(),
+            added: self.added.len(),
+            lines: self.lines.len(),
+            steps: self.stats.steps,
+        }
+    }
+
+    fn rollback(&mut self, c: &Checkpoint) {
+        for v in self.trail.drain(c.trail..) {
+            if (v as usize) < c.mark.0 {
+                self.vars[v as usize].0 = None;
+            }
+        }
+        self.release(c.mark);
+        for j in self.added.drain(c.added..) {
+            self.done.remove(&j);
+            let pred = self.store.node(j)[0] as usize;
+            if self.derived[pred].last() == Some(&j) {
+                self.derived[pred].pop();
+            }
+        }
+        self.lines.truncate(c.lines);
+        self.stats.steps = c.steps;
+    }
+
+    /// The goal with its variables numbered by first occurrence: two goals
+    /// with equal keys are variants (equal up to renaming).
+    fn variant_key(&self, t: T, names: &mut Vec<u32>, out: &mut String) {
+        match self.deref(t) {
+            T::V(v) => {
+                let i = names.iter().position(|&w| w == v).unwrap_or_else(|| {
+                    names.push(v);
+                    names.len() - 1
+                });
+                out.push_str(&format!("?{i}"));
+            }
+            T::G(g) => out.push_str(&format!("#{g}")),
+            t @ T::S(_) => {
+                let (h, n) = self.head(t).expect("compound");
+                out.push_str(&format!("({h}"));
+                for k in 0..n {
+                    out.push(' ');
+                    self.variant_key(self.arg(t, k), names, out);
+                }
+                out.push(')');
+            }
+        }
+    }
+
+    fn term_text(&self, id: u32) -> String {
+        let node = self.store.node(id);
+        if node.len() == 1 {
+            return self.spec.names[node[0] as usize].clone();
+        }
+        let args: Vec<String> = node[1..].iter().map(|&a| self.term_text(a)).collect();
+        format!("({} {})", self.spec.names[node[0] as usize], args.join(" "))
+    }
+
+    /// Model-guided search for a derivation of `goal`: candidates in order of
+    /// the adaptive model's probability, undoing failed attempts. Untrusted;
+    /// the certificate it writes is checked by the kernel.
+    fn search(
+        &mut self,
+        goal: T,
+        parent: u64,
+        depth: usize,
+        limits: &mut SearchLimits,
+        active: &mut std::collections::HashSet<u32>,
+    ) -> Result<u32> {
+        if depth > limits.depth {
+            return Err("search depth limit".into());
+        }
+        // A goal that is a variant of one being solved would only repeat it.
+        let mut key = String::new();
+        self.variant_key(goal, &mut Vec::new(), &mut key);
+        if !self.open_goals.insert(key.clone()) {
+            return Err("repeats an enclosing goal".into());
+        }
+        let result = self.search_inner(goal, parent, depth, limits, active);
+        self.open_goals.remove(&key);
+        result
+    }
+
+    fn search_inner(
+        &mut self,
+        goal: T,
+        parent: u64,
+        depth: usize,
+        limits: &mut SearchLimits,
+        active: &mut std::collections::HashSet<u32>,
+    ) -> Result<u32> {
+        self.stats.depth = self.stats.depth.max(depth);
+        let spec = self.spec;
+        let ground = self.ground(goal);
+        if let Some(g) = ground {
+            if let Some(n) = self.done.get(&g) {
+                return Ok(*n);
+            }
+            if active.contains(&g) {
+                return Err("cyclic goal".into());
+            }
+        }
+        let goal = self.deref(goal);
+        let (pred, arity) = self.head(goal).ok_or("a goal must be a judgment")?;
+        let reuse = match ground {
+            Some(_) => Vec::new(),
+            None => self.lookup(goal, pred, arity),
+        };
+        let mut rules = Vec::new();
+        for &r in &spec.by_pred[pred as usize] {
+            let rule = &spec.rules[r as usize];
+            let mut env = vec![None; rule.vars.len()];
+            if self.trial(|e| e.unify_pat(&rule.conclusion, &mut env, &rule.vars, goal)) {
+                rules.push(r);
+            }
+        }
+        let open = u64::from(ground.is_none());
+        let ctxs: Vec<u64> = (0..reuse.len())
+            .map(|i| mix(&[1, parent, open, i.min(7) as u64]))
+            .chain(rules.iter().map(|&r| mix(&[2, parent, open, u64::from(r)])))
+            .collect();
+        let mut rest = 1.0f64;
+        let mut order: Vec<(f64, usize)> = Vec::with_capacity(ctxs.len());
+        for (i, ctx) in ctxs.iter().enumerate() {
+            let yes = if i + 1 == ctxs.len() {
+                1.0
+            } else {
+                1.0 - f64::from(*self.model.get(ctx).unwrap_or(&1024)) / 2048.0
+            };
+            // The richer, shape-aware estimate wins where it has data.
+            let rich = self
+                .rich
+                .as_ref()
+                .and_then(|m| m.get(&self.rich_context(goal, *ctx)))
+                .map(|&(taken, offered)| (f64::from(taken) + 0.5) / (f64::from(offered) + 1.0));
+            let score = match rich {
+                Some(p) => 1.0 + p,
+                None => rest * yes,
+            };
+            order.push((score, i));
+            rest *= 1.0 - yes;
+        }
+        order.sort_by(|a, b| b.0.total_cmp(&a.0));
+        if let Some(g) = ground {
+            active.insert(g);
+        }
+        let mut last = format!("no rule derives a goal for {}", spec.names[pred as usize]);
+        for (_, c) in order {
+            if limits.attempts == 0 {
+                last = "search attempt limit".into();
+                break;
+            }
+            limits.attempts -= 1;
+            self.stats.choices += 1;
+            if std::env::var_os("HORN_SEARCH_TRACE").is_some() && self.stats.choices < 400 {
+                let what = match reuse.get(c) {
+                    Some(_) => "reuse".to_string(),
+                    None => spec.rules[rules[c - reuse.len()] as usize].name.clone(),
+                };
+                let mut key = String::new();
+                self.variant_key(goal, &mut Vec::new(), &mut key);
+                eprintln!("{depth:3} {what:22} {}", key.chars().take(150).collect::<String>());
+            }
+            let cp = self.checkpoint();
+            match self.attempt(goal, c, &reuse, &rules, depth, limits, active) {
+                Ok(step) => {
+                    if let Some(g) = ground {
+                        active.remove(&g);
+                    }
+                    return Ok(step);
+                }
+                Err(e) => {
+                    last = e;
+                    self.rollback(&cp);
+                }
+            }
+        }
+        if let Some(g) = ground {
+            active.remove(&g);
+        }
+        Err(last)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn attempt(
+        &mut self,
+        goal: T,
+        c: usize,
+        reuse: &[u32],
+        rules: &[u32],
+        depth: usize,
+        limits: &mut SearchLimits,
+        active: &mut std::collections::HashSet<u32>,
+    ) -> Result<u32> {
+        if let Some(&j) = reuse.get(c) {
+            if !self.unify(goal, T::G(j)) {
+                return Err("reuse does not fit".into());
+            }
+            return Ok(self.done[&j]);
+        }
+        let spec = self.spec;
+        let r = rules[c - reuse.len()];
+        let rule = &spec.rules[r as usize];
+        let mut env = vec![None; rule.vars.len()];
+        if !self.unify_pat(&rule.conclusion, &mut env, &rule.vars, goal) {
+            return Err("conclusion does not fit".into());
+        }
+        let premises: Vec<T> = rule
+            .premises
+            .iter()
+            .map(|p| self.inst(p, &mut env, &rule.vars))
+            .collect();
+        let mut refs = vec![NONE; premises.len()];
+        let mut todo: Vec<usize> = (0..premises.len()).collect();
+        while !todo.is_empty() {
+            // A premise whose input positions (learned from the corpus) are
+            // all ground, preferring ground premises as the coder does;
+            // otherwise the coder's own order.
+            let next = (0..todo.len())
+                .find(|&i| self.ground(premises[todo[i]]).is_some())
+                .or_else(|| (0..todo.len()).find(|&i| self.inputs_ready(premises[todo[i]])));
+            // No premise can run with its inputs known: this rule cannot be
+            // used in this direction, so the attempt fails here.
+            let Some(next) = next else {
+                return Err("no premise has its inputs determined".into());
+            };
+            let k = todo.remove(next);
+            let context = mix(&[3, u64::from(r), k as u64]);
+            refs[k] = self.search(premises[k], context, depth + 1, limits, active)?;
+            self.settle(premises[k]);
+        }
+        let mut open = Vec::new();
+        self.unbound(goal, &mut open);
+        if !open.is_empty() {
+            return Err("conclusion left open: a witness would be needed".into());
+        }
+        let judgment = self.ground(goal).ok_or("conclusion is not ground")?;
+        if let Some(n) = self.done.get(&judgment) {
+            return Ok(*n);
+        }
+        let step = self.stats.steps as u32;
+        self.stats.steps += 1;
+        let mut bindings = String::new();
+        for &v in &rule.free {
+            let id = self
+                .ground(env[v].expect("conclusion variable"))
+                .ok_or("free conclusion variable is not ground")?;
+            bindings.push_str(&format!(" ({} {})", rule.vars[v].0, self.term_text(id)));
+        }
+        let refs: Vec<String> = refs.iter().map(u32::to_string).collect();
+        self.lines.push(format!(
+            "(step {step} {} ({}){bindings})\n",
+            rule.name,
+            refs.join(" ")
+        ));
+        self.remember(judgment, step);
+        self.added.push(judgment);
+        Ok(step)
     }
 
     fn bit(&mut self, ctx: u64, value: bool) -> Result<bool> {
@@ -574,6 +915,25 @@ impl<'s, 'w> Engine<'s, 'w> {
     /// Pick one of `ctxs.len()` candidates by asking, in order, "is it this
     /// one?"; `chosen` is only read when encoding.
     fn choose(&mut self, chosen: usize, ctxs: &[u64]) -> Result<usize> {
+        if matches!(self.coder, Coder::Encode(_)) && ctxs.len() > 1 {
+            // Probability of each candidate under the current model: the
+            // chain asks "is it this one?" in order; p is P(no) in 1/2048.
+            let mut rest = 1.0f64;
+            let mut probs = Vec::with_capacity(ctxs.len());
+            for (i, ctx) in ctxs.iter().enumerate() {
+                let yes = if i + 1 == ctxs.len() {
+                    1.0
+                } else {
+                    1.0 - f64::from(*self.model.get(ctx).unwrap_or(&1024)) / 2048.0
+                };
+                probs.push(rest * yes);
+                rest *= 1.0 - yes;
+            }
+            let rank = probs.iter().filter(|&&q| q > probs[chosen]).count();
+            self.stats.choices += 1;
+            self.stats.top1 += usize::from(rank == 0);
+            self.stats.rank_hist[rank.min(7)] += 1;
+        }
         for (i, &ctx) in ctxs.iter().enumerate().take(ctxs.len() - 1) {
             if self.bit(ctx, chosen == i)? {
                 return Ok(i);
@@ -751,10 +1111,10 @@ impl<'s, 'w> Engine<'s, 'w> {
     /// Run `f` as a trial: every binding and allocation is undone afterwards.
     /// Trials never nest, so the trail only matters inside one.
     fn trial(&mut self, f: impl FnOnce(&mut Self) -> bool) -> bool {
-        self.trail.clear();
+        let start = self.trail.len();
         let mark = self.mark();
         let ok = f(self);
-        for v in self.trail.drain(..) {
+        for v in self.trail.drain(start..) {
             if (v as usize) < mark.0 {
                 self.vars[v as usize].0 = None;
             }
@@ -835,8 +1195,12 @@ impl<'s, 'w> Engine<'s, 'w> {
         }
         let k = self.index_key(pred, mask, &key);
         let bucket = self.buckets.get(&k).cloned().unwrap_or_default();
-        bucket
+        let mut seen = std::collections::HashSet::new();
+        let live: Vec<u32> = bucket
             .into_iter()
+            .filter(|j| self.done.contains_key(j) && seen.insert(*j))
+            .collect();
+        live.into_iter()
             .filter(|&j| self.trial(|e| e.unify(goal, T::G(j))))
             .collect()
     }
@@ -866,6 +1230,14 @@ impl<'s, 'w> Engine<'s, 'w> {
         }
         let goal = self.deref(goal);
         let (pred, arity) = self.head(goal).ok_or("a goal must be a judgment")?;
+        if self.rich.is_some() {
+            for k in 0..arity {
+                let is_ground = self.ground(self.arg(goal, k)).is_some();
+                let e = self.modes.entry((pred, k)).or_insert((0, 0));
+                e.1 += 1;
+                e.0 += u32::from(is_ground);
+            }
+        }
         let reuse = match ground {
             Some(_) => Vec::new(),
             None => self.lookup(goal, pred, arity),
@@ -903,6 +1275,17 @@ impl<'s, 'w> Engine<'s, 'w> {
             ));
         }
         let c = self.choose(chosen, &ctxs)?;
+        if self.rich.is_some() && ctxs.len() > 1 {
+            let keys: Vec<u64> = ctxs.iter().map(|&x| self.rich_context(goal, x)).collect();
+            let rich = self.rich.as_mut().expect("rich model");
+            for (i, k) in keys.into_iter().enumerate() {
+                let e = rich.entry(k).or_insert((0, 0));
+                e.1 += 1;
+                if i == c {
+                    e.0 += 1;
+                }
+            }
+        }
         if let Some(&j) = reuse.get(c) {
             self.unify(goal, T::G(j));
             return Ok(self.done[&j]);
@@ -1051,6 +1434,7 @@ impl<'s, 'w> Engine<'s, 'w> {
             let mark = self.mark();
             let step = self.solve(T::G(*judgment), truth, mix(&[0, u64::from(pred)]), 0)?;
             self.release(mark);
+            self.trail.clear();
             if self.out.is_some() {
                 self.emit(&format!("(result {name} {step})\n"))?;
             }
@@ -1207,6 +1591,116 @@ pub fn encode(theory: &str, goals: &str, proof: impl BufRead + Send) -> Result<(
         bytes.extend(encoder.finish());
         engine.stats.oracle_bytes = bytes.len();
         Ok((bytes, engine.stats))
+    })
+}
+
+/// Research: search for derivations of `goals` with the adaptive model trained
+/// by encoding each certificate of `corpus`; returns a compact certificate
+/// (to be checked by the kernel) and statistics, or the first goal that the
+/// search could not prove within `limits`.
+pub fn model_search(
+    theory: &str,
+    corpus: &[(&str, &[u8])],
+    goals: &str,
+    mut limits: SearchLimits,
+) -> Result<(String, Stats)> {
+    deep(|| {
+        let spec = Spec::parse(theory)?;
+        let mut model = Map::default();
+        let mut rich = Map::default();
+        let mut modes = Map::default();
+        for (g, proof) in corpus {
+            let mut store = Store::new();
+            let gs = read_goals(&spec, &mut store, g)?;
+            let truth = read_truth(&spec, &mut store, *proof)?;
+            let encoder = Encoder {
+                low: 0,
+                range: u32::MAX,
+                cache: 0,
+                pending: 1,
+                out: Vec::new(),
+            };
+            let mut engine = Engine::new(&spec, store, Coder::Encode(encoder));
+            engine.model = std::mem::take(&mut model);
+            engine.rich = Some(std::mem::take(&mut rich));
+            engine.modes = std::mem::take(&mut modes);
+            engine.truth = Some(truth);
+            engine.run(&gs)?;
+            model = engine.model;
+            rich = engine.rich.take().expect("rich model");
+            modes = std::mem::take(&mut engine.modes);
+        }
+        let mut store = Store::new();
+        let gs = read_goals(&spec, &mut store, goals)?;
+        let decoder = Decoder {
+            input: &[],
+            pos: 0,
+            code: 0,
+            range: u32::MAX,
+        };
+        let mut engine = Engine::new(&spec, store, Coder::Decode(decoder));
+        engine.model = model;
+        engine.rich = Some(rich);
+        if std::env::var_os("HORN_SEARCH_TRACE").is_some() {
+            let mut ms: Vec<_> = modes.iter().collect();
+            ms.sort();
+            for ((p, k), (g, t)) in ms {
+                eprintln!("mode {} {k}: ground {g} of {t}", spec.names[*p as usize]);
+            }
+        }
+        engine.modes = modes;
+        let mut text = String::new();
+        for (name, judgment) in &gs {
+            let pred = engine.store.node(*judgment)[0];
+            let mut active = std::collections::HashSet::new();
+            let step = engine
+                .search(T::G(*judgment), mix(&[0, u64::from(pred)]), 0, &mut limits, &mut active)
+                .map_err(|e| format!("{name}: {e}"))?;
+            for line in engine.lines.drain(..) {
+                text.push_str(&line);
+            }
+            engine.added.clear();
+            engine.trail.clear();
+            text.push_str(&format!("(result {name} {step})\n"));
+        }
+        engine.stats.goals = gs.len();
+        Ok((text, engine.stats))
+    })
+}
+
+/// Research measurement: encode each certificate of `corpus` in turn with one
+/// shared adaptive model, then `target` starting from the trained model, and
+/// return the target's statistics (how often the model's most probable
+/// candidate was the one taken). Nothing here produces an oracle file.
+pub fn prediction_experiment(
+    theory: &str,
+    corpus: &[(&str, &[u8])],
+    target: (&str, &[u8]),
+) -> Result<Stats> {
+    deep(|| {
+        let spec = Spec::parse(theory)?;
+        let mut model = Map::default();
+        for (i, (goals, proof)) in corpus.iter().chain(std::iter::once(&target)).enumerate() {
+            let mut store = Store::new();
+            let goals = read_goals(&spec, &mut store, goals)?;
+            let truth = read_truth(&spec, &mut store, *proof)?;
+            let encoder = Encoder {
+                low: 0,
+                range: u32::MAX,
+                cache: 0,
+                pending: 1,
+                out: Vec::new(),
+            };
+            let mut engine = Engine::new(&spec, store, Coder::Encode(encoder));
+            engine.model = std::mem::take(&mut model);
+            engine.truth = Some(truth);
+            engine.run(&goals)?;
+            if i == corpus.len() {
+                return Ok(engine.stats);
+            }
+            model = engine.model;
+        }
+        unreachable!()
     })
 }
 
