@@ -266,3 +266,18 @@ fn oracles_decode_unchanged_after_declarations_are_appended() {
     let error = oracle::decode(THEORY, &goals, &bytes, Vec::new()).unwrap_err();
     assert!(error.contains("larger theory"), "{error}");
 }
+
+#[test]
+fn checking_reports_long_rule_names_whole() {
+    let long = format!("zero-{}", "x".repeat(300));
+    let theory = format!(
+        "(sort Nat) (ctor z () Nat) (ctor s (Nat) Nat) (pred even (Nat))
+        (rule {long} () (even z))
+        (rule plus-two ((even ?n)) (even (s (s ?n))))"
+    );
+    let goals = "(goal two (even (s (s z))))";
+    let proof = format!("(step 0 {long} ())\n(step 1 plus-two (0))\n(result two 1)\n");
+    let (bytes, _) = oracle::encode(&theory, goals, proof.as_bytes()).unwrap();
+    let (_, rules) = oracle::check_with_rules(&theory, goals, &bytes).unwrap();
+    assert_eq!(rules, ["plus-two".to_owned(), long]);
+}

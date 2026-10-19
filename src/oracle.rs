@@ -1257,10 +1257,21 @@ pub fn check(theory: &str, goals: &str, oracle: &[u8]) -> Result<crate::kernel::
 struct RuleScan<W> {
     inner: W,
     line: Vec<u8>,
+    /// Spaces in `line`.
+    spaces: usize,
     rules: std::collections::BTreeSet<String>,
 }
 
 impl<W: Write> RuleScan<W> {
+    /// Whether the line read so far may still end inside the rule name of
+    /// `(step N RULE ...)`: it is a prefix of `(step ` or starts with it,
+    /// and the space after the rule name has not been read yet.
+    fn wants_more(&self) -> bool {
+        const STEP: &[u8] = b"(step ";
+        let start = self.line.len().min(STEP.len());
+        self.line[..start] == STEP[..start] && self.spaces < 3
+    }
+
     fn scan(&mut self) {
         if let Some(rest) = self.line.strip_prefix(b"(step ")
             && let Some(rule) = rest.split(|b| *b == b' ').nth(1)
@@ -1270,6 +1281,7 @@ impl<W: Write> RuleScan<W> {
             self.rules.insert(rule.to_owned());
         }
         self.line.clear();
+        self.spaces = 0;
     }
 }
 
@@ -1279,8 +1291,9 @@ impl<W: Write> Write for RuleScan<W> {
         for &b in &buf[..n] {
             if b == b'\n' {
                 self.scan();
-            } else if self.line.len() < 256 {
+            } else if self.wants_more() {
                 self.line.push(b);
+                self.spaces += usize::from(b == b' ');
             }
         }
         Ok(n)
@@ -1306,6 +1319,7 @@ pub fn check_with_rules(
             let mut scan = RuleScan {
                 inner: BufWriter::with_capacity(1 << 20, writer),
                 line: Vec::new(),
+                spaces: 0,
                 rules: Default::default(),
             };
             decode(theory, goals, oracle, &mut scan)?;
