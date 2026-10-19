@@ -1,7 +1,6 @@
 //! Untrusted producer for the scoped PathP experiment. No kernel changes.
 use crate::cubical::engine::frontend::{E, Producer, lam};
 use crate::cubical::engine::term::{Result, Sexp, atom, call};
-use std::collections::BTreeMap;
 
 #[path = "face_ops.rs"]
 mod face_ops;
@@ -77,9 +76,9 @@ impl Op {
 type TransformKey = (u8, usize, usize, Option<usize>);
 #[derive(Default)]
 struct TransformMemo {
-    terms: std::collections::HashMap<Sexp, usize>,
+    terms: crate::cubical::engine::term::FastMap<Sexp, usize>,
     values: Vec<Sexp>,
-    operations: BTreeMap<TransformKey, (usize, usize)>,
+    operations: crate::cubical::engine::term::FastMap<TransformKey, (usize, usize)>,
 }
 impl TransformMemo {
     fn intern(&mut self, t: &Sexp) -> usize {
@@ -95,7 +94,7 @@ impl TransformMemo {
 #[derive(Default)]
 pub struct PathProducer {
     pub p: Producer,
-    inferred: BTreeMap<Sexp, (Sexp, usize)>,
+    inferred: crate::cubical::engine::term::FastMap<Sexp, (Sexp, usize)>,
     transformations: Option<TransformMemo>,
 }
 

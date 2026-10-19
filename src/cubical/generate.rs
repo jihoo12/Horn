@@ -84,8 +84,7 @@ pub fn certify<T: Send>(
             .map_err(|e| e.to_string())?;
         worker.join().map_err(|_| "producer panicked".to_string())?
     })?;
-    let checked = oracle::check(&theory, &goals, &oracle)?;
-    let rules_used = rules_used(&theory, &goals, &oracle)?;
+    let (checked, rules_used) = oracle::check_with_rules(&theory, &goals, &oracle)?;
     Ok((
         Regenerated {
             goals,
@@ -96,22 +95,6 @@ pub fn certify<T: Send>(
         },
         extra,
     ))
-}
-
-/// The distinct rules named by the steps the oracle decodes to.
-pub fn rules_used(theory: &str, goals: &str, oracle: &[u8]) -> Result<Vec<String>> {
-    let mut text = Vec::new();
-    oracle::decode(theory, goals, oracle, &mut text)?;
-    let text = String::from_utf8(text).map_err(|e| e.to_string())?;
-    let mut rules: Vec<String> = text
-        .lines()
-        .filter_map(|l| l.strip_prefix("(step "))
-        .filter_map(|l| l.split_whitespace().nth(1))
-        .map(str::to_owned)
-        .collect();
-    rules.sort();
-    rules.dedup();
-    Ok(rules)
 }
 
 /// The number of rules a theory declares.

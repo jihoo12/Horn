@@ -85,7 +85,7 @@ fn universe(a: &E) -> Result<usize> {
 pub struct Producer {
     // In archive mode use judgment(id), rather than reading the third field.
     pub steps: Vec<(String, Vec<usize>, Sexp)>,
-    cache: std::collections::HashMap<Sexp, usize>,
+    cache: crate::cubical::engine::term::FastMap<Sexp, usize>,
     results: Vec<(String, usize)>,
     // Judgments are hash-consed, so storing them is cheap; this flag only
     // turns on progress messages for large runs.

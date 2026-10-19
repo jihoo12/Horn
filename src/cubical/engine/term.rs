@@ -76,10 +76,62 @@ impl PartialOrd for Sexp {
     }
 }
 
+/// A fast, deterministic hasher for the engine's maps (the FxHash
+/// multiply-rotate). Interned lists hash as their interning id, so keys are
+/// short; SipHash's resistance to adversarial keys is not needed for an
+/// untrusted producer whose output is checked anyway.
+#[derive(Default, Clone, Copy)]
+pub struct FastHasher(u64);
+
+impl FastHasher {
+    #[inline]
+    fn add(&mut self, word: u64) {
+        self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+}
+
+impl Hasher for FastHasher {
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        let mut chunks = bytes.chunks_exact(8);
+        for c in &mut chunks {
+            self.add(u64::from_le_bytes(c.try_into().unwrap()));
+        }
+        let rest = chunks.remainder();
+        if !rest.is_empty() {
+            let mut word = [0u8; 8];
+            word[..rest.len()].copy_from_slice(rest);
+            self.add(u64::from_le_bytes(word));
+        }
+    }
+    #[inline]
+    fn write_u8(&mut self, i: u8) {
+        self.add(u64::from(i));
+    }
+    #[inline]
+    fn write_u64(&mut self, i: u64) {
+        self.add(i);
+    }
+    #[inline]
+    fn write_usize(&mut self, i: usize) {
+        self.add(i as u64);
+    }
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+pub type FastBuild = std::hash::BuildHasherDefault<FastHasher>;
+/// A `HashMap` with the engine's fast hasher.
+pub type FastMap<K, V> = HashMap<K, V, FastBuild>;
+/// A `HashSet` with the engine's fast hasher.
+pub type FastSet<K> = std::collections::HashSet<K, FastBuild>;
+
 #[derive(Default)]
 struct Interner {
-    lists: HashMap<Box<[Sexp]>, Items>,
-    atoms: HashMap<Box<str>, Rc<str>>,
+    lists: FastMap<Box<[Sexp]>, Items>,
+    atoms: FastMap<Box<str>, Rc<str>>,
 }
 
 thread_local! {
