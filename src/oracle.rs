@@ -1250,17 +1250,81 @@ pub fn decode(theory: &str, goals: &str, oracle: &[u8], out: impl Write + Send) 
 /// the ground kernel against the caller's theory and exact goals. No decoded
 /// proof file is materialized, and decoder failure is never acceptance.
 pub fn check(theory: &str, goals: &str, oracle: &[u8]) -> Result<crate::kernel::Report> {
+    Ok(check_with_rules(theory, goals, oracle)?.0)
+}
+
+/// Passes decoded text through, collecting the rule named by each step line.
+struct RuleScan<W> {
+    inner: W,
+    line: Vec<u8>,
+    /// Spaces in `line`.
+    spaces: usize,
+    rules: std::collections::BTreeSet<String>,
+}
+
+impl<W: Write> RuleScan<W> {
+    /// Whether the line read so far may still end inside the rule name of
+    /// `(step N RULE ...)`: it is a prefix of `(step ` or starts with it,
+    /// and the space after the rule name has not been read yet.
+    fn wants_more(&self) -> bool {
+        const STEP: &[u8] = b"(step ";
+        let start = self.line.len().min(STEP.len());
+        self.line[..start] == STEP[..start] && self.spaces < 3
+    }
+
+    fn scan(&mut self) {
+        if let Some(rest) = self.line.strip_prefix(b"(step ")
+            && let Some(rule) = rest.split(|b| *b == b' ').nth(1)
+            && let Ok(rule) = std::str::from_utf8(rule)
+            && !self.rules.contains(rule)
+        {
+            self.rules.insert(rule.to_owned());
+        }
+        self.line.clear();
+        self.spaces = 0;
+    }
+}
+
+impl<W: Write> Write for RuleScan<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        for &b in &buf[..n] {
+            if b == b'\n' {
+                self.scan();
+            } else if self.wants_more() {
+                self.line.push(b);
+                self.spaces += usize::from(b == b' ');
+            }
+        }
+        Ok(n)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// `check`, also returning the sorted names of the rules used by the steps
+/// the kernel accepted. The names are read from the decoded stream on its
+/// way to the kernel, so the oracle is decoded once.
+pub fn check_with_rules(
+    theory: &str,
+    goals: &str,
+    oracle: &[u8],
+) -> Result<(crate::kernel::Report, Vec<String>)> {
     use std::io::{BufReader, BufWriter};
     let checker = crate::kernel::Theory::parse(theory)?;
     let (reader, writer) = std::io::pipe().map_err(|e| e.to_string())?;
     let (report, decoded) = std::thread::scope(|scope| {
         let decoder = scope.spawn(|| {
-            decode(
-                theory,
-                goals,
-                oracle,
-                BufWriter::with_capacity(1 << 20, writer),
-            )
+            let mut scan = RuleScan {
+                inner: BufWriter::with_capacity(1 << 20, writer),
+                line: Vec::new(),
+                spaces: 0,
+                rules: Default::default(),
+            };
+            decode(theory, goals, oracle, &mut scan)?;
+            scan.flush().map_err(|e| e.to_string())?;
+            Ok::<_, String>(scan.rules.into_iter().collect::<Vec<_>>())
         });
         let report = checker.check_reader(goals, BufReader::with_capacity(1 << 20, reader));
         (report, decoder.join())
@@ -1268,6 +1332,6 @@ pub fn check(theory: &str, goals: &str, oracle: &[u8]) -> Result<crate::kernel::
     let decoded = decoded.map_err(|_| "decoder panicked".to_string())?;
     // A kernel rejection explains more than the decoder's broken pipe.
     let report = report?;
-    decoded?;
-    Ok(report)
+    let rules = decoded?;
+    Ok((report, rules))
 }
