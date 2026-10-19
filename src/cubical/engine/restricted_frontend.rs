@@ -4,8 +4,7 @@ use super::FUEL_TYPES;
 use crate::cubical::engine::face_frontend::{Face, FaceProducer};
 use crate::cubical::engine::frontend::number as num;
 use crate::cubical::engine::path_frontend::{Op, cons, papp, path, u, v};
-use crate::cubical::engine::term::{Result, Sexp, atom, call};
-use std::collections::{BTreeMap, BTreeSet};
+use crate::cubical::engine::term::{FastMap, FastSet, Result, Sexp, atom, call};
 
 #[path = "computation_frontend.rs"]
 #[allow(dead_code)]
@@ -55,11 +54,11 @@ fn level(t: &Sexp) -> Result<usize> {
 #[derive(Default)]
 pub struct RestrictedProducer {
     pub f: FaceProducer,
-    inferred: BTreeMap<Sexp, (Sexp, usize)>,
-    checked: BTreeMap<Sexp, usize>,
-    equalities: BTreeMap<Sexp, usize>,
-    equality_active: BTreeSet<Sexp>,
-    restriction_hints: Option<BTreeMap<Sexp, Vec<(Face, Sexp)>>>,
+    inferred: FastMap<Sexp, (Sexp, usize)>,
+    checked: FastMap<Sexp, usize>,
+    equalities: FastMap<Sexp, usize>,
+    equality_active: FastSet<Sexp>,
+    restriction_hints: Option<FastMap<Sexp, Vec<(Face, Sexp)>>>,
     closed_annotation_reuse: bool,
     /// Type closed annotated terms once, in the empty context, and weaken
     /// them to every other context with `rhas.closed`.
@@ -72,7 +71,10 @@ pub struct RestrictedProducer {
     /// With `keep_reduct_types`: where each term that needs an annotation was
     /// checked, by term, as (d, Γ, type). A failed inference of the same term
     /// in an extension of such a context retries with the transported type.
-    checked_forms: BTreeMap<Sexp, Vec<(usize, Sexp, Sexp)>>,
+    /// Typings of unannotated forms: dimensions, context, type, and the
+    /// context's length.
+    checked_forms: FastMap<Sexp, Vec<(usize, Sexp, Sexp, usize)>>,
+    checked_form_set: FastSet<(Sexp, usize, Sexp, Sexp)>,
 }
 
 /// Whether `t`, after stripping projections, applications and path
@@ -86,22 +88,44 @@ fn unannotated_head(t: &Sexp) -> bool {
 }
 
 /// Whether ordinary variable `k` occurs free in `t`.
+/// The number of entries of a context `(cons A (cons B ... nil))`.
+fn context_length(g: &Sexp) -> usize {
+    let mut n = 0;
+    let mut tail = g;
+    while let Ok(("cons", [_, rest])) = shape(tail) {
+        n += 1;
+        tail = rest;
+    }
+    n
+}
 fn mentions(t: &Sexp, k: usize) -> bool {
-    match shape(t) {
+    // Terms are hash-consed DAGs with much sharing; walking them as trees
+    // can take exponential time, so results are memoized per (term, index).
+    thread_local! {
+        static MEMO: std::cell::RefCell<FastMap<(Sexp, usize), bool>> =
+            std::cell::RefCell::new(FastMap::default());
+    }
+    let Sexp::List(xs) = t else {
+        return false;
+    };
+    let key = (t.clone(), k);
+    if let Some(found) = MEMO.with(|m| m.borrow().get(&key).copied()) {
+        return found;
+    }
+    let out = match shape(t) {
         Ok(("v", [n])) => natural(n).is_ok_and(|n| n == k),
         Ok(("pi" | "sigma", [a, b])) => mentions(a, k) || mentions(b, k + 1),
         Ok(("lam", [b])) => mentions(b, k + 1),
-        _ => match t {
-            Sexp::List(xs) => xs.iter().skip(1).any(|x| mentions(x, k)),
-            Sexp::Atom(_) => false,
-        },
-    }
+        _ => xs.iter().skip(1).any(|x| mentions(x, k)),
+    };
+    MEMO.with(|m| m.borrow_mut().insert(key, out));
+    out
 }
 impl RestrictedProducer {
     // Reuse only already certified typings on provably weaker restrictions.
     // The new local judgment is always emitted using rhas.weaken.
     pub fn reuse_restricted_typings(&mut self) {
-        self.restriction_hints = Some(BTreeMap::new());
+        self.restriction_hints = Some(FastMap::default());
     }
     pub fn reuse_beta_typing(&mut self) {
         self.typed_beta_reuse = true;
@@ -1891,19 +1915,25 @@ impl RestrictedProducer {
         if !self.reduct_types {
             return Ok(None);
         }
-        let known = self.checked_forms.get(t).cloned().unwrap_or_default();
-        // A closed term can have many types. Try the typings recorded in the
-        // closest context first (fewest added variables, then fewest added
-        // dimensions), most recent first: an older typing from an unrelated,
-        // more specific use (say at int) must not win over the one recorded
-        // where the term was built (say as a composition base, now under the
-        // two extra dimensions of a filler).
-        let mut ranked = Vec::new();
-        for (index, (d0, g0, a0)) in known.into_iter().enumerate() {
-            if d0 > d {
-                continue;
-            }
-            let dims = d - d0;
+        let Some(known) = self.checked_forms.get(t) else {
+            return Ok(None);
+        };
+        // The rank of a recorded typing, (added variables, added dimensions),
+        // follows from the context lengths alone when the recorded context,
+        // lifted, is a suffix of this one. Rank first, then confirm the
+        // suffix only for the candidates actually tried, in rank order.
+        let length = context_length(g);
+        let mut order: Vec<_> = known
+            .iter()
+            .enumerate()
+            .filter(|(_, (d0, _, _, l0))| {
+                *d0 <= d && *l0 <= length && (*d0, *l0) != (d, length)
+            })
+            .map(|(index, (d0, _, _, l0))| ((length - l0, d - d0), std::cmp::Reverse(index)))
+            .collect();
+        order.sort_unstable();
+        for ((extra, dims), std::cmp::Reverse(index)) in order {
+            let (_, g0, a0, _) = self.checked_forms[t][index].clone();
             // Lift the recorded context and type over the new dimensions.
             let (mut g1, mut a1) = (g0, a0);
             for _ in 0..dims {
@@ -1911,36 +1941,32 @@ impl RestrictedProducer {
                 a1 = self.f.path.transform(&a1, &Op::DShift(0))?.0;
             }
             let mut tail = g.clone();
-            let mut extra = 0;
-            while tail != g1 {
+            for _ in 0..extra {
                 let ("cons", [_, rest]) = shape(&tail)? else {
-                    break;
+                    unreachable!("the context has at least `extra` entries")
                 };
                 tail = rest.clone();
-                extra += 1;
             }
-            if tail != g1 || (extra == 0 && dims == 0) {
+            if tail != g1 {
                 continue;
             }
             for _ in 0..extra {
                 a1 = self.f.path.transform(&a1, &Op::Shift(0))?.0;
             }
-            ranked.push(((extra, dims), std::cmp::Reverse(index), a1));
-        }
-        ranked.sort_by(|x, y| (x.0, x.1).cmp(&(y.0, y.1)));
-        for (_, _, candidate) in ranked {
-            if let Ok(id) = self.check(d, g, phi, t, &candidate) {
-                return Ok(Some((candidate, id)));
+            if let Ok(id) = self.check(d, g, phi, t, &a1) {
+                return Ok(Some((a1, id)));
             }
         }
         Ok(None)
     }
     fn remember(&mut self, d: usize, g: &Sexp, phi: &Face, t: &Sexp, a: &Sexp, id: usize) {
         if self.reduct_types && matches!(shape(t), Ok(("lam" | "pair" | "plam", _))) {
-            let known = self.checked_forms.entry(t.clone()).or_default();
-            let entry = (d, g.clone(), a.clone());
-            if !known.contains(&entry) {
-                known.push(entry);
+            if self
+                .checked_form_set
+                .insert((t.clone(), d, g.clone(), a.clone()))
+            {
+                let entry = (d, g.clone(), a.clone(), context_length(g));
+                self.checked_forms.entry(t.clone()).or_default().push(entry);
             }
         }
         let key = call("rhas-key", [num(d), g.clone(), phi.quote(), t.clone()]);
@@ -2051,6 +2077,22 @@ pub fn restricted_demo() -> Result<RestrictedProducer> {
 /// dimensions (at or above `d`). Mirrors the binders of `scope`; untrusted,
 /// since every use is certified by a `scoped` derivation.
 fn closed(t: &Sexp, n: usize, d: usize) -> bool {
+    thread_local! {
+        static MEMO: std::cell::RefCell<FastMap<(Sexp, usize, usize), bool>> =
+            std::cell::RefCell::new(FastMap::default());
+    }
+    if let Sexp::Atom(_) = t {
+        return true;
+    }
+    let key = (t.clone(), n, d);
+    if let Some(found) = MEMO.with(|m| m.borrow().get(&key).copied()) {
+        return found;
+    }
+    let out = closed_uncached(t, n, d);
+    MEMO.with(|m| m.borrow_mut().insert(key, out));
+    out
+}
+fn closed_uncached(t: &Sexp, n: usize, d: usize) -> bool {
     fn face(f: &Sexp, d: usize) -> bool {
         match f {
             Sexp::Atom(_) => true,

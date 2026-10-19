@@ -84,8 +84,7 @@ pub fn certify<T: Send>(
             .map_err(|e| e.to_string())?;
         worker.join().map_err(|_| "producer panicked".to_string())?
     })?;
-    let checked = oracle::check(&theory, &goals, &oracle)?;
-    let rules_used = rules_used(&theory, &goals, &oracle)?;
+    let (checked, rules_used) = oracle::check_with_rules(&theory, &goals, &oracle)?;
     Ok((
         Regenerated {
             goals,

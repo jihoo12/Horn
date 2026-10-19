@@ -85,7 +85,7 @@ fn universe(a: &E) -> Result<usize> {
 pub struct Producer {
     // In archive mode use judgment(id), rather than reading the third field.
     pub steps: Vec<(String, Vec<usize>, Sexp)>,
-    cache: std::collections::HashMap<Sexp, usize>,
+    cache: crate::cubical::engine::term::FastMap<Sexp, usize>,
     results: Vec<(String, usize)>,
     // Judgments are hash-consed, so storing them is cheap; this flag only
     // turns on progress messages for large runs.
@@ -114,6 +114,15 @@ impl Producer {
         let id = self.steps.len();
         if self.archive.is_some() && id > 0 && id.is_multiple_of(100_000) {
             eprintln!("GENERATING (not checked): {id} proof steps");
+            if std::env::var_os("HORN_PROFILE").is_some() && id.is_multiple_of(500_000) {
+                let mut h = std::collections::HashMap::<&str, usize>::new();
+                for (r, _, _) in &self.steps[id - 500_000..] {
+                    *h.entry(r.as_str()).or_default() += 1;
+                }
+                let mut v: Vec<_> = h.into_iter().collect();
+                v.sort_by(|a, b| b.1.cmp(&a.1));
+                eprintln!("PROFILE {:?}", &v[..v.len().min(20)]);
+            }
         }
         self.cache.insert(judgment.clone(), id);
         self.steps.push((rule.to_owned(), refs, judgment));
@@ -159,6 +168,17 @@ impl Producer {
             }
             keep[i] = true;
             pending.extend(self.steps[i].1.iter().copied());
+        }
+        if std::env::var_os("HORN_PROFILE").is_some() {
+            let mut h = std::collections::HashMap::<&str, usize>::new();
+            for (i, (r, _, _)) in self.steps.iter().enumerate() {
+                if !keep[i] {
+                    *h.entry(r.as_str()).or_default() += 1;
+                }
+            }
+            let mut v: Vec<_> = h.into_iter().collect();
+            v.sort_by(|a, b| b.1.cmp(&a.1));
+            eprintln!("UNREACHABLE {} {:?}", keep.iter().filter(|k| !**k).count(), &v[..v.len().min(25)]);
         }
         let mut next = 0;
         let ids: Vec<_> = keep

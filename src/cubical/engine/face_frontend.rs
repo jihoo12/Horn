@@ -118,7 +118,7 @@ fn natural(t: &Sexp) -> Result<usize> {
 #[derive(Default)]
 pub struct FaceProducer {
     pub path: PathProducer,
-    entailments: std::collections::HashMap<Sexp, Result<usize>>,
+    entailments: crate::cubical::engine::term::FastMap<Sexp, Result<usize>>,
 }
 impl FaceProducer {
     fn emit(&mut self, rule: &str, refs: Vec<usize>, j: Sexp) -> usize {
