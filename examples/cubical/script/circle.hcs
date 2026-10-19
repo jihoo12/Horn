@@ -50,3 +50,12 @@
 (eval loop-once (app winding (plam i (loop i))))
 (eval constant (app winding (plam i base)))
 (eval loop-backwards (app winding (plam i (loop (neg i)))))
+
+; Composite loops. A composition in the circle is a formal point (the
+; homogeneous composition constructor), and the recursor commutes with it,
+; so helix sends loop . loop to a composition of types, and transport
+; through it winds twice.
+(def compose (pi p (path s1 base base) (pi q (path s1 base base) (path s1 base base)))
+  (lam p (path s1 base base) (lam q (path s1 base base)
+    (plam i (hcomp j s1 (((= i 0) base) ((= i 1) (papp q j))) (papp p i))))))
+(eval loop-twice (app winding (app compose (plam i (loop i)) (plam i (loop i)))))

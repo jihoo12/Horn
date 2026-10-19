@@ -358,7 +358,18 @@ impl PathProducer {
                     t.clone()
                 } else {
                     let mut out = Vec::new();
+                    let interval = crate::cubical::engine::data::interval_index(h);
                     for (i, x) in xs.iter().enumerate() {
+                        if Some(i) == interval {
+                            if op.dimension() {
+                                let (x2, id) = self.itransform(x, op)?;
+                                refs.push(id);
+                                out.push(x2);
+                            } else {
+                                out.push(x.clone());
+                            }
+                            continue;
+                        }
                         let xop = if Some(i) == crate::cubical::engine::data::motive_index(h) {
                             self.under(op, false, &mut refs)?
                         } else {

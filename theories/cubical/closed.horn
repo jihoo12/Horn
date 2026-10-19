@@ -1,0 +1,13 @@
+; Appended after circle.horn.
+; Closed-term weakening. A term with no free variables and no free
+; dimensions that is typed (or equated) in the empty context, with no
+; dimensions and the true face, keeps its typing in every well-formed
+; restricted context: weakening by variables and dimensions and restriction
+; to a face are admissible for every rule, and this states their composite
+; for closed terms. It lets a closed library term (ua, iso-equiv, an
+; equivalence) be checked once, instead of once per context it occurs in.
+(rule rhas.closed ((rhas z nil ft ?t ?a) (scoped z z ?t) (rctx ?d ?g ?phi))
+  (rhas ?d ?g ?phi ?t ?a))
+(rule req.closed ((req z nil ft ?t ?s ?a) (scoped z z ?t) (scoped z z ?s)
+    (rctx ?d ?g ?phi))
+  (req ?d ?g ?phi ?t ?s ?a))

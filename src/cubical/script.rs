@@ -82,6 +82,16 @@ impl Names {
     }
 }
 
+/// A face under one more dimension binder: every dimension index rises.
+fn shift_face(f: &Face) -> Face {
+    match f {
+        Face::False | Face::True => f.clone(),
+        Face::End(n, b) => Face::End(n + 1, *b),
+        Face::And(a, b) => shift_face(a).and(shift_face(b)),
+        Face::Or(a, b) => shift_face(a).or(shift_face(b)),
+    }
+}
+
 fn index(names: &[String], name: &str) -> Option<usize> {
     names.iter().rev().position(|n| n == name)
 }
@@ -150,6 +160,10 @@ const RESERVED: &[&str] = &[
     "base",
     "loop",
     "s1rec",
+    "hcomp",
+    "comp",
+    "and",
+    "or",
 ];
 
 struct Elaborator {
@@ -169,6 +183,7 @@ fn producer() -> RestrictedProducer {
     p.strengthen_typings();
     p.keep_reduct_types();
     p.enable_composition_computation();
+    p.closed_term_reuse = true;
     p
 }
 
@@ -296,6 +311,91 @@ impl Elaborator {
         }
     }
 
+    /// A face: `(= i 0)`, `(= i 1)`, `(and F G)`, `(or F G)`, `ff` or `ft`.
+    fn face(&self, s: &Sexp, names: &Names) -> Result<Face> {
+        let bad = || format!("invalid face {s}");
+        Ok(match s {
+            Sexp::Atom(a) if &**a == "ff" => Face::False,
+            Sexp::Atom(a) if &**a == "ft" => Face::True,
+            Sexp::Atom(_) => return Err(bad()),
+            Sexp::List(xs) => match (xs.first().map(Sexp::atom).transpose()?, &xs[1..]) {
+                (Some("="), [i, end]) => {
+                    let name = i.atom()?;
+                    let k = index(&names.dimensions, name)
+                        .ok_or_else(|| format!("unknown dimension {name}"))?;
+                    match end.atom()? {
+                        "0" => Face::End(k, false),
+                        "1" => Face::End(k, true),
+                        _ => return Err(bad()),
+                    }
+                }
+                (Some("and"), [a, b]) => self.face(a, names)?.and(self.face(b, names)?),
+                (Some("or"), [a, b]) => self.face(a, names)?.or(self.face(b, names)?),
+                _ => return Err(bad()),
+            },
+        })
+    }
+
+    /// `(comp j A ((FACE TERM) ...) BASE)`: composition along the line
+    /// `j ↦ A` of BASE with a system whose branches bind `j`; its face is
+    /// the disjunction of the branch faces. `hcomp` is the same in a type
+    /// that does not depend on `j`, written outside `j`'s scope.
+    fn composition(
+        &mut self,
+        homogeneous: bool,
+        j: &Sexp,
+        a: &Sexp,
+        sides: &Sexp,
+        base: &Sexp,
+        names: &Names,
+    ) -> Result<Sexp> {
+        let inner = names.with_dimension(binder(j)?);
+        // A homogeneous type and the branch faces are written outside j's
+        // scope: they are elaborated there and then shifted under j, so a
+        // binder j that shadows an outer dimension does not capture them.
+        let family = if homogeneous {
+            let outer = self.term(a, names)?;
+            self.p
+                .f
+                .path
+                .transform(&outer, &super::engine::path_frontend::Op::DShift(0))?
+                .0
+        } else {
+            self.term(a, &inner)?
+        };
+        let Sexp::List(sides) = sides else {
+            return Err("a composition needs a list of (FACE TERM) branches".into());
+        };
+        let mut extent = Face::False;
+        let mut system = atom("snil");
+        for side in sides.iter().rev() {
+            let Sexp::List(pair) = side else {
+                return Err(format!("invalid branch {side}"));
+            };
+            let [phi, t] = &pair[..] else {
+                return Err(format!("a branch is (FACE TERM): {side}"));
+            };
+            let outer = self.face(phi, names)?;
+            let shifted = shift_face(&outer);
+            let t = self.term(t, &inner)?;
+            system = call("side", [shifted.quote(), t, system]);
+            extent = if extent == Face::False {
+                outer
+            } else {
+                outer.or(extent)
+            };
+        }
+        Ok(call(
+            "comp",
+            [
+                family,
+                extent.quote(),
+                call("system", [system]),
+                self.term(base, names)?,
+            ],
+        ))
+    }
+
     fn term(&mut self, s: &Sexp, names: &Names) -> Result<Sexp> {
         let xs = match s {
             Sexp::Atom(a) => {
@@ -318,7 +418,7 @@ impl Elaborator {
                     }
                 } else if let Some((d, i)) = data::by_ctor_name(a) {
                     let c = &d.ctors[i];
-                    if c.args.is_empty() {
+                    if c.arity() == 0 {
                         Ok(atom(&c.symbol))
                     } else {
                         Err(format!("constructor {a} needs {} arguments", c.args.len()))
@@ -457,17 +557,18 @@ impl Elaborator {
                 // from the fields or from the expected type.
                 let (d, i) = data::by_ctor_name(c).unwrap();
                 let ctor = &d.ctors[i];
-                if args.len() != ctor.args.len() {
-                    return Err(format!(
-                        "constructor {c} needs {} arguments",
-                        ctor.args.len()
-                    ));
+                if args.len() != ctor.arity() {
+                    return Err(format!("constructor {c} needs {} arguments", ctor.arity()));
                 }
-                let args = args
+                let n = ctor.args.len();
+                let mut out = args[..n]
                     .iter()
                     .map(|a| self.term(a, names))
                     .collect::<Result<Vec<_>>>()?;
-                data::apply(&ctor.symbol, args)
+                if ctor.boundary.is_some() {
+                    out.push(self.interval(&args[n], names)?);
+                }
+                data::apply(&ctor.symbol, out)
             }
             (n, args) if data::by_name(n).is_some() => {
                 let d = data::by_name(n).unwrap();
@@ -483,6 +584,9 @@ impl Elaborator {
             ("equiv", [a, b]) => {
                 let (a, b) = (self.term(a, names)?, self.term(b, names)?);
                 self.p.equiv_type(&a, &b)?.0
+            }
+            (kind @ ("hcomp" | "comp"), [j, a, sides, base]) => {
+                self.composition(kind == "hcomp", j, a, sides, base, names)?
             }
             ("transport", [i, a, x]) => call(
                 "comp",
@@ -517,6 +621,7 @@ impl Elaborator {
         }
         let ty = format!("ty/{name}");
         let mut out = Vec::new();
+        let mut sources = Vec::new();
         for c in ctors {
             let xs = c.list()?;
             let cname = xs.first().ok_or("empty constructor")?.atom()?;
@@ -524,8 +629,20 @@ impl Elaborator {
             if out.iter().any(|o: &Ctor| o.name == cname) {
                 return Err(format!("duplicate constructor {cname}"));
             }
+            // A path constructor ends with `(path LEFT RIGHT)`.
+            let (fields, boundary) = match xs.last() {
+                Some(Sexp::List(ys))
+                    if xs.len() > 1 && ys.first().is_some_and(|h| *h == atom("path")) =>
+                {
+                    let [_, l, r] = &ys[..] else {
+                        return Err(format!("constructor {cname}: expected (path LEFT RIGHT)"));
+                    };
+                    (&xs[1..xs.len() - 1], Some((l.clone(), r.clone())))
+                }
+                _ => (&xs[1..], None),
+            };
             let mut args = Vec::new();
-            for a in &xs[1..] {
+            for a in fields {
                 // Fields: discrete closed types, a parameter, or the type
                 // itself at its own parameters (uniform recursion).
                 let own = Sexp::List(
@@ -552,14 +669,37 @@ impl Elaborator {
                 };
                 args.push(arg);
             }
+            if boundary.is_some() {
+                if !params.is_empty() {
+                    return Err(format!(
+                        "{name}: path constructors need a type without parameters"
+                    ));
+                }
+                if args.iter().any(|a| !matches!(a, ArgTy::Closed(_))) {
+                    return Err(format!(
+                        "path constructor {cname}: fields must be bool, nat or earlier closed data types"
+                    ));
+                }
+            }
             out.push(Ctor {
                 name: cname.to_owned(),
                 symbol: format!("ctor/{name}/{cname}"),
                 args,
+                boundary: None,
             });
+            sources.push(boundary);
         }
         if out.is_empty() {
             return Err(format!("data {name} needs a constructor"));
+        }
+        // Endpoints are closed point terms of the type, elaborated once all
+        // constructors are known.
+        for i in 0..out.len() {
+            if let Some((l, r)) = &sources[i] {
+                let l = self.endpoint(l, &out)?;
+                let r = self.endpoint(r, &out)?;
+                out[i].boundary = Some((l, r));
+            }
         }
         let d = data::register(Data {
             name: name.to_owned(),
@@ -569,6 +709,34 @@ impl Elaborator {
             ctors: out,
         });
         Ok(d.theory())
+    }
+
+    /// A path constructor's endpoint: a point constructor of the type being
+    /// declared, applied to closed terms.
+    fn endpoint(&mut self, s: &Sexp, ctors: &[Ctor]) -> Result<Sexp> {
+        let (head, args) = match s {
+            Sexp::Atom(a) => (&**a, &[][..]),
+            Sexp::List(xs) if !xs.is_empty() => (xs[0].atom()?, &xs[1..]),
+            _ => return Err(format!("invalid endpoint {s}")),
+        };
+        let c = ctors
+            .iter()
+            .find(|c| c.name == head && c.boundary.is_none())
+            .ok_or_else(|| format!("endpoint {s} must be a point constructor of the type"))?;
+        if args.len() != c.args.len() {
+            return Err(format!(
+                "endpoint {s}: {head} needs {} arguments",
+                c.args.len()
+            ));
+        }
+        let mut out = Vec::new();
+        for (a, ty) in args.iter().zip(&c.args) {
+            out.push(match ty {
+                ArgTy::Rec => self.endpoint(a, ctors)?,
+                _ => self.term(a, &Names::default())?,
+            });
+        }
+        Ok(data::apply(&c.symbol, out))
     }
 
     fn fresh(&self, name: &str) -> Result<()> {

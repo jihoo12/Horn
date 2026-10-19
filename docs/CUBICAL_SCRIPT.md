@@ -25,10 +25,10 @@ cargo run --release --locked --offline --bin horn -- cubical eval examples/cubic
 ```text
 not-true = bfalse : bool
 along-ua = bfalse : bool
-ACCEPT (cubical script): 6 goals, 237149 proof steps, 54574 oracle bytes
+ACCEPT (cubical script): 6 goals, 83756 proof steps, 15467 oracle bytes
 ```
 
-This takes about 8 seconds and 0.25 GB. `--emit NEW_DIR` writes `theory.horn`, `goals` and
+This takes about 1.5 seconds and 0.1 GB. `--emit NEW_DIR` writes `theory.horn`, `goals` and
 `proof.oracle` for independent checking with `oracle-kernel`.
 
 Natural numbers ([nat.hcs](../examples/cubical/script/nat.hcs)) support
@@ -47,7 +47,7 @@ programs by recursion and proofs by induction, in 0.1 s:
 ```
 
 Functions move along ua too ([function.hcs](../examples/cubical/script/function.hcs),
-about 22 s): transporting `not` along the line `i ↦ (ua not i → ua not i)`
+about 3 s): transporting `not` along the line `i ↦ (ua not i → ua not i)`
 gives a function that maps `btrue` to `bfalse` and `bfalse` to `btrue`, as
 conjugating `not` by `not` should. This goes through composition in Pi types,
 then Glue, then bool.
@@ -55,7 +55,7 @@ then Glue, then bool.
 ## Declared data types
 
 `(data NAME (CTOR ARG-TYPE...) ...)` declares a closed data type
-([data.hcs](../examples/cubical/script/data.hcs), about 9 s):
+([data.hcs](../examples/cubical/script/data.hcs), about 2 s):
 
 ```text
 (data color (red) (green) (blue))
@@ -75,7 +75,7 @@ reader sees exactly which rules a script introduced. Nothing about the
 declaration is built into the engine or the kernel.
 
 Type parameters are declared as `(data (list A) (nil) (cons A (list A)))`
-([list.hcs](../examples/cubical/script/list.hcs), about 8 s). Constructor
+([list.hcs](../examples/cubical/script/list.hcs), about 2 s). Constructor
 terms do not carry the parameters, `(cons btrue nil)`: the engine reads them
 off a field at a parameter or, as for an unannotated lambda, off the expected
 type; a lone `nil` needs one. The eliminator takes them explicitly,
@@ -99,12 +99,12 @@ strict positivity is immediate. Composition rules depend on parameters:
   and stay unevaluated; the transports that ua needs all use the empty face.
 
 The type (in its parameters), its constructors and its eliminator also get
-congruence rules. Indices, function-typed fields and
-higher constructors are not supported.
+congruence rules. Indices and function-typed fields are not supported;
+path constructors are (below).
 
 ## Programs move along equivalences
 
-[binary.hcs](../examples/cubical/script/binary.hcs) (about 28 s) declares
+[binary.hcs](../examples/cubical/script/binary.hcs) (about 4 s) declares
 binary numbers in bijective base 2, `(data bin (bz) (b1 bin) (b2 bin))` for
 0, 2b+1 and 2b+2, proves `nat ≃ bin` with conversions in both directions and
 their inverse laws (by induction, with path composition defined by
@@ -129,7 +129,7 @@ transports the sum forward (through `from-nat`), all as checked steps.
 inductive type: `s1`, `base`, a path constructor `(loop r)` with
 `loop i0 = loop i1 = base`, and the recursor `(s1rec A b l x)` for `b : A`
 and `l : Path A b b`, which computes on `base` and on `(loop r)`.
-[circle.hcs](../examples/cubical/script/circle.hcs) (about 11 s) declares the
+[circle.hcs](../examples/cubical/script/circle.hcs) declares the
 integers, proves the successor an equivalence, and defines the universal
 cover `helix x = s1rec U0 int (ua sucEquiv) x`. Transporting `0` along
 `helix` over a loop counts its windings:
@@ -140,17 +140,101 @@ cover `helix x = s1rec U0 int (ua sucEquiv) x`. Transporting `0` along
 ; winding loop = (pos 1), winding refl = (pos 0), winding loop⁻¹ = (negsuc 0)
 ```
 
-There is no composition rule for `s1`: the circle is not discrete, so
-composition cannot return its base, and the homogeneous composition
-constructor is not included. Compositions in `s1` itself, and so composite
-loops such as `loop · loop`, do not evaluate; transports in families over
-the circle, which the winding number needs, do.
+### Composite loops
+
+The circle is not discrete, so composition in `s1` cannot return its base.
+Following Coquand, Huber and Mörtberg (2018), a composition in the constant
+family `s1` is instead a *formal* point: the homogeneous composition
+constructor. Horn needs no new constructor for it, since `(comp s1 φ u u0)`
+is already well typed by the composition rules and nothing reduces it; one
+rule, `req.s1rec-comp`, lets the recursor commute with it:
+
+```text
+s1rec A b l (hcomp^j [φ ↦ u] u0) ≡ hcomp^j_A [φ ↦ s1rec A b l u] (s1rec A b l u0)
+```
+
+Compositions are written `(hcomp j A ((FACE TERM) ...) BASE)`, or
+`(comp j A ...)` when the type depends on `j`, with faces `(= i 0)`,
+`(= i 1)`, `(and F G)`, `(or F G)`. Path composition is then a definition,
+and the winding number of `loop · loop` computes (about 60 s, 2.5 GB):
+
+```text
+(def compose (pi p (path s1 base base) (pi q (path s1 base base) (path s1 base base)))
+  (lam p (path s1 base base) (lam q (path s1 base base)
+    (plam i (hcomp j s1 (((= i 0) base) ((= i 1) (papp q j))) (papp p i))))))
+(eval loop-twice (app winding (app compose (plam i (loop i)) (plam i (loop i)))))
+; loop-twice = (pos 2) : int
+```
+
+`helix` sends the composite loop to a composition in the universe,
+`hcomp^j_U [i=0 ↦ int, i=1 ↦ ua suc j] (ua suc i)`, which is a Glue type
+(`req.comp-universe`); transporting `0` through it runs Glue composition,
+which takes the center of a fiber of the universe's line equivalence.
+
+Two changes make that run in a minute instead of not finishing:
+
+- **The line equivalence is direct.** `canonical-map`, the equivalence that
+  universe composition glues along, used to transport the identity
+  equivalence and its contractibility evidence along the line, so each
+  fiber center cost a composition in a Π of Σ of path types over Glue
+  types. It is now the transport `f` made an equivalence by `iso-equiv`
+  with the transport `g` back and two filling squares
+  (`canonical_code_frontend`), so a fiber center is `(g y, s y)`: one
+  transport back along the line. It is still a fixed program whose typing
+  is checked at every use; any equivalence is a valid choice for the
+  universe's composition structure.
+- **Closed terms are typed once.** `rhas.closed` and `req.closed`
+  ([closed.horn](../theories/cubical/closed.horn)) weaken a typing or
+  equation of a closed term in the empty context to any well-formed
+  restricted context, with its dimensions and face; the engine uses them
+  for annotated closed terms such as `ua`, `iso-equiv` and the line
+  equivalence, which were otherwise re-checked at every dimension depth and
+  face they were used under.
+
+## Declared higher inductive types
+
+A constructor whose last item is `(path LEFT RIGHT)` is a path constructor
+([hit.hcs](../examples/cubical/script/hit.hcs), about 2 s). Its endpoints are
+closed point terms of the type; it may have fields (bool, nat, earlier
+closed data types), and its terms take an interval after them:
+
+```text
+(data circle (pt) (lp (path pt pt)))
+(data susp (north) (south) (merid bool (path north south)))
+(eval merid-true (app wind (plam i (app to-circle (merid btrue i)))))   ; (pos 1) : int
+```
+
+For a path constructor the declaration also generates:
+
+- typing with an interval premise, and scope/shift/substitution rules that
+  map the interval by dimension operations only;
+- its boundary, `(c a… r) ≡ LEFT` when `r = 0` holds under the face, and
+  `≡ RIGHT` when `r = 1`, and congruence in the fields and the interval;
+- an eliminator method of type `Π a…. PathP (i. P (c a… i)) e₀ e₁`, where
+  `e₀`, `e₁` are the eliminator's values on the endpoints spelled out with
+  the methods (stating them with the eliminator would make its typing rule
+  circular), and the computation `elim … (c a… r) ≡ (m a…) @ r`;
+- instead of a composition rule, the eliminator on a formal composition
+  (CHM 2018), `req.E.hcomp`:
+
+```text
+elim P m… (hcomp^j_T [φ ↦ u] u0)
+  ≡ comp^j (P (hfill^j [φ ↦ u] u0)) [φ ↦ elim P m… u] (elim P m… u0)
+```
+
+with the filler given by `filldef`, so the motive may depend on the point.
+A type with a path constructor is not discrete, so it gets no rule that
+returns a composition's base. With the declared circle, `wind (lp · lp)`
+also computes to `(pos 2)` (about 60 s), through this dependent rule
+rather than the built-in `s1rec` one. Path constructors need a type without
+parameters, fields that are closed discrete types, and point endpoints;
+higher-dimensional constructors (a torus's square) are not supported.
 
 ## Universe levels
 
 `ua` and `iso-equiv` are the prelude at level 0; `(ua-at L)` and
 `(iso-equiv-at M N)` are the same closed terms at other levels, checked where
-they are used. [levels.hcs](../examples/cubical/script/levels.hcs) (about 4 s)
+they are used. [levels.hcs](../examples/cubical/script/levels.hcs) (about 1 s)
 builds `swap` on pairs of types, which live in `U1`, turns it into a path with
 `(ua-at 1)`, and transports a function out of pairs of types along it.
 
@@ -165,7 +249,7 @@ reach canonical form when they are data (booleans, numbers, declared types).
 ## Level variables
 
 `(def-poly NAME (L) TYPE TERM)` states a definition for every universe level
-`L` ([poly.hcs](../examples/cubical/script/poly.hcs), about 16 s, most of it
+`L` ([poly.hcs](../examples/cubical/script/poly.hcs), about 11 s, most of it
 univalence). Levels are numerals, a level variable, or `(s LEVEL)`;
 `(ua-at LEVEL)`, `(iso-equiv-at LEVEL)` and `(univalence-at LEVEL)` accept
 level variables. `(at NAME LEVEL)` uses a definition at a level, including
@@ -175,7 +259,7 @@ the enclosing definition's own `L`.
 (def-poly univalence (L)
   (pi A (u L) (pi B (u L) (equiv (path (u L) A B) (equiv A B))))
   (univalence-at L))
-; ACCEPT (schematic univalence): every level L, 210196 steps, 3 inductions
+; ACCEPT (schematic univalence): every level L, 198400 steps, 3 inductions
 ```
 
 The ground kernel cannot state "for every L", so a polymorphic definition is
@@ -212,7 +296,8 @@ It is not meant to become Lean 4. Its distinguishing commitments are:
 ## Forms
 
 - `(data NAME (CTOR FIELD-TYPE...) ...)` or `(data (NAME PARAM...) ...)`: a data
-  type (above). Constructors
+  type (above); a constructor `(CTOR FIELD-TYPE... (path LEFT RIGHT))` is a
+  path constructor, applied as `(CTOR a... r)`. Constructors
   apply like functions; `(elim NAME k P (METHODS...) x)` eliminates `x` into
   the motive `P` over `k : NAME`, with one method per constructor taking its
   arguments and then one induction hypothesis per recursive argument.
@@ -228,7 +313,8 @@ Terms use named binders: `(lam x A body)`, `(pi x A B)`, `(sigma x A B)`,
 `(app f a ...)`, `(pair a b)`, `(fst p)`, `(snd p)`, `(plam i body)`,
 `(path i A l r)` or `(path A l r)`, `(papp p r)`, `(bif c P t f b)` with
 motive `P` over `c : bool`, `(ann t A)`, `(u N)`, `(equiv A B)` and
-`(transport i A x)`, `(suc n)`, `(natrec k P z s n)` with motive `P` over
+`(transport i A x)`, `(hcomp j A ((FACE TERM) ...) BASE)`,
+`(comp j A ((FACE TERM) ...) BASE)`, `(suc n)`, `(natrec k P z s n)` with motive `P` over
 `k : nat` and step `s : Π k. P k → P (suc k)`, and numerals. Intervals are `i0`, `i1`, names, `neg`, `meet` and
 `join`. Constants are `bool btrue bfalse nat zero`.
 

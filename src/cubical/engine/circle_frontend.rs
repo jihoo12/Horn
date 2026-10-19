@@ -1,5 +1,6 @@
 //! Engine support for the circle (`theories/cubical/circle.horn`): typing,
-//! the boundary of loop, the recursor's computation, and congruence.
+//! the boundary of loop, the recursor's computation on base, loop and the
+//! formal composition `comp s1 ...`, and congruence.
 use super::{RestrictedProducer, level, shape};
 use crate::cubical::engine::face_frontend::Face;
 use crate::cubical::engine::path_frontend::{Op, path};
@@ -81,6 +82,37 @@ impl RestrictedProducer {
                         let oi = self.check(d, g, phi, &out, a)?;
                         let ti = self.check(d, g, phi, t, a)?;
                         let eq = self.eq(d, g, phi, t, &out, a, "req.s1rec-loop", vec![ti, oi]);
+                        let eq = self.retype_eq(d, g, phi, t, &out, a, ty, eq)?;
+                        return Ok(Some((out, ty.clone(), eq)));
+                    }
+                    ("comp", [fam, psi, tube, u])
+                        if *fam == atom("s1")
+                            && self.f.entails(d, phi, &Face::parse(psi)?).is_err() =>
+                    {
+                        let (a1, ai) = self.f.path.transform(a, &Op::DShift(0))?;
+                        let (b1, bi) = self.f.path.transform(b, &Op::DShift(0))?;
+                        let (l1, li) = self.f.path.transform(lp, &Op::DShift(0))?;
+                        let out = call(
+                            "comp",
+                            [
+                                a1.clone(),
+                                psi.clone(),
+                                call("s1rec", [a1, b1, l1, tube.clone()]),
+                                call("s1rec", [a.clone(), b.clone(), lp.clone(), u.clone()]),
+                            ],
+                        );
+                        let ti = self.check(d, g, phi, t, a)?;
+                        let oi = self.check(d, g, phi, &out, a)?;
+                        let eq = self.eq(
+                            d,
+                            g,
+                            phi,
+                            t,
+                            &out,
+                            a,
+                            "req.s1rec-comp",
+                            vec![ti, ai, bi, li, oi],
+                        );
                         let eq = self.retype_eq(d, g, phi, t, &out, a, ty, eq)?;
                         return Ok(Some((out, ty.clone(), eq)));
                     }

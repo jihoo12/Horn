@@ -1,10 +1,13 @@
 ; The circle, a higher inductive type, appended after nat.horn: a point base,
 ; a path constructor loop with loop i0 = loop i1 = base, and the
 ; non-dependent recursor s1rec A b l x : A for b : A and l : Path A b b.
-; Declarative object theory only. There is deliberately no composition rule
-; for s1: the circle is not discrete, so composition cannot return its base,
-; and its homogeneous composition constructor is not included. Compositions
-; in s1 therefore do not compute; transports in families over s1 do.
+; Declarative object theory only. The circle is not discrete, so composition
+; cannot return its base. Instead, as in Coquand, Huber and Mortberg (2018),
+; a composition in the constant family s1 is itself a canonical point: the
+; formal homogeneous composition constructor. No new constructor or rule
+; forms it; comp's typing and face rule from composition.horn already
+; apply. The recursor commutes with it (req.s1rec-comp below), so composite
+; loops such as loop . loop compute in families over the circle.
 (ctor s1 () Tm)
 (ctor base () Tm)
 (ctor loop (I) Tm)
@@ -62,3 +65,14 @@
 (rule req.s1rec-cong ((rhas ?d ?g ?phi (s1rec ?a ?b ?lp ?x) ?a) (rhas ?d ?g ?phi (s1rec ?a ?b ?lp ?x2) ?a)
     (req ?d ?g ?phi ?x ?x2 s1))
   (req ?d ?g ?phi (s1rec ?a ?b ?lp ?x) (s1rec ?a ?b ?lp ?x2) ?a))
+
+; The recursor on a formal composition: s1rec of hcomp [psi |-> t] u is the
+; composition, in the constant family A, of s1rec over the tube and the
+; base (CHM 2018, section 2). A, b and l are shifted under the composition's
+; dimension binder. Every piece is checked: the right side must be typed
+; by rhas.comp, which checks the tube against the base on psi.
+(rule req.s1rec-comp ((rhas ?d ?g ?phi (s1rec ?a ?b ?lp (comp s1 ?psi ?t ?u)) ?a)
+    (dshift ?a z ?a1) (dshift ?b z ?b1) (dshift ?lp z ?l1)
+    (rhas ?d ?g ?phi (comp ?a1 ?psi (s1rec ?a1 ?b1 ?l1 ?t) (s1rec ?a ?b ?lp ?u)) ?a))
+  (req ?d ?g ?phi (s1rec ?a ?b ?lp (comp s1 ?psi ?t ?u))
+    (comp ?a1 ?psi (s1rec ?a1 ?b1 ?l1 ?t) (s1rec ?a ?b ?lp ?u)) ?a))

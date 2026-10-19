@@ -1,0 +1,75 @@
+; Higher inductive types declared in a script. A constructor ending in
+; (path LEFT RIGHT) is a path constructor between closed point terms; its
+; eliminator method is a path over the motive. The type is not discrete:
+; a composition in it is a formal point, taken apart by the eliminator.
+; Every rule is generated and checked like any other declaration's.
+(data int (pos nat) (negsuc nat))
+(def sucint (pi x int int)
+  (lam x int
+    (elim int k int
+      ((lam n nat (pos (suc n)))
+       (lam n nat (natrec j int (pos 0) (lam j nat (lam r int (negsuc j))) n)))
+      x)))
+(def predint (pi x int int)
+  (lam x int
+    (elim int k int
+      ((lam n nat (natrec j int (negsuc 0) (lam j nat (lam r int (pos j))) n))
+       (lam n nat (negsuc (suc n))))
+      x)))
+
+(def suc-pred (pi x int (path int (app sucint (app predint x)) x))
+  (lam x int
+    (elim int k (path int (app sucint (app predint k)) k)
+      ((lam n nat
+         (natrec j (path int (app sucint (app predint (pos j))) (pos j))
+           (plam i (pos 0))
+           (lam j nat (lam h (path int (app sucint (app predint (pos j))) (pos j)) (plam i (pos (suc j)))))
+           n))
+       (lam n nat (plam i (negsuc n))))
+      x)))
+(def pred-suc (pi x int (path int (app predint (app sucint x)) x))
+  (lam x int
+    (elim int k (path int (app predint (app sucint k)) k)
+      ((lam n nat (plam i (pos n)))
+       (lam n nat
+         (natrec j (path int (app predint (app sucint (negsuc j))) (negsuc j))
+           (plam i (negsuc 0))
+           (lam j nat (lam h (path int (app predint (app sucint (negsuc j))) (negsuc j)) (plam i (negsuc (suc j)))))
+           n)))
+      x)))
+
+(def suc-equiv (equiv int int)
+  (pair sucint (app iso-equiv int int sucint predint suc-pred pred-suc)))
+
+; The circle, declared, and its universal cover.
+(data circle (pt) (lp (path pt pt)))
+(def cover (pi x circle (u 0))
+  (lam x circle (elim circle k (u 0) (int (app ua int int suc-equiv)) x)))
+(def wind (pi p (path circle pt pt) int)
+  (lam p (path circle pt pt) (transport i (app cover (papp p i)) (pos 0))))
+(eval once (app wind (plam i (lp i))))
+(eval back (app wind (plam i (lp (neg i)))))
+
+; A dependent eliminator: refl at every point, a path over lp.
+(def loop-refl (pi x circle (path circle x x))
+  (lam x circle
+    (elim circle k (path circle k k) ((plam j pt) (plam i (plam j (lp i)))) x)))
+(equal along-loop (plam i (app loop-refl (lp i))) (plam i (plam j (lp i)))
+  (path i (path circle (lp i) (lp i)) (plam j pt) (plam j pt)))
+
+; The suspension of bool, a path constructor with a field, mapped onto the
+; circle: merid btrue goes around once, merid bfalse stays.
+(data susp (north) (south) (merid bool (path north south)))
+(def to-circle (pi x susp circle)
+  (lam x susp
+    (elim susp k circle
+      (pt pt (lam b bool (bif c (path circle pt pt) (plam i (lp i)) (plam i pt) b)))
+      x)))
+(eval merid-true (app wind (plam i (app to-circle (merid btrue i)))))
+(eval merid-false (app wind (plam i (app to-circle (merid bfalse i)))))
+
+; The eliminator on a composition in susp: a composition in circle.
+(equal on-composition
+  (plam i (app to-circle (hcomp j susp (((= i 0) north) ((= i 1) south)) (merid btrue i))))
+  (plam i (hcomp j circle (((= i 0) pt) ((= i 1) pt)) (lp i)))
+  (path circle pt pt))

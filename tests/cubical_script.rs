@@ -357,9 +357,117 @@ fn the_winding_number_of_loop_computes() {
         [
             "loop-once = (pos 1) : int",
             "constant = (pos 0) : int",
-            "loop-backwards = (negsuc 0) : int"
+            "loop-backwards = (negsuc 0) : int",
+            "loop-twice = (pos 2) : int"
         ]
     );
-    // The circle is not discrete: no composition rule returns a base in s1.
-    assert!(!script.certified.theory.contains("(comp s1 "));
+    // The circle is not discrete: no rule reduces a composition in s1; it is
+    // a formal point that only the recursor (req.s1rec-comp) takes apart.
+    assert!(
+        !script
+            .certified
+            .theory
+            .contains("(req ?d ?g ?phi (comp s1 ")
+    );
+    assert!(
+        script
+            .certified
+            .rules_used
+            .iter()
+            .any(|r| r == "req.s1rec-comp")
+    );
+}
+
+/// The universe's line equivalence is generated text; regenerate the file
+/// with `HORN_BLESS=1 cargo test canonical_map`.
+#[test]
+fn canonical_map_file_is_generated_and_typed_at_levels_0_1_2() {
+    use cubical::engine::canonical_code_frontend::{definition, program};
+    use cubical::engine::face_frontend::Face;
+    use cubical::engine::restricted_frontend::RestrictedProducer;
+    use cubical::engine::term::atom;
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/theories/cubical/canonical-map.horn"
+    );
+    let text = definition().unwrap();
+    if std::env::var_os("HORN_BLESS").is_some() {
+        std::fs::write(path, &text).unwrap();
+    }
+    assert_eq!(std::fs::read_to_string(path).unwrap(), text);
+    let (certified, ()) = cubical::generate::certify(cubical::core_theory(), || {
+        let mut p = RestrictedProducer::default();
+        p.f.path.p.archive_judgments();
+        p.reuse_restricted_typings();
+        for l in 0..3 {
+            let t = program(l)?;
+            let (_, id) = p.infer(0, &atom("nil"), &Face::True, &t)?;
+            p.f.path.p.result(&format!("canonical-map-{l}"), id);
+        }
+        Ok((p, (), String::new()))
+    })
+    .unwrap();
+    assert_eq!(certified.checked.goals, 3);
+}
+
+#[test]
+fn declared_higher_inductive_types_compute() {
+    let script = cubical::script::run(include_str!("../examples/cubical/script/hit.hcs")).unwrap();
+    let shown: Vec<_> = script
+        .evaluations
+        .iter()
+        .map(|e| format!("{} = {} : {}", e.name, e.value, e.ty))
+        .collect();
+    assert_eq!(
+        shown,
+        [
+            "once = (pos 1) : int",
+            "back = (negsuc 0) : int",
+            "merid-true = (pos 1) : int",
+            "merid-false = (pos 0) : int"
+        ]
+    );
+    let used = &script.certified.rules_used;
+    for rule in [
+        "req.elim/circle.ctor/circle/lp",
+        "req.ctor/susp/merid-1",
+        "req.elim/susp.hcomp",
+    ] {
+        assert!(used.iter().any(|r| r == rule), "{rule}");
+    }
+    // A higher inductive type is not discrete: no rule returns a base.
+    assert!(
+        !script
+            .certified
+            .theory
+            .contains("(rule req.comp-ty/circle ")
+    );
+}
+
+#[test]
+fn path_constructors_are_restricted_to_closed_types_and_point_endpoints() {
+    for bad in [
+        "(data (t A) (a) (p (path a a)))",
+        "(data t (a) (p t (path a a)))",
+        "(data t (a) (p (path a q)))",
+        "(data t (a) (p (path a a)) (q (path p a)))",
+    ] {
+        assert!(cubical::script::run(bad).is_err(), "{bad}");
+    }
+}
+
+/// A composition binder may shadow an outer dimension: the branch faces and
+/// a homogeneous type are written outside its scope.
+#[test]
+fn composition_binders_do_not_capture_outer_faces_or_types() {
+    for source in [
+        "(check shadow-face (plam i (hcomp i nat (((= i 0) zero)) zero)) (path nat zero zero))",
+        "(check shadow-family
+           (lam P (path (u 0) nat nat) (plam i (lam x (papp P i) (hcomp i (papp P i) () x))))
+           (pi P (path (u 0) nat nat)
+             (path i (pi x (papp P i) (papp P i)) (lam x nat x) (lam x nat x))))",
+    ] {
+        let script = cubical::script::run(source).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(script.certified.checked.goals, 1);
+    }
 }
