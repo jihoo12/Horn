@@ -1,9 +1,9 @@
 # Extraction baseline
 
-Source: https://github.com/jihoo12/kamo3
+Source: `jihoo12/kamo3` (private)
 
-This upstream repository is private. Its links and revision identifiers are
-retained for provenance and for authorized readers; they are not required
+This upstream repository is private. Its revision identifiers are
+retained for provenance; they are not required
 dependencies of Horn's build, examples, tests, or trust specification.
 
 Commit: `6a226630910b34ac89dc77f08a22fe956340aecf`
@@ -33,9 +33,3 @@ The kamo3 repository remains an application/research repository. The initial
 extraction did not change its embedded checker. Downstream migrations must pin
 a reviewed Horn commit and run certificate compatibility checks before removing
 embedded copies; new Horn commits do not automatically update pinned consumers.
-
-Optional upstream research context (requires repository access):
-
-- [Architecture and status](https://github.com/jihoo12/kamo3/blob/6a226630910b34ac89dc77f08a22fe956340aecf/README.md)
-- [Trust notes](https://github.com/jihoo12/kamo3/blob/6a226630910b34ac89dc77f08a22fe956340aecf/TRUST.md)
-- [Research plan](https://github.com/jihoo12/kamo3/blob/6a226630910b34ac89dc77f08a22fe956340aecf/RESEARCH_PLAN.md)
