@@ -975,7 +975,12 @@ impl RestrictedProducer {
             return Ok(id);
         }
         if let (("plam", [body]), ("path", [a, b, c])) = (shape(t)?, shape(expected)?) {
-            if let ("hole", [id]) = shape(body)? {
+            // A hole under transparent annotations still owes the ends.
+            let mut inner = body;
+            while let ("ann", [x, _]) = shape(inner)? {
+                inner = x;
+            }
+            if let ("hole", [id]) = shape(inner)? {
                 let (g2, _) = self.f.path.dshiftctx(g, 0)?;
                 return Ok(self.fill(Hole {
                     id: id.clone(),

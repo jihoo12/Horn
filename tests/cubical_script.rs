@@ -570,3 +570,38 @@ fn holes_in_equalities_types_and_unreached_positions_are_all_reported() {
     .unwrap();
     assert!(dims.contains("\n  i✝ i : I\n"), "{dims}");
 }
+
+#[test]
+fn holes_are_numbered_in_source_order_and_never_certified() {
+    // A hole in a lambda's domain, which the elaborator does not use, still
+    // keeps the form from being certified.
+    let domain = cubical::script::run("(check x (lam n ? n) (pi n nat nat))")
+        .err()
+        .unwrap();
+    assert!(
+        domain.contains("?1\n  (in a position that is not checked"),
+        "{domain}"
+    );
+    // `check` elaborates the type first; numbers follow the source.
+    let both = cubical::script::run("(check both ? ?)").err().unwrap();
+    assert!(
+        both.starts_with("check both: 2 goals to fill\n\n?1\n  ⊢ ?2"),
+        "{both}"
+    );
+    // A def-poly elaborates its source twice; its hole is one goal.
+    let poly = cubical::script::run("(def-poly id (L) (pi A (u L) (pi x A A)) (? todo))")
+        .err()
+        .unwrap();
+    assert!(
+        poly.starts_with("def-poly id: 1 goal to fill\n\n?todo\n"),
+        "{poly}"
+    );
+    // A hole under an annotation still owes the path's ends.
+    let ann = cubical::script::run("(def x (path nat 0 0) (plam i (ann ? nat)))")
+        .err()
+        .unwrap();
+    assert!(
+        ann.ends_with("where i = 0 must give 0\n        i = 1 must give 0"),
+        "{ann}"
+    );
+}

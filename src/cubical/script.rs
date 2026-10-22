@@ -169,9 +169,11 @@ const RESERVED: &[&str] = &[
 
 struct Elaborator {
     p: RestrictedProducer,
-    /// Holes written in the current form: their display name and the names
-    /// in scope where they were written.
-    holes: Vec<(String, Names)>,
+    /// Holes written in the current form, in source order: their display
+    /// name, and the names in scope where they were elaborated (`None` for
+    /// a hole in a position the elaborator skips, such as a lambda's
+    /// domain).
+    holes: Vec<(String, Option<Names>)>,
     defs: HashMap<String, Sexp>,
     /// Level-polymorphic definitions: level parameter, type, term (source).
     poly: HashMap<String, (String, Sexp, Sexp)>,
@@ -401,14 +403,12 @@ impl Elaborator {
 
     /// A hole `?` or `(? NAME)`: the core term `(hole K)`, which never has
     /// a derivation; checking it records what it must be.
-    fn new_hole(&mut self, name: Option<&str>, names: &Names) -> Sexp {
-        let k = self.holes.len();
-        let shown = match name {
-            Some(n) => format!("?{n}"),
-            None => format!("?{}", k + 1),
-        };
-        self.holes.push((shown, names.clone()));
-        call("hole", [atom(k.to_string())])
+    fn new_hole(&mut self, k: &Sexp, names: &Names) -> Result<Sexp> {
+        let index: usize = k.atom()?.parse().map_err(|_| "invalid hole")?;
+        let (_, scope) = self.holes.get_mut(index).ok_or("invalid hole")?;
+        // A def-poly elaborates its source twice; the first scope stands.
+        scope.get_or_insert_with(|| names.clone());
+        Ok(call("hole", [k.clone()]))
     }
 
     /// The error for a form that failed. If the checker met holes, show
@@ -452,8 +452,10 @@ impl Elaborator {
                 .unwrap_or(0);
             let fits = |h: &crate::cubical::engine::restricted_frontend::Hole| {
                 self.holes.get(k).is_some_and(|(_, names)| {
-                    names.dimensions.len() == h.dimensions
-                        && names.ordinary.len() == context_length(&h.context)
+                    names.as_ref().is_some_and(|names| {
+                        names.dimensions.len() == h.dimensions
+                            && names.ordinary.len() == context_length(&h.context)
+                    })
                 })
             };
             match shown_holes.iter().position(|h| h.id == hole.id) {
@@ -480,14 +482,17 @@ impl Elaborator {
         );
         for (k, hole) in order {
             let Some(hole) = hole else {
-                out.push_str(&format!(
-                    "\n\n{}\n  (not reached by the checker, so it has no goal yet; fill the others first)",
-                    self.holes[k].0
-                ));
+                let (shown, scope) = &self.holes[k];
+                let why = if scope.is_some() {
+                    "not reached by the checker, so it has no goal yet; fill the others first"
+                } else {
+                    "in a position that is not checked, such as a lambda's domain; write it out"
+                };
+                out.push_str(&format!("\n\n{shown}\n  ({why})"));
                 continue;
             };
             let (shown, names) = match self.holes.get(k) {
-                Some((shown, names)) => (shown.clone(), names.clone()),
+                Some((shown, names)) => (shown.clone(), names.clone().unwrap_or_default()),
                 None => (format!("?{k}"), Names::default()),
             };
             out.push_str(&format!("\n\n{shown}"));
@@ -564,7 +569,6 @@ impl Elaborator {
 
     fn term(&mut self, s: &Sexp, names: &Names) -> Result<Sexp> {
         let xs = match s {
-            Sexp::Atom(a) if &**a == "?" => return Ok(self.new_hole(None, names)),
             Sexp::Atom(a) => {
                 return if ["bool", "btrue", "bfalse", "nat", "zero", "s1", "base"].contains(&&**a) {
                     Ok(s.clone())
@@ -603,7 +607,7 @@ impl Elaborator {
         let head = xs.first().ok_or("empty term")?.atom()?;
         let args = &xs[1..];
         Ok(match (head, args) {
-            ("?", [name]) => self.new_hole(Some(binder(name)?), names),
+            ("?#", [k]) => self.new_hole(k, names)?,
             ("u", [l]) => call("u", [self.level_term(l, names)?]),
             ("at", [name, l]) => {
                 let name = name.atom()?;
@@ -1000,6 +1004,10 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
         let mut polymorphic = Vec::new();
         let mut names_seen = std::collections::HashSet::new();
         for form in &forms {
+            // Number the holes in source order, wherever they are written.
+            let mut written = Vec::new();
+            let form = &number_holes(form, &mut written)?;
+            e.holes = written.into_iter().map(|shown| (shown, None)).collect();
             let xs = form.list()?;
             let head = xs.first().ok_or("empty form")?.atom()?;
             // A data head may be `(NAME PARAM...)`.
@@ -1011,7 +1019,6 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
                 return Err(format!("duplicate name {name}"));
             }
             let empty = Names::default();
-            e.holes.clear();
             e.p.holes.clear();
             let what = format!("{head} {name}");
             match (head, &xs[2..]) {
@@ -1109,4 +1116,30 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
         evaluations,
         polymorphic,
     })
+}
+
+/// Replace each hole `?` or `(? NAME)` of a form by `(?# K)`, numbering them
+/// in the order they are written, and collect how each is shown.
+fn number_holes(s: &Sexp, written: &mut Vec<String>) -> Result<Sexp> {
+    match s {
+        Sexp::Atom(a) if &**a == "?" => {
+            let k = written.len();
+            written.push(format!("?{}", k + 1));
+            Ok(call("?#", [atom(k.to_string())]))
+        }
+        Sexp::List(xs) if xs.first().and_then(|h| h.atom().ok()) == Some("?") => {
+            let [_, name] = &xs[..] else {
+                return Err(format!("invalid hole {s}"));
+            };
+            let k = written.len();
+            written.push(format!("?{}", binder(name)?));
+            Ok(call("?#", [atom(k.to_string())]))
+        }
+        Sexp::List(xs) => Ok(super::engine::term::list(
+            xs.iter()
+                .map(|x| number_holes(x, written))
+                .collect::<Result<_>>()?,
+        )),
+        Sexp::Atom(_) => Ok(s.clone()),
+    }
 }
