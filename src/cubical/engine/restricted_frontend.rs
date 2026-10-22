@@ -81,9 +81,40 @@ pub struct Constraint {
     pub ty: Sexp,
 }
 
+/// Why a term did not check, at the place it went wrong.
+#[derive(Clone)]
+pub enum Wrong {
+    /// A path's body at an end (`one`: at i1) is `got` but must be `want`,
+    /// both of type `ty`, in the context outside the abstraction.
+    End {
+        one: bool,
+        got: Sexp,
+        want: Sexp,
+        ty: Sexp,
+    },
+    /// The term has type `got` where `want` is expected.
+    Type { got: Sexp, want: Sexp },
+    /// An introduction form (lam, pair, plam) where the type, `want`, has no
+    /// such elements.
+    Former { want: Sexp },
+}
+
+/// A term that did not check, with where it was checked.
+#[derive(Clone)]
+pub struct Mismatch {
+    pub dimensions: usize,
+    pub context: Sexp,
+    pub face: Face,
+    pub term: Sexp,
+    pub wrong: Wrong,
+}
+
 #[derive(Default)]
 pub struct RestrictedProducer {
     pub f: FaceProducer,
+    /// Mismatches on the way to a failure. One recorded under a call that
+    /// later succeeded was recovered from and is dropped.
+    pub mismatches: Vec<Mismatch>,
     /// Holes met while checking, in order, without repeats.
     pub holes: Vec<Hole>,
     /// Equations with holes met while checking, without repeats.
@@ -449,6 +480,20 @@ impl RestrictedProducer {
         self.f.path.sscope(d, n, s)
     }
     pub fn infer(&mut self, d: usize, g: &Sexp, phi: &Face, t: &Sexp) -> Result<(Sexp, usize)> {
+        let mark = self.mismatches.len();
+        let out = self.infer_unmarked(d, g, phi, t);
+        if out.is_ok() {
+            self.mismatches.truncate(mark);
+        }
+        out
+    }
+    fn infer_unmarked(
+        &mut self,
+        d: usize,
+        g: &Sexp,
+        phi: &Face,
+        t: &Sexp,
+    ) -> Result<(Sexp, usize)> {
         let key = call("rhas-key", [num(d), g.clone(), phi.quote(), t.clone()]);
         if let Some(result) = self.inferred.get(&key) {
             return Ok(result.clone());
@@ -867,6 +912,21 @@ impl RestrictedProducer {
         t: &Sexp,
         expected: &Sexp,
     ) -> Result<usize> {
+        let mark = self.mismatches.len();
+        let out = self.check_unmarked(d, g, phi, t, expected);
+        if out.is_ok() {
+            self.mismatches.truncate(mark);
+        }
+        out
+    }
+    fn check_unmarked(
+        &mut self,
+        d: usize,
+        g: &Sexp,
+        phi: &Face,
+        t: &Sexp,
+        expected: &Sexp,
+    ) -> Result<usize> {
         let key = call(
             "rhas",
             [num(d), g.clone(), phi.quote(), t.clone(), expected.clone()],
@@ -984,6 +1044,20 @@ impl RestrictedProducer {
             let id = self.check(d, g, phi, t, &target)?;
             return self.retype_has(d, g, phi, t, &target, expected, id);
         }
+        if let Some(former) = former
+            && shape(expected)?.0 != former
+        {
+            self.mismatches.push(Mismatch {
+                dimensions: d,
+                context: g.clone(),
+                face: phi.clone(),
+                term: t.clone(),
+                wrong: Wrong::Former {
+                    want: expected.clone(),
+                },
+            });
+            return Err(format!("{} does not have type {expected}", shape(t)?.0));
+        }
         if let ("lam", [body]) = shape(t)? {
             let ("pi", [a, b]) = shape(expected)? else {
                 return Err("lambda expects Pi annotation".into());
@@ -1034,8 +1108,26 @@ impl RestrictedProducer {
             let (t1, t1i) = self.f.path.transform(body, &Op::DSubst(0, atom("i1")))?;
             let (a0, a0i) = self.f.path.transform(a, &Op::DSubst(0, atom("i0")))?;
             let (a1, a1i) = self.f.path.transform(a, &Op::DSubst(0, atom("i1")))?;
-            let e0 = self.equality(d, g, phi, &t0, b, &a0)?;
-            let e1 = self.equality(d, g, phi, &t1, c, &a1)?;
+            let end = |p: &mut Self, one: bool, got: &Sexp, want: &Sexp, ty: &Sexp| {
+                let out = p.equality(d, g, phi, got, want, ty);
+                if out.is_err() {
+                    p.mismatches.push(Mismatch {
+                        dimensions: d,
+                        context: g.clone(),
+                        face: phi.clone(),
+                        term: t.clone(),
+                        wrong: Wrong::End {
+                            one,
+                            got: got.clone(),
+                            want: want.clone(),
+                            ty: ty.clone(),
+                        },
+                    });
+                }
+                out
+            };
+            let e0 = end(self, false, &t0, b, &a0)?;
+            let e1 = end(self, true, &t1, c, &a1)?;
             let id = self.has(
                 d,
                 g,
@@ -1078,7 +1170,22 @@ impl RestrictedProducer {
         }
         let (ue, ei) = self.infer(d, g, phi, expected)?;
         level(&ue)?;
-        let eq = self.equality(d, g, phi, &actual, expected, &ue)?;
+        let eq = match self.equality(d, g, phi, &actual, expected, &ue) {
+            Ok(eq) => eq,
+            Err(err) => {
+                self.mismatches.push(Mismatch {
+                    dimensions: d,
+                    context: g.clone(),
+                    face: phi.clone(),
+                    term: t.clone(),
+                    wrong: Wrong::Type {
+                        got: actual.clone(),
+                        want: expected.clone(),
+                    },
+                });
+                return Err(err);
+            }
+        };
         Ok(self.has(d, g, phi, t, expected, "rhas.conv", vec![ti, eq, ei]))
     }
 
@@ -1708,6 +1815,22 @@ impl RestrictedProducer {
         Ok((t.clone(), ty, eq))
     }
     pub fn equality(
+        &mut self,
+        d: usize,
+        g: &Sexp,
+        phi: &Face,
+        a: &Sexp,
+        b: &Sexp,
+        ty: &Sexp,
+    ) -> Result<usize> {
+        let mark = self.mismatches.len();
+        let out = self.equality_unmarked(d, g, phi, a, b, ty);
+        if out.is_ok() {
+            self.mismatches.truncate(mark);
+        }
+        out
+    }
+    fn equality_unmarked(
         &mut self,
         d: usize,
         g: &Sexp,

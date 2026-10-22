@@ -82,6 +82,29 @@ numbered in the order they are written; a hole anywhere in a form, even in
 a position the checker does not use, keeps the form from being certified.
 In a `def-poly`, goals show the level variable (`⊢ (u L)`).
 
+## When a proof is wrong
+
+A form that does not check says where, in the same names: a path that does
+not end where it must, a term whose type is not the one required, or a
+function, pair or path given where the type has no such elements. Each side
+is also shown evaluated when that differs. Forgetting `suc` in the step of
+`zero-add` above gives:
+
+```text
+error: def zero-add: the path does not end where it must, at i = 0
+
+  n : nat
+  k : nat
+  p : (path nat (app add 0 k) k)
+
+  it is (papp p 0), which computes to (natrec x nat 0 (lam x (lam y (suc y))) k)
+  but must be (app add 0 (suc k)), which computes to (suc (natrec x nat 0 (lam x (lam y (suc y))) k))
+```
+
+The checker's search may fail in several places before giving up; the
+report is the last mismatch on the path that failed, not one it recovered
+from.
+
 Natural numbers ([nat.hcs](../examples/cubical/script/nat.hcs)) support
 programs by recursion and proofs by induction, in 0.1 s:
 

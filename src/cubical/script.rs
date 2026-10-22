@@ -31,6 +31,7 @@ use super::engine::face_frontend::Face;
 use super::engine::iso_equiv_frontend::{iso_equiv_term, iso_equiv_type};
 use super::engine::path_frontend::{dim, papp, path, v};
 use super::engine::restricted_frontend::RestrictedProducer;
+use super::engine::restricted_frontend::{Mismatch, Wrong};
 use super::engine::term::{Result, Sexp, atom, call, parse};
 use super::engine::ua_frontend::{ua_term, ua_type};
 use super::generate::{Certificate, Regenerated, certify};
@@ -181,6 +182,9 @@ struct Elaborator {
     /// While a def-poly with holes is checked at a marker level: that level
     /// and the level variable it stands for.
     level_marker: Option<(usize, String)>,
+    /// The names in scope where each core term of the current form was
+    /// written, to show a mismatch by name.
+    scopes: HashMap<Sexp, Names>,
     defs: HashMap<String, Sexp>,
     /// Level-polymorphic definitions: level parameter, type, term (source).
     poly: HashMap<String, (String, Sexp, Sexp)>,
@@ -275,6 +279,7 @@ impl Elaborator {
             p,
             holes: Vec::new(),
             level_marker: None,
+            scopes: HashMap::new(),
             defs: HashMap::new(),
             poly: HashMap::new(),
             prelude,
@@ -421,7 +426,7 @@ impl Elaborator {
 
     /// The error for a form that failed. If the checker met holes, show
     /// what each must be instead of the search failure they caused.
-    fn explain(&self, what: &str, err: String) -> String {
+    fn explain(&mut self, what: &str, err: String) -> String {
         fn context_length(g: &Sexp) -> usize {
             let mut n = 0;
             let mut tail = g;
@@ -434,15 +439,12 @@ impl Elaborator {
             n
         }
         if self.p.holes.is_empty() && self.holes.is_empty() {
-            return format!("{what}: {err}");
+            return match self.p.mismatches.last().cloned() {
+                Some(m) => self.mismatch(what, &m),
+                None => format!("{what}: {err}"),
+            };
         }
-        let mut known = HashMap::new();
-        for (name, t) in &self.defs {
-            known.insert(t.clone(), name.clone());
-        }
-        for (name, t) in &self.prelude {
-            known.insert(t.clone(), (*name).to_owned());
-        }
+        let known = self.known();
         let hole_names: Vec<String> = self.holes.iter().map(|(n, _)| n.clone()).collect();
         let printer = Printer {
             known: &known,
@@ -637,7 +639,156 @@ impl Elaborator {
         out
     }
 
+    /// Closed terms to print by name: definitions and the prelude.
+    fn known(&self) -> HashMap<Sexp, String> {
+        let mut known = HashMap::new();
+        for (name, t) in &self.defs {
+            known.insert(t.clone(), name.clone());
+        }
+        for (name, t) in &self.prelude {
+            known.insert(t.clone(), (*name).to_owned());
+        }
+        known
+    }
+
+    /// Show a mismatch in the user's names, with what each side computes to.
+    fn mismatch(&mut self, what: &str, m: &Mismatch) -> String {
+        let names = self.scopes.get(&m.term).cloned().unwrap_or_default();
+        let mut entries = Vec::new();
+        let mut tail = &m.context;
+        while let Sexp::List(xs) = tail
+            && xs.len() == 3
+        {
+            entries.push(xs[1].clone());
+            tail = &xs[2];
+        }
+        entries.reverse();
+        let mut vars: Vec<String> = if names.ordinary.len() == entries.len() {
+            names.ordinary.clone()
+        } else {
+            (0..entries.len()).map(|i| format!("x{i}")).collect()
+        };
+        for i in 0..vars.len() {
+            if vars[i + 1..].contains(&vars[i]) {
+                vars[i].push('✝');
+            }
+        }
+        let dims: Vec<String> = if names.dimensions.len() == m.dimensions {
+            names.dimensions.clone()
+        } else {
+            (0..m.dimensions).map(|i| format!("i{i}")).collect()
+        };
+        // What a term computes to, when that differs from it.
+        let normal = |e: &mut Self, t: &Sexp, ty: &Sexp| -> Option<Sexp> {
+            let (v, _) =
+                e.p.value(m.dimensions, &m.context, &m.face, t, ty, 10_000)
+                    .ok()?;
+            (v != *t).then_some(v)
+        };
+        let (headline, lines): (String, Vec<(String, Sexp, Option<Sexp>)>) = match &m.wrong {
+            Wrong::End { one, got, want, ty } => {
+                let (g, w) = (normal(self, got, ty), normal(self, want, ty));
+                (
+                    format!(
+                        "the path does not end where it must, at {} = {}",
+                        self.path_dimension(m),
+                        u8::from(*one)
+                    ),
+                    vec![
+                        ("it is".into(), got.clone(), g),
+                        ("but must be".into(), want.clone(), w),
+                    ],
+                )
+            }
+            Wrong::Type { got, want } => {
+                let universe = self
+                    .p
+                    .infer(m.dimensions, &m.context, &m.face, want)
+                    .ok()
+                    .map(|(u, _)| u);
+                let (g, w) = match &universe {
+                    Some(u) => (normal(self, got, u), normal(self, want, u)),
+                    None => (None, None),
+                };
+                (
+                    "a term does not have the type it must".into(),
+                    vec![
+                        ("the term".into(), m.term.clone(), None),
+                        ("has type".into(), got.clone(), g),
+                        ("but must have".into(), want.clone(), w),
+                    ],
+                )
+            }
+            Wrong::Former { want } => (
+                format!(
+                    "a {} cannot have this type",
+                    match shape_head(&m.term) {
+                        "lam" => "function (lam)",
+                        "pair" => "pair",
+                        _ => "path (plam)",
+                    }
+                ),
+                vec![
+                    ("the term".into(), m.term.clone(), None),
+                    ("must have".into(), want.clone(), None),
+                ],
+            ),
+        };
+        let known = self.known();
+        let hole_names: Vec<String> = self.holes.iter().map(|(n, _)| n.clone()).collect();
+        let printer = Printer {
+            known: &known,
+            holes: &hole_names,
+            level: None,
+        };
+        let mut out = format!("{what}: {headline}\n");
+        for (i, ty) in entries.iter().enumerate() {
+            let scope = Scope {
+                vars: vars[..i].to_vec(),
+                dims: dims.clone(),
+            };
+            out.push_str(&format!("\n  {} : {}", vars[i], printer.term(ty, &scope)));
+        }
+        if !dims.is_empty() {
+            out.push_str(&format!("\n  {} : I", dims.join(" ")));
+        }
+        let scope = Scope { vars, dims };
+        if m.face != Face::True {
+            out.push_str(&format!("\n  under {}", printer.face(&m.face, &scope)));
+        }
+        if !entries.is_empty() || !scope.dims.is_empty() || m.face != Face::True {
+            out.push('\n');
+        }
+        for (label, t, computed) in lines {
+            out.push_str(&format!("\n  {label} {}", printer.term(&t, &scope)));
+            if let Some(v) = computed {
+                out.push_str(&format!(", which computes to {}", printer.term(&v, &scope)));
+            }
+        }
+        out
+    }
+
+    /// The name of the dimension a mismatched path abstraction binds.
+    fn path_dimension(&self, m: &Mismatch) -> String {
+        if let Sexp::List(xs) = &m.term
+            && xs.len() == 2
+            && let Some(names) = self.scopes.get(&xs[1])
+            && let Some(i) = names.dimensions.last()
+        {
+            return i.clone();
+        }
+        "i".into()
+    }
+
     fn term(&mut self, s: &Sexp, names: &Names) -> Result<Sexp> {
+        let t = self.term_unrecorded(s, names)?;
+        self.scopes
+            .entry(t.clone())
+            .or_insert_with(|| names.clone());
+        Ok(t)
+    }
+
+    fn term_unrecorded(&mut self, s: &Sexp, names: &Names) -> Result<Sexp> {
         let xs = match s {
             Sexp::Atom(a) => {
                 return if ["bool", "btrue", "bfalse", "nat", "zero", "s1", "base"].contains(&&**a) {
@@ -1092,6 +1243,8 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
             e.p.holes.clear();
             e.p.constraints.clear();
             e.level_marker = None;
+            e.scopes.clear();
+            e.p.mismatches.clear();
             let what = format!("{head} {name}");
             match (head, &xs[2..]) {
                 ("data", ctors) => {
@@ -1247,5 +1400,12 @@ fn hole_numbers(t: &Sexp, out: &mut Vec<usize>) {
         for x in xs.iter() {
             hole_numbers(x, out);
         }
+    }
+}
+
+fn shape_head(t: &Sexp) -> &str {
+    match t {
+        Sexp::List(xs) => xs.first().and_then(|h| h.atom().ok()).unwrap_or(""),
+        Sexp::Atom(a) => a,
     }
 }
