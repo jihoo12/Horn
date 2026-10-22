@@ -38,6 +38,10 @@ use std::collections::HashMap;
 
 const FUEL: usize = 100_000;
 
+/// The universe level a def-poly with holes is checked at, standing for its
+/// level variable when its goals are shown.
+const LEVEL_MARK: usize = 64;
+
 /// One reported evaluation: `name = value : type`.
 pub struct Evaluation {
     pub name: String,
@@ -174,6 +178,9 @@ struct Elaborator {
     /// a hole in a position the elaborator skips, such as a lambda's
     /// domain).
     holes: Vec<(String, Option<Names>)>,
+    /// While a def-poly with holes is checked at a marker level: that level
+    /// and the level variable it stands for.
+    level_marker: Option<(usize, String)>,
     defs: HashMap<String, Sexp>,
     /// Level-polymorphic definitions: level parameter, type, term (source).
     poly: HashMap<String, (String, Sexp, Sexp)>,
@@ -267,6 +274,7 @@ impl Elaborator {
         Ok(Self {
             p,
             holes: Vec::new(),
+            level_marker: None,
             defs: HashMap::new(),
             poly: HashMap::new(),
             prelude,
@@ -439,6 +447,10 @@ impl Elaborator {
         let printer = Printer {
             known: &known,
             holes: &hole_names,
+            level: self
+                .level_marker
+                .as_ref()
+                .map(|(mark, var)| (*mark, var.as_str())),
         };
         // One goal per hole: where it was checked in the context it was
         // written in, if it was; otherwise where it was first met.
@@ -1020,6 +1032,7 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
             }
             let empty = Names::default();
             e.p.holes.clear();
+            e.level_marker = None;
             let what = format!("{head} {name}");
             match (head, &xs[2..]) {
                 ("data", ctors) => appended.push_str(&e.declare(&xs[1], ctors)?),
@@ -1031,6 +1044,18 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
                     let param = binder(param)?.to_owned();
                     e.poly
                         .insert(name.clone(), (param.clone(), ty.clone(), t.clone()));
+                    // With holes, check an instance at a level no script
+                    // writes, so that goals show the level variable.
+                    if !e.holes.is_empty() {
+                        e.level_marker = Some((LEVEL_MARK, param.clone()));
+                        let mark = super::engine::term::numeral(LEVEL_MARK);
+                        let (tm, tym) = e.instance(&param, mark, ty, t)?;
+                        let err =
+                            e.p.check(0, &nil, &top, &tm, &tym)
+                                .err()
+                                .unwrap_or_default();
+                        return Err(e.explain(&what, err));
+                    }
                     // The instance at level 0 is an ordinary definition.
                     let (t0, ty0) = e.instance(&param, atom("z"), ty, t)?;
                     let id =

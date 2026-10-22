@@ -11,6 +11,9 @@ pub struct Printer<'a> {
     pub known: &'a HashMap<Sexp, String>,
     /// How each hole `(hole K)` was written: `?1`, `?step`, ...
     pub holes: &'a [String],
+    /// A level variable checked as a marker level: universe levels from the
+    /// marker up print as the variable (`(u L)`, `(u (s L))`).
+    pub level: Option<(usize, &'a str)>,
 }
 
 /// Names of the ordinary variables and dimensions in scope, outermost first.
@@ -112,7 +115,15 @@ impl Printer<'_> {
                 Some(k) => scope.var(k),
                 None => t.to_string(),
             },
-            ("u", [l]) => format!("(u {})", unary(l).map_or(l.to_string(), |l| l.to_string())),
+            ("u", [l]) => match (unary(l), self.level) {
+                (Some(n), Some((mark, var))) if n >= mark => format!(
+                    "(u {}{var}{})",
+                    "(s ".repeat(n - mark),
+                    ")".repeat(n - mark)
+                ),
+                (Some(n), _) => format!("(u {n})"),
+                (None, _) => format!("(u {l})"),
+            },
             (former @ ("pi" | "sigma"), [a, b]) => {
                 let (inner, x) = scope.with_var();
                 format!(

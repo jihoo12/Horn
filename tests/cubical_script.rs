@@ -605,3 +605,26 @@ fn holes_are_numbered_in_source_order_and_never_certified() {
         "{ann}"
     );
 }
+
+#[test]
+fn def_poly_goals_show_the_level_variable_and_annotations_are_respected() {
+    let level = cubical::script::run("(def-poly x (L) (u L) ?)")
+        .err()
+        .unwrap();
+    assert_eq!(level, "def-poly x: 1 goal to fill\n\n?1\n  ⊢ (u L)");
+    let body = cubical::script::run(
+        "(def-poly id (L) (pi A (u L) (pi x A A)) (lam A (u L) (lam x A (? body))))",
+    )
+    .err()
+    .unwrap();
+    assert!(
+        body.ends_with("?body\n  A : (u L)\n  x : A\n  ⊢ A"),
+        "{body}"
+    );
+    // An annotation other than the path's family is the hole's type, and
+    // the hole is not given the path's ends.
+    let other = cubical::script::run("(def x (path nat 0 0) (plam i (ann ? bool)))")
+        .err()
+        .unwrap();
+    assert!(other.ends_with("i : I\n  ⊢ bool"), "{other}");
+}

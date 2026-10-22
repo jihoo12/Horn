@@ -975,9 +975,12 @@ impl RestrictedProducer {
             return Ok(id);
         }
         if let (("plam", [body]), ("path", [a, b, c])) = (shape(t)?, shape(expected)?) {
-            // A hole under transparent annotations still owes the ends.
+            // A hole annotated with the path's own family still owes the
+            // ends; another annotation is checked as written.
             let mut inner = body;
-            while let ("ann", [x, _]) = shape(inner)? {
+            while let ("ann", [x, ty]) = shape(inner)?
+                && ty == a
+            {
                 inner = x;
             }
             if let ("hole", [id]) = shape(inner)? {
