@@ -218,6 +218,9 @@ impl PathProducer {
             ("u", [_]) | ("nat", []) | ("zero", []) => t.clone(),
             ("bool" | "btrue" | "bfalse", []) => t.clone(),
             ("s1" | "base", []) => t.clone(),
+            // A hole has no derivation, so neither does anything built on
+            // this step; it passes through so that its goal can be shown.
+            ("hole", [_]) => t.clone(),
             ("loop", [r]) => {
                 if op.dimension() {
                     let (r2, id) = self.itransform(r, op)?;

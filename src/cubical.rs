@@ -2,6 +2,7 @@
 //! inference or reduction algorithm in the kernel. See docs/CUBICAL.md.
 
 pub mod ast;
+pub mod display;
 pub mod engine;
 pub mod generate;
 pub mod producer;

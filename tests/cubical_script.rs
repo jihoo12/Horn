@@ -475,3 +475,69 @@ fn composition_binders_do_not_capture_outer_faces_or_types() {
         assert_eq!(script.certified.checked.goals, 1);
     }
 }
+
+const ADD: &str = "(def add (pi m nat (pi n nat nat))
+  (lam m nat (lam n nat (natrec k nat m (lam k nat (lam r nat (suc r))) n))))";
+
+#[test]
+fn holes_show_every_goal_by_name_with_path_boundaries() {
+    let source = format!(
+        "{ADD}
+(def zero-add (pi n nat (path nat (app add 0 n) n))
+  (lam n nat
+    (natrec k (path nat (app add 0 k) k)
+      (plam i ?)
+      (lam k nat (lam p (path nat (app add 0 k) k) (? step)))
+      n)))"
+    );
+    let Err(err) = cubical::script::run(&source) else {
+        panic!("a form with holes must not be certified");
+    };
+    let expected = "def zero-add: 2 goals to fill
+
+?1
+  n : nat
+  i : I
+  ⊢ nat
+  where i = 0 must give (app add 0 0)
+        i = 1 must give 0
+
+?step
+  n : nat
+  k : nat
+  p : (path nat (app add 0 k) k)
+  ⊢ (path nat (app add 0 (suc k)) (suc k))";
+    assert_eq!(err, expected);
+    // Filling both holes gives a checked proof.
+    let filled = source
+        .replace("(plam i ?)", "(plam i 0)")
+        .replace("(? step)", "(plam i (suc (papp p i)))");
+    cubical::script::run(&filled).unwrap();
+}
+
+#[test]
+fn holes_report_faces_shadowing_and_unknown_types() {
+    let side = cubical::script::run(
+        "(def compose (pi p (path s1 base base) (pi q (path s1 base base) (path s1 base base)))
+  (lam p (path s1 base base) (lam q (path s1 base base)
+    (plam i (hcomp j s1 (((= i 0) base) ((= i 1) (? side))) (papp p i))))))",
+    )
+    .err()
+    .unwrap();
+    assert!(
+        side.contains("  i j : I\n  under (= i 1)\n  ⊢ s1"),
+        "{side}"
+    );
+    let shadow =
+        cubical::script::run("(def shadow (pi x nat (pi x nat nat)) (lam x nat (lam x nat ?)))")
+            .err()
+            .unwrap();
+    assert!(
+        shadow.ends_with("  x✝ : nat\n  x : nat\n  ⊢ nat"),
+        "{shadow}"
+    );
+    let head = cubical::script::run("(eval three (app ? 1 2))")
+        .err()
+        .unwrap();
+    assert!(head.contains("its type is not known here"), "{head}");
+}
