@@ -475,3 +475,212 @@ fn composition_binders_do_not_capture_outer_faces_or_types() {
         assert_eq!(script.certified.checked.goals, 1);
     }
 }
+
+const ADD: &str = "(def add (pi m nat (pi n nat nat))
+  (lam m nat (lam n nat (natrec k nat m (lam k nat (lam r nat (suc r))) n))))";
+
+#[test]
+fn holes_show_every_goal_by_name_with_path_boundaries() {
+    let source = format!(
+        "{ADD}
+(def zero-add (pi n nat (path nat (app add 0 n) n))
+  (lam n nat
+    (natrec k (path nat (app add 0 k) k)
+      (plam i ?)
+      (lam k nat (lam p (path nat (app add 0 k) k) (? step)))
+      n)))"
+    );
+    let Err(err) = cubical::script::run(&source) else {
+        panic!("a form with holes must not be certified");
+    };
+    let expected = "def zero-add: 2 goals to fill
+
+?1
+  n : nat
+  i : I
+  ⊢ nat
+  where i = 0 must give (app add 0 0)
+        i = 1 must give 0
+
+?step
+  n : nat
+  k : nat
+  p : (path nat (app add 0 k) k)
+  ⊢ (path nat (app add 0 (suc k)) (suc k))";
+    assert_eq!(err, expected);
+    // Filling both holes gives a checked proof.
+    let filled = source
+        .replace("(plam i ?)", "(plam i 0)")
+        .replace("(? step)", "(plam i (suc (papp p i)))");
+    cubical::script::run(&filled).unwrap();
+}
+
+#[test]
+fn holes_report_faces_shadowing_and_unknown_types() {
+    let side = cubical::script::run(
+        "(def compose (pi p (path s1 base base) (pi q (path s1 base base) (path s1 base base)))
+  (lam p (path s1 base base) (lam q (path s1 base base)
+    (plam i (hcomp j s1 (((= i 0) base) ((= i 1) (? side))) (papp p i))))))",
+    )
+    .err()
+    .unwrap();
+    assert!(
+        side.contains("  i j : I\n  under (= i 1)\n  ⊢ s1"),
+        "{side}"
+    );
+    let shadow =
+        cubical::script::run("(def shadow (pi x nat (pi x nat nat)) (lam x nat (lam x nat ?)))")
+            .err()
+            .unwrap();
+    assert!(
+        shadow.ends_with("  x✝ : nat\n  x : nat\n  ⊢ nat"),
+        "{shadow}"
+    );
+    let head = cubical::script::run("(eval three (app ? 1 2))")
+        .err()
+        .unwrap();
+    assert!(head.contains("its type is not known here"), "{head}");
+}
+
+#[test]
+fn holes_in_equalities_types_and_unreached_positions_are_all_reported() {
+    let equal = cubical::script::run("(equal e ? ? nat)").err().unwrap();
+    assert_eq!(
+        equal,
+        "equal e: 2 goals to fill\n\n?1\n  ⊢ nat\n\n?2\n  ⊢ nat\n\nand these must hold:\n  ?1 = ?2 : nat"
+    );
+    let app = cubical::script::run("(eval x (app ? ?))").err().unwrap();
+    assert!(app.starts_with("eval x: 2 goals to fill"), "{app}");
+    assert!(app.contains("?2\n  (not reached by the checker"), "{app}");
+    // Holes inside a goal print as written, not as internal numbers.
+    let path = cubical::script::run("(def x (path ? ? ?) (plam i ?))")
+        .err()
+        .unwrap();
+    assert!(
+        path.ends_with(
+            "?4\n  i : I\n  ⊢ ?1\n  where i = 0 must give ?2\n        i = 1 must give ?3"
+        ),
+        "{path}"
+    );
+    // A shadowed dimension is marked like a shadowed variable.
+    let dims = cubical::script::run(
+        "(def shade (path (path nat 0 0) (plam i 0) (plam i 0)) (plam i (plam i ?)))",
+    )
+    .err()
+    .unwrap();
+    assert!(dims.contains("\n  i✝ i : I\n"), "{dims}");
+}
+
+#[test]
+fn holes_are_numbered_in_source_order_and_never_certified() {
+    // A hole in a lambda's domain, which the elaborator does not use, still
+    // keeps the form from being certified.
+    let domain = cubical::script::run("(check x (lam n ? n) (pi n nat nat))")
+        .err()
+        .unwrap();
+    assert!(
+        domain.contains("?1\n  (in a position that is not checked"),
+        "{domain}"
+    );
+    // `check` elaborates the type first; numbers follow the source.
+    let both = cubical::script::run("(check both ? ?)").err().unwrap();
+    assert!(
+        both.starts_with("check both: 2 goals to fill\n\n?1\n  ⊢ ?2"),
+        "{both}"
+    );
+    // A def-poly elaborates its source twice; its hole is one goal.
+    let poly = cubical::script::run("(def-poly id (L) (pi A (u L) (pi x A A)) (? todo))")
+        .err()
+        .unwrap();
+    assert!(
+        poly.starts_with("def-poly id: 1 goal to fill\n\n?todo\n"),
+        "{poly}"
+    );
+    // A hole under an annotation still owes the path's ends.
+    let ann = cubical::script::run("(def x (path nat 0 0) (plam i (ann ? nat)))")
+        .err()
+        .unwrap();
+    assert!(
+        ann.ends_with("where i = 0 must give 0\n        i = 1 must give 0"),
+        "{ann}"
+    );
+}
+
+#[test]
+fn def_poly_goals_show_the_level_variable_and_annotations_are_respected() {
+    let level = cubical::script::run("(def-poly x (L) (u L) ?)")
+        .err()
+        .unwrap();
+    assert_eq!(level, "def-poly x: 1 goal to fill\n\n?1\n  ⊢ (u L)");
+    let body = cubical::script::run(
+        "(def-poly id (L) (pi A (u L) (pi x A A)) (lam A (u L) (lam x A (? body))))",
+    )
+    .err()
+    .unwrap();
+    assert!(
+        body.ends_with("?body\n  A : (u L)\n  x : A\n  ⊢ A"),
+        "{body}"
+    );
+    // An annotation other than the path's family is the hole's type, and
+    // the hole is not given the path's ends.
+    let other = cubical::script::run("(def x (path nat 0 0) (plam i (ann ? bool)))")
+        .err()
+        .unwrap();
+    assert!(other.ends_with("i : I\n  ⊢ bool"), "{other}");
+}
+
+#[test]
+fn goals_keep_equations_and_say_when_their_type_is_not_a_type() {
+    let value = cubical::script::run("(def x btrue ?)").err().unwrap();
+    assert!(
+        value.ends_with("⊢ btrue  (not a type, so nothing can fill this)"),
+        "{value}"
+    );
+    for bad in [
+        "(def x (path btrue btrue btrue) (plam i ?))",
+        "(def x (path nat btrue btrue) (plam i ?))",
+    ] {
+        let path = cubical::script::run(bad).err().unwrap();
+        assert!(
+            path.contains("(but the path type it is in is not a type"),
+            "{path}"
+        );
+    }
+    let equation = cubical::script::run("(equal e ? 0 nat)").err().unwrap();
+    assert_eq!(
+        equation,
+        "equal e: 1 goal to fill\n\n?1\n  ⊢ nat\n\nand these must hold:\n  ?1 = 0 : nat"
+    );
+}
+
+#[test]
+fn equations_outside_a_path_and_holes_in_declarations_read_well() {
+    let ends =
+        cubical::script::run("(def f (pi n nat (path nat n n)) (lam n nat (plam i (suc ?))))")
+            .err()
+            .unwrap();
+    assert!(ends.contains("(suc ?1) = n : nat"), "{ends}");
+    // Equations name their variables after the holes they contain.
+    let two = cubical::script::run(
+        "(def f (sigma p (pi a nat (path nat a a)) (pi b nat (path nat b b)))
+           (pair (lam a nat (plam i (suc ?))) (lam b nat (plam j (suc ?)))))",
+    )
+    .err()
+    .unwrap();
+    assert!(two.contains("(suc ?1) = a : nat"), "{two}");
+    assert!(two.contains("(suc ?2) = b : nat"), "{two}");
+    let field = cubical::script::run("(data t (a ?))").err().unwrap();
+    assert!(
+        field.contains("?1\n  (in a position that is not checked"),
+        "{field}"
+    );
+    let data = cubical::script::run("(data t (a nat) (p (path (a ?) (a 0))))")
+        .err()
+        .unwrap();
+    assert!(
+        data.ends_with(
+            "(in a position that is not checked (a lambda's domain, a data declaration); write it out)"
+        ),
+        "{data}"
+    );
+}

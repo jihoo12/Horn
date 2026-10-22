@@ -35,6 +35,53 @@ ACCEPT (cubical script): 6 goals, 83756 proof steps, 15467 oracle bytes
 This takes about 0.6 seconds and 0.1 GB. `--emit NEW_DIR` writes `theory.horn`, `goals` and
 `proof.oracle` for independent checking with `oracle-kernel`.
 
+## Holes
+
+Write `?` or `(? NAME)` for a part of a term you have not written yet. The
+form is not certified; instead every hole is reported with what it must be:
+the variables and dimensions in scope by their names, the face it lives
+under, the type it must have, and, for the body of a path abstraction, the
+values it must take at the ends:
+
+```text
+(def zero-add (pi n nat (path nat (app add 0 n) n))
+  (lam n nat
+    (natrec k (path nat (app add 0 k) k)
+      (plam i ?)
+      (lam k nat (lam p (path nat (app add 0 k) k) (? step)))
+      n)))
+```
+
+```text
+error: def zero-add: 2 goals to fill
+
+?1
+  n : nat
+  i : I
+  ⊢ nat
+  where i = 0 must give (app add 0 0)
+        i = 1 must give 0
+
+?step
+  n : nat
+  k : nat
+  p : (path nat (app add 0 k) k)
+  ⊢ (path nat (app add 0 (suc k)) (suc k))
+```
+
+Checking continues past a hole (it is taken to fit, with a placeholder step
+that no theory accepts), so all holes of a form are shown at once. Terms
+print as they are written: definitions by name, numerals as numbers,
+declared data by their declared names, faces simplified, and a variable
+shadowed by a later one of the same name as `x✝`. A hole whose type the
+checker cannot know there (the head of an application) says so, and so does
+one whose required type is not a type. Equations between terms with holes,
+as in `(equal e ? 0 nat)`, are listed after the goals (`?1 = 0 : nat`),
+since a hole's type alone does not say what it must equal. Holes are
+numbered in the order they are written; a hole anywhere in a form, even in
+a position the checker does not use, keeps the form from being certified.
+In a `def-poly`, goals show the level variable (`⊢ (u L)`).
+
 Natural numbers ([nat.hcs](../examples/cubical/script/nat.hcs)) support
 programs by recursion and proofs by induction, in 0.1 s:
 

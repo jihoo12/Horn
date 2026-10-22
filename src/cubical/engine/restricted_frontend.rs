@@ -51,9 +51,43 @@ fn level(t: &Sexp) -> Result<usize> {
     }
 }
 
+/// A place in a term left to the user, `(hole K)`, as the checker met it.
+#[derive(Clone, PartialEq)]
+pub struct Hole {
+    /// The elaborator's number for the hole.
+    pub id: Sexp,
+    pub dimensions: usize,
+    pub context: Sexp,
+    pub face: Face,
+    /// The type the hole must have; `None` where it was met in a position
+    /// whose type is not known (the head of an application, ...).
+    pub ty: Option<Sexp>,
+    /// For the body of a path abstraction: what it must be at i0 and at i1,
+    /// in the context outside the abstraction.
+    pub boundary: Option<(Sexp, Sexp)>,
+    /// The type is not a type (it has no elements to fill the hole with).
+    pub not_a_type: bool,
+}
+
+/// An equation between terms with holes, left for the user with the holes'
+/// goals: `left = right : ty`.
+#[derive(Clone, PartialEq)]
+pub struct Constraint {
+    pub dimensions: usize,
+    pub context: Sexp,
+    pub face: Face,
+    pub left: Sexp,
+    pub right: Sexp,
+    pub ty: Sexp,
+}
+
 #[derive(Default)]
 pub struct RestrictedProducer {
     pub f: FaceProducer,
+    /// Holes met while checking, in order, without repeats.
+    pub holes: Vec<Hole>,
+    /// Equations with holes met while checking, without repeats.
+    pub constraints: Vec<Constraint>,
     inferred: FastMap<Sexp, (Sexp, usize)>,
     checked: FastMap<Sexp, usize>,
     equalities: FastMap<Sexp, usize>,
@@ -87,6 +121,16 @@ fn unannotated_head(t: &Sexp) -> bool {
         Ok(("lam" | "pair" | "plam", _)) => true,
         Ok(("fst" | "snd", [x])) | Ok(("app" | "papp", [x, _])) => unannotated_head(x),
         _ => false,
+    }
+}
+
+/// A face under one more dimension binder: every dimension index rises.
+fn shift_face(f: &Face) -> Face {
+    match f {
+        Face::False | Face::True => f.clone(),
+        Face::End(n, b) => Face::End(n + 1, *b),
+        Face::And(a, b) => shift_face(a).and(shift_face(b)),
+        Face::Or(a, b) => shift_face(a).or(shift_face(b)),
     }
 }
 
@@ -162,7 +206,10 @@ impl RestrictedProducer {
     /// The context's head and tail when `t` (and `a`, if given) can be typed
     /// without its newest variable; `t` is then lowered past it.
     fn strengthenable(&self, g: &Sexp, t: &Sexp, a: Option<&Sexp>) -> Option<(Sexp, Sexp)> {
-        if !self.strengthening || matches!(shape(t), Ok(("v" | "u" | "nat" | "zero", _))) {
+        if !self.strengthening
+            || matches!(shape(t), Ok(("v" | "u" | "nat" | "zero", _)))
+            || has_hole(t)
+        {
             return None;
         }
         let ("cons", [b, rest]) = shape(g).ok()? else {
@@ -369,6 +416,35 @@ impl RestrictedProducer {
     pub fn scope(&mut self, d: usize, n: usize, t: &Sexp) -> Result<usize> {
         self.f.path.scope(d, n, t)
     }
+    /// Record a hole whose type is not known, and fail.
+    fn hole<T>(&mut self, hole: Hole) -> Result<T> {
+        let id = hole.id.clone();
+        self.record(hole);
+        Err(format!("unfilled hole {id}"))
+    }
+    fn record(&mut self, hole: Hole) {
+        if !self.holes.contains(&hole) {
+            self.holes.push(hole);
+        }
+    }
+    /// Record a hole at a known type and let checking go on, so that every
+    /// hole of a form is reported, not just the first. The placeholder step
+    /// cites rule `hole`, which no theory has: a form with a hole is
+    /// reported, never certified, and the kernel would reject the step.
+    fn fill(&mut self, hole: Hole) -> usize {
+        let judgment = call(
+            "rhas",
+            [
+                num(hole.dimensions),
+                hole.context.clone(),
+                hole.face.quote(),
+                call("hole", [hole.id.clone()]),
+                hole.ty.clone().unwrap_or_else(|| atom("unknown")),
+            ],
+        );
+        self.record(hole);
+        self.emit("hole", vec![], judgment)
+    }
     fn sscope(&mut self, d: usize, n: usize, s: &Sexp) -> Result<usize> {
         self.f.path.sscope(d, n, s)
     }
@@ -376,6 +452,17 @@ impl RestrictedProducer {
         let key = call("rhas-key", [num(d), g.clone(), phi.quote(), t.clone()]);
         if let Some(result) = self.inferred.get(&key) {
             return Ok(result.clone());
+        }
+        if let ("hole", [id]) = shape(t)? {
+            return self.hole(Hole {
+                id: id.clone(),
+                dimensions: d,
+                context: g.clone(),
+                face: phi.clone(),
+                ty: None,
+                boundary: None,
+                not_a_type: false,
+            });
         }
         if let Some(hints) = &self.restriction_hints {
             let hint_key = call("typing-hints", [num(d), g.clone(), t.clone()]);
@@ -410,6 +497,7 @@ impl RestrictedProducer {
         if self.closed_term_reuse
             && (d, g, phi) != (0, &atom("nil"), &Face::True)
             && !unannotated_head(t)
+            && !has_hole(t)
             && closed(t, 0, 0)
             && (matches!(shape(t)?.0, "ann") || !self.not_closed_typable.contains(t))
         {
@@ -786,6 +874,23 @@ impl RestrictedProducer {
         if let Some(id) = self.checked.get(&key) {
             return Ok(*id);
         }
+        if let ("hole", [id]) = shape(t)? {
+            // A goal is only worth showing at a type. A type with holes of
+            // its own is checked too, which records them.
+            let not_a_type = match self.infer(d, g, phi, expected) {
+                Ok((u, _)) => level(&u).is_err(),
+                Err(_) => !has_hole(expected),
+            };
+            return Ok(self.fill(Hole {
+                id: id.clone(),
+                dimensions: d,
+                context: g.clone(),
+                face: phi.clone(),
+                ty: Some(expected.clone()),
+                boundary: None,
+                not_a_type,
+            }));
+        }
         if self.certified_check_reuse {
             let inferred_key = call("rhas-key", [num(d), g.clone(), phi.quote(), t.clone()]);
             if let Some((actual, id)) = self.inferred.get(&inferred_key)
@@ -894,6 +999,32 @@ impl RestrictedProducer {
             return Ok(id);
         }
         if let (("plam", [body]), ("path", [a, b, c])) = (shape(t)?, shape(expected)?) {
+            // A hole annotated with the path's own family still owes the
+            // ends; another annotation is checked as written.
+            let mut inner = body;
+            while let ("ann", [x, ty]) = shape(inner)?
+                && ty == a
+            {
+                inner = x;
+            }
+            if let ("hole", [id]) = shape(inner)? {
+                // The path type must itself be a type (family and ends).
+                // A path type with holes is checked too, which records them.
+                let not_a_type = match self.infer(d, g, phi, expected) {
+                    Ok((u, _)) => level(&u).is_err(),
+                    Err(_) => !has_hole(expected),
+                };
+                let (g2, _) = self.f.path.dshiftctx(g, 0)?;
+                return Ok(self.fill(Hole {
+                    id: id.clone(),
+                    dimensions: d + 1,
+                    context: g2,
+                    face: shift_face(phi),
+                    ty: Some(a.clone()),
+                    boundary: Some((b.clone(), c.clone())),
+                    not_a_type,
+                }));
+            }
             let (ut, pti) = self.infer(d, g, phi, expected)?;
             level(&ut)?;
             let (g2, gi) = self.f.path.dshiftctx(g, 0)?;
@@ -1599,6 +1730,24 @@ impl RestrictedProducer {
         if let Some(id) = self.equalities.get(&key) {
             return Ok(*id);
         }
+        // Whether a hole will fit is for the user to see from its goal; each
+        // side is checked at the type so that its holes are recorded.
+        if has_hole(a) || has_hole(b) {
+            let _ = self.check(d, g, phi, a, ty);
+            let _ = self.check(d, g, phi, b, ty);
+            let constraint = Constraint {
+                dimensions: d,
+                context: g.clone(),
+                face: phi.clone(),
+                left: a.clone(),
+                right: b.clone(),
+                ty: ty.clone(),
+            };
+            if !self.constraints.contains(&constraint) {
+                self.constraints.push(constraint);
+            }
+            return Ok(self.emit("hole", vec![], key));
+        }
         if !self.equality_active.insert(key.clone()) {
             return Err(format!("cyclic equality search: {a} versus {b} : {ty}"));
         }
@@ -2007,6 +2156,23 @@ pub fn restricted_demo() -> Result<RestrictedProducer> {
 /// Whether `t` has no free variables (at or above `n`) and no free
 /// dimensions (at or above `d`). Mirrors the binders of `scope`; untrusted,
 /// since every use is certified by a `scoped` derivation.
+/// Whether `t` contains a hole `(hole K)`.
+fn has_hole(t: &Sexp) -> bool {
+    thread_local! {
+        static MEMO: std::cell::RefCell<FastMap<Sexp, bool>> =
+            std::cell::RefCell::new(FastMap::default());
+    }
+    let Sexp::List(xs) = t else {
+        return false;
+    };
+    if let Some(found) = MEMO.with(|m| m.borrow().get(t).copied()) {
+        return found;
+    }
+    let out = xs.first().and_then(|h| h.atom().ok()) == Some("hole") || xs.iter().any(has_hole);
+    MEMO.with(|m| m.borrow_mut().insert(t.clone(), out));
+    out
+}
+
 fn closed(t: &Sexp, n: usize, d: usize) -> bool {
     thread_local! {
         static MEMO: std::cell::RefCell<FastMap<(Sexp, usize, usize), bool>> =

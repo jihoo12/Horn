@@ -24,6 +24,7 @@
 //! (`Π A B : U0. Equiv A B → Path U0 A B`) and `iso-equiv`
 //! (`Π X Y f g s t. isEquiv f`) are closed library terms, checked like any
 //! definition; neither is an axiom. Definitions are closed and transparent.
+use super::display::{Printer, Scope};
 use super::engine::data::{self, ArgTy, Ctor, Data};
 use super::engine::deep_univalence_frontend;
 use super::engine::face_frontend::Face;
@@ -36,6 +37,10 @@ use super::generate::{Certificate, Regenerated, certify};
 use std::collections::HashMap;
 
 const FUEL: usize = 100_000;
+
+/// The universe level a def-poly with holes is checked at, standing for its
+/// level variable when its goals are shown.
+const LEVEL_MARK: usize = 64;
 
 /// One reported evaluation: `name = value : type`.
 pub struct Evaluation {
@@ -168,6 +173,14 @@ const RESERVED: &[&str] = &[
 
 struct Elaborator {
     p: RestrictedProducer,
+    /// Holes written in the current form, in source order: their display
+    /// name, and the names in scope where they were elaborated (`None` for
+    /// a hole in a position the elaborator skips, such as a lambda's
+    /// domain).
+    holes: Vec<(String, Option<Names>)>,
+    /// While a def-poly with holes is checked at a marker level: that level
+    /// and the level variable it stands for.
+    level_marker: Option<(usize, String)>,
     defs: HashMap<String, Sexp>,
     /// Level-polymorphic definitions: level parameter, type, term (source).
     poly: HashMap<String, (String, Sexp, Sexp)>,
@@ -260,6 +273,8 @@ impl Elaborator {
         );
         Ok(Self {
             p,
+            holes: Vec::new(),
+            level_marker: None,
             defs: HashMap::new(),
             poly: HashMap::new(),
             prelude,
@@ -394,6 +409,234 @@ impl Elaborator {
         ))
     }
 
+    /// A hole `?` or `(? NAME)`: the core term `(hole K)`, which never has
+    /// a derivation; checking it records what it must be.
+    fn new_hole(&mut self, k: &Sexp, names: &Names) -> Result<Sexp> {
+        let index: usize = k.atom()?.parse().map_err(|_| "invalid hole")?;
+        let (_, scope) = self.holes.get_mut(index).ok_or("invalid hole")?;
+        // A def-poly elaborates its source twice; the first scope stands.
+        scope.get_or_insert_with(|| names.clone());
+        Ok(call("hole", [k.clone()]))
+    }
+
+    /// The error for a form that failed. If the checker met holes, show
+    /// what each must be instead of the search failure they caused.
+    fn explain(&self, what: &str, err: String) -> String {
+        fn context_length(g: &Sexp) -> usize {
+            let mut n = 0;
+            let mut tail = g;
+            while let Sexp::List(xs) = tail
+                && xs.len() == 3
+            {
+                n += 1;
+                tail = &xs[2];
+            }
+            n
+        }
+        if self.p.holes.is_empty() && self.holes.is_empty() {
+            return format!("{what}: {err}");
+        }
+        let mut known = HashMap::new();
+        for (name, t) in &self.defs {
+            known.insert(t.clone(), name.clone());
+        }
+        for (name, t) in &self.prelude {
+            known.insert(t.clone(), (*name).to_owned());
+        }
+        let hole_names: Vec<String> = self.holes.iter().map(|(n, _)| n.clone()).collect();
+        let printer = Printer {
+            known: &known,
+            holes: &hole_names,
+            level: self
+                .level_marker
+                .as_ref()
+                .map(|(mark, var)| (*mark, var.as_str())),
+        };
+        // One goal per hole: where it was checked in the context it was
+        // written in, if it was; otherwise where it was first met.
+        let mut shown_holes: Vec<&crate::cubical::engine::restricted_frontend::Hole> = Vec::new();
+        for hole in &self.p.holes {
+            let k: usize = hole
+                .id
+                .atom()
+                .ok()
+                .and_then(|a| a.parse().ok())
+                .unwrap_or(0);
+            let fits = |h: &crate::cubical::engine::restricted_frontend::Hole| {
+                self.holes.get(k).is_some_and(|(_, names)| {
+                    names.as_ref().is_some_and(|names| {
+                        names.dimensions.len() == h.dimensions
+                            && names.ordinary.len() == context_length(&h.context)
+                    })
+                })
+            };
+            match shown_holes.iter().position(|h| h.id == hole.id) {
+                Some(i) if !fits(shown_holes[i]) && fits(hole) => shown_holes[i] = hole,
+                Some(_) => {}
+                None => shown_holes.push(hole),
+            }
+        }
+        // Every hole written, in order; those the checker never reached (it
+        // stopped before them, or never checks that position) have no goal.
+        let hole_number = |h: &crate::cubical::engine::restricted_frontend::Hole| -> usize {
+            h.id.atom().ok().and_then(|a| a.parse().ok()).unwrap_or(0)
+        };
+        let order: Vec<(
+            usize,
+            Option<&crate::cubical::engine::restricted_frontend::Hole>,
+        )> = (0..self.holes.len().max(shown_holes.len()))
+            .map(|k| (k, shown_holes.iter().copied().find(|h| hole_number(h) == k)))
+            .collect();
+        let count = order.len();
+        let mut out = format!(
+            "{what}: {count} goal{} to fill",
+            if count == 1 { "" } else { "s" }
+        );
+        for (k, hole) in order {
+            let Some(hole) = hole else {
+                let (shown, scope) = &self.holes[k];
+                let why = if scope.is_some() {
+                    "not reached by the checker, so it has no goal yet; fill the others first"
+                } else {
+                    "in a position that is not checked (a lambda's domain, a data declaration); write it out"
+                };
+                out.push_str(&format!("\n\n{shown}\n  ({why})"));
+                continue;
+            };
+            let (shown, names) = match self.holes.get(k) {
+                Some((shown, names)) => (shown.clone(), names.clone().unwrap_or_default()),
+                None => (format!("?{k}"), Names::default()),
+            };
+            out.push_str(&format!("\n\n{shown}"));
+            // Context entries, outermost first; each type is in the scope of
+            // the entries before it.
+            let mut entries = Vec::new();
+            let mut tail = &hole.context;
+            while let Sexp::List(xs) = tail
+                && xs.len() == 3
+            {
+                entries.push(xs[1].clone());
+                tail = &xs[2];
+            }
+            entries.reverse();
+            let mut vars: Vec<String> = if names.ordinary.len() == entries.len() {
+                names.ordinary.clone()
+            } else {
+                (0..entries.len()).map(|i| format!("x{i}")).collect()
+            };
+            // A variable shadowed by a later one of the same name is shown
+            // as `x✝`; it cannot be referred to here.
+            for i in 0..vars.len() {
+                if vars[i + 1..].contains(&vars[i]) {
+                    vars[i].push('✝');
+                }
+            }
+            let mut dims: Vec<String> = if names.dimensions.len() == hole.dimensions {
+                names.dimensions.clone()
+            } else {
+                (0..hole.dimensions).map(|i| format!("i{i}")).collect()
+            };
+            for i in 0..dims.len() {
+                if dims[i + 1..].contains(&dims[i]) {
+                    dims[i].push('✝');
+                }
+            }
+            for (i, ty) in entries.iter().enumerate() {
+                let scope = Scope {
+                    vars: vars[..i].to_vec(),
+                    dims: dims.clone(),
+                };
+                out.push_str(&format!("\n  {} : {}", vars[i], printer.term(ty, &scope)));
+            }
+            if !dims.is_empty() {
+                out.push_str(&format!("\n  {} : I", dims.join(" ")));
+            }
+            let scope = Scope {
+                vars: vars.clone(),
+                dims: dims.clone(),
+            };
+            if hole.face != Face::True {
+                out.push_str(&format!("\n  under {}", printer.face(&hole.face, &scope)));
+            }
+            match &hole.ty {
+                Some(ty) if hole.not_a_type && hole.boundary.is_some() => out.push_str(&format!(
+                    "\n  ⊢ {}  (but the path type it is in is not a type, so nothing can fill this)",
+                    printer.term(ty, &scope)
+                )),
+                Some(ty) if hole.not_a_type => out.push_str(&format!(
+                    "\n  ⊢ {}  (not a type, so nothing can fill this)",
+                    printer.term(ty, &scope)
+                )),
+                Some(ty) => out.push_str(&format!("\n  ⊢ {}", printer.term(ty, &scope))),
+                None => out
+                    .push_str("\n  ⊢ (its type is not known here; annotate it with (ann ? TYPE))"),
+            }
+            if let Some((left, right)) = &hole.boundary {
+                let outer = Scope {
+                    vars: vars.clone(),
+                    dims: dims[..dims.len().saturating_sub(1)].to_vec(),
+                };
+                let i = dims.last().cloned().unwrap_or_default();
+                out.push_str(&format!(
+                    "\n  where {i} = 0 must give {}\n        {i} = 1 must give {}",
+                    printer.term(left, &outer),
+                    printer.term(right, &outer)
+                ));
+            }
+        }
+        // Equations between terms with holes, which the goals' types alone
+        // do not express. Their variables are named as in a goal with the
+        // same context, if there is one.
+        if !self.p.constraints.is_empty() {
+            out.push_str("\n\nand these must hold:");
+        }
+        for c in &self.p.constraints {
+            // An equation may sit outside binders its holes are under (a
+            // path's ends): use their names for the variables and the outer
+            // dimensions it has.
+            let fits = |names: &Option<Names>| {
+                let names = names.clone()?;
+                (names.ordinary.len() == context_length(&c.context)
+                    && names.dimensions.len() >= c.dimensions)
+                    .then(|| Names {
+                        dimensions: names.dimensions[..c.dimensions].to_vec(),
+                        ..names
+                    })
+            };
+            // The scope of a hole the equation contains, else of any hole
+            // with as many variables.
+            let mut inside = Vec::new();
+            hole_numbers(&c.left, &mut inside);
+            hole_numbers(&c.right, &mut inside);
+            let named = inside
+                .iter()
+                .find_map(|k| self.holes.get(*k).and_then(|(_, names)| fits(names)))
+                .or_else(|| self.holes.iter().find_map(|(_, names)| fits(names)));
+            let scope = match named {
+                Some(names) => Scope {
+                    vars: names.ordinary,
+                    dims: names.dimensions,
+                },
+                None => Scope {
+                    vars: (0..context_length(&c.context))
+                        .map(|i| format!("x{i}"))
+                        .collect(),
+                    dims: (0..c.dimensions).map(|i| format!("i{i}")).collect(),
+                },
+            };
+            out.push_str(&format!(
+                "\n  {} = {} : {}",
+                printer.term(&c.left, &scope),
+                printer.term(&c.right, &scope),
+                printer.term(&c.ty, &scope)
+            ));
+            if c.face != Face::True {
+                out.push_str(&format!("  under {}", printer.face(&c.face, &scope)));
+            }
+        }
+        out
+    }
+
     fn term(&mut self, s: &Sexp, names: &Names) -> Result<Sexp> {
         let xs = match s {
             Sexp::Atom(a) => {
@@ -434,6 +677,7 @@ impl Elaborator {
         let head = xs.first().ok_or("empty term")?.atom()?;
         let args = &xs[1..];
         Ok(match (head, args) {
+            ("?#", [k]) => self.new_hole(k, names)?,
             ("u", [l]) => call("u", [self.level_term(l, names)?]),
             ("at", [name, l]) => {
                 let name = name.atom()?;
@@ -830,6 +1074,10 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
         let mut polymorphic = Vec::new();
         let mut names_seen = std::collections::HashSet::new();
         for form in &forms {
+            // Number the holes in source order, wherever they are written.
+            let mut written = Vec::new();
+            let form = &number_holes(form, &mut written)?;
+            e.holes = written.into_iter().map(|shown| (shown, None)).collect();
             let xs = form.list()?;
             let head = xs.first().ok_or("empty form")?.atom()?;
             // A data head may be `(NAME PARAM...)`.
@@ -841,8 +1089,20 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
                 return Err(format!("duplicate name {name}"));
             }
             let empty = Names::default();
+            e.p.holes.clear();
+            e.p.constraints.clear();
+            e.level_marker = None;
+            let what = format!("{head} {name}");
             match (head, &xs[2..]) {
-                ("data", ctors) => appended.push_str(&e.declare(&xs[1], ctors)?),
+                ("data", ctors) => {
+                    // A declaration's terms (field types, path constructor
+                    // ends) are not checked by the engine, so its holes
+                    // have no goals; report them before reading it.
+                    if !e.holes.is_empty() {
+                        return Err(e.explain(&what, String::new()));
+                    }
+                    appended.push_str(&e.declare(&xs[1], ctors)?);
+                }
                 ("def-poly", [params, ty, t]) => {
                     e.fresh(&name)?;
                     let [param] = params.list()? else {
@@ -851,11 +1111,23 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
                     let param = binder(param)?.to_owned();
                     e.poly
                         .insert(name.clone(), (param.clone(), ty.clone(), t.clone()));
+                    // With holes, check an instance at a level no script
+                    // writes, so that goals show the level variable.
+                    if !e.holes.is_empty() {
+                        e.level_marker = Some((LEVEL_MARK, param.clone()));
+                        let mark = super::engine::term::numeral(LEVEL_MARK);
+                        let (tm, tym) = e.instance(&param, mark, ty, t)?;
+                        let err =
+                            e.p.check(0, &nil, &top, &tm, &tym)
+                                .err()
+                                .unwrap_or_default();
+                        return Err(e.explain(&what, err));
+                    }
                     // The instance at level 0 is an ordinary definition.
                     let (t0, ty0) = e.instance(&param, atom("z"), ty, t)?;
                     let id =
                         e.p.check(0, &nil, &top, &t0, &ty0)
-                            .map_err(|err| format!("def-poly {name}: {err}"))?;
+                            .map_err(|err| e.explain(&format!("def-poly {name}"), err))?;
                     e.p.f.path.p.result(&name, id);
                     e.defs
                         .insert(name.clone(), call("ann", [t0.clone(), ty0.clone()]));
@@ -865,7 +1137,7 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
                     let theory = super::core_theory() + &appended;
                     polymorphic.push(
                         generalize_definition(&name, &e.p.f.path.p, id, &expected, &theory)
-                            .map_err(|err| format!("def-poly {name}: {err}"))?,
+                            .map_err(|err| e.explain(&format!("def-poly {name}"), err))?,
                     );
                 }
                 ("def", [ty, t]) => {
@@ -874,7 +1146,7 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
                     let t = e.term(t, &empty)?;
                     let id =
                         e.p.check(0, &nil, &top, &t, &ty)
-                            .map_err(|err| format!("def {name}: {err}"))?;
+                            .map_err(|err| e.explain(&format!("def {name}"), err))?;
                     e.p.f.path.p.result(&name, id);
                     e.defs.insert(name, call("ann", [t, ty]));
                 }
@@ -883,7 +1155,7 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
                     let t = e.term(t, &empty)?;
                     let id =
                         e.p.check(0, &nil, &top, &t, &ty)
-                            .map_err(|err| format!("check {name}: {err}"))?;
+                            .map_err(|err| e.explain(&format!("check {name}"), err))?;
                     e.p.f.path.p.result(&name, id);
                 }
                 ("eval", [t, rest @ ..]) if rest.len() <= 1 => {
@@ -892,17 +1164,20 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
                         [ty] => e.term(ty, &empty)?,
                         _ => {
                             // Report the inferred type in weak-head normal form.
-                            let fail = |err| format!("eval {name}: {err}");
-                            let (ty, _) = e.p.infer(0, &nil, &top, &t).map_err(fail)?;
-                            let (universe, _) = e.p.infer(0, &nil, &top, &ty).map_err(fail)?;
+                            let (ty, _) =
+                                e.p.infer(0, &nil, &top, &t)
+                                    .map_err(|err| e.explain(&format!("eval {name}"), err))?;
+                            let (universe, _) =
+                                e.p.infer(0, &nil, &top, &ty)
+                                    .map_err(|err| e.explain(&format!("eval {name}"), err))?;
                             e.p.value(0, &nil, &top, &ty, &universe, FUEL)
-                                .map_err(fail)?
+                                .map_err(|err| e.explain(&format!("eval {name}"), err))?
                                 .0
                         }
                     };
                     let (value, id) =
                         e.p.value(0, &nil, &top, &t, &ty, FUEL)
-                            .map_err(|err| format!("eval {name}: {err}"))?;
+                            .map_err(|err| e.explain(&format!("eval {name}"), err))?;
                     e.p.f.path.p.result(&name, id);
                     evaluations.push(Evaluation {
                         name,
@@ -914,10 +1189,15 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
                     let (a, b, ty) = (e.term(a, &empty)?, e.term(b, &empty)?, e.term(ty, &empty)?);
                     let id =
                         e.p.equality(0, &nil, &top, &a, &b, &ty)
-                            .map_err(|err| format!("equal {name}: {err}"))?;
+                            .map_err(|err| e.explain(&format!("equal {name}"), err))?;
                     e.p.f.path.p.result(&name, id);
                 }
                 _ => return Err(format!("invalid form {form}")),
+            }
+            // Checking goes past holes to find them all; a form with one is
+            // reported, never certified.
+            if !e.holes.is_empty() {
+                return Err(e.explain(&what, String::new()));
             }
         }
         Ok((e.p, (evaluations, polymorphic), appended))
@@ -928,4 +1208,44 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
         evaluations,
         polymorphic,
     })
+}
+
+/// Replace each hole `?` or `(? NAME)` of a form by `(?# K)`, numbering them
+/// in the order they are written, and collect how each is shown.
+fn number_holes(s: &Sexp, written: &mut Vec<String>) -> Result<Sexp> {
+    match s {
+        Sexp::Atom(a) if &**a == "?" => {
+            let k = written.len();
+            written.push(format!("?{}", k + 1));
+            Ok(call("?#", [atom(k.to_string())]))
+        }
+        Sexp::List(xs) if xs.first().and_then(|h| h.atom().ok()) == Some("?") => {
+            let [_, name] = &xs[..] else {
+                return Err(format!("invalid hole {s}"));
+            };
+            let k = written.len();
+            written.push(format!("?{}", binder(name)?));
+            Ok(call("?#", [atom(k.to_string())]))
+        }
+        Sexp::List(xs) => Ok(super::engine::term::list(
+            xs.iter()
+                .map(|x| number_holes(x, written))
+                .collect::<Result<_>>()?,
+        )),
+        Sexp::Atom(_) => Ok(s.clone()),
+    }
+}
+
+/// The numbers K of the holes `(hole K)` in a core term.
+fn hole_numbers(t: &Sexp, out: &mut Vec<usize>) {
+    if let Sexp::List(xs) = t {
+        if xs.first().and_then(|h| h.atom().ok()) == Some("hole")
+            && let Some(k) = xs.get(1).and_then(|k| k.atom().ok()?.parse().ok())
+        {
+            out.push(k);
+        }
+        for x in xs.iter() {
+            hole_numbers(x, out);
+        }
+    }
 }
