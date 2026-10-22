@@ -24,7 +24,7 @@ pub fn app(f: E, a: E) -> E {
 }
 
 pub fn number(n: usize) -> Sexp {
-    (0..n).fold(atom("z"), |x, _| call("s", [x]))
+    crate::cubical::engine::term::numeral(n)
 }
 
 impl E {

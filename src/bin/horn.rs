@@ -48,6 +48,8 @@ fn run() -> Result<(), String> {
 }
 
 fn run_cubical(args: &[String]) -> Result<(), String> {
+    // The process exits after one command; leave the term table to the OS.
+    cubical::engine::term::keep_terms_until_exit();
     let usage = "usage: horn cubical list\n       horn cubical check NAME|all\n       horn cubical export NAME DIR\n       horn cubical run FILE [--profile NAME] [--emit NEW_DIR]\n       horn cubical generate NAME [--emit NEW_DIR]\n       horn cubical eval FILE.hcs [--emit NEW_DIR]";
     let args: Vec<_> = args.iter().map(String::as_str).collect();
     if args == ["list"] {
@@ -105,7 +107,14 @@ fn run_cubical(args: &[String]) -> Result<(), String> {
                 return Err(format!("{dir} already exists"));
             }
             let source = fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
-            let script = cubical::script::run(&source).map_err(|e| format!("{path}: {e}"))?;
+            // An oracle is only built when it is written out; otherwise the
+            // kernel checks the derivation as the engine streams it.
+            let certificate = match output {
+                Some(_) => cubical::generate::Certificate::Oracle,
+                None => cubical::generate::Certificate::Direct,
+            };
+            let script = cubical::script::run_with(&source, certificate)
+                .map_err(|e| format!("{path}: {e}"))?;
             if let Some(dir) = output {
                 fs::create_dir(dir)
                     .map_err(|e| format!("cannot create new directory {dir}: {e}"))?;
@@ -113,8 +122,8 @@ fn run_cubical(args: &[String]) -> Result<(), String> {
                 fs::write(dir.join("theory.horn"), &script.certified.theory)
                     .map_err(|e| e.to_string())?;
                 fs::write(dir.join("goals"), &script.certified.goals).map_err(|e| e.to_string())?;
-                fs::write(dir.join("proof.oracle"), &script.certified.oracle)
-                    .map_err(|e| e.to_string())?;
+                let oracle = script.certified.oracle.as_deref().ok_or("no oracle")?;
+                fs::write(dir.join("proof.oracle"), oracle).map_err(|e| e.to_string())?;
             }
             if let Some(dir) = output {
                 let dir = std::path::Path::new(dir);
@@ -125,7 +134,7 @@ fn run_cubical(args: &[String]) -> Result<(), String> {
                         .map_err(|e| e.to_string())?;
                 }
             }
-            // Results are printed only after the kernel accepted the oracle.
+            // Results are printed only after the kernel accepted the derivation.
             for e in &script.evaluations {
                 println!("{} = {} : {}", e.name, e.value, e.ty);
             }
@@ -136,12 +145,18 @@ fn run_cubical(args: &[String]) -> Result<(), String> {
                 );
             }
             let report = &script.certified.checked;
-            println!(
-                "ACCEPT (cubical script): {} goals, {} proof steps, {} oracle bytes",
-                report.goals,
-                report.steps,
-                script.certified.oracle.len()
-            );
+            match &script.certified.oracle {
+                Some(oracle) => println!(
+                    "ACCEPT (cubical script): {} goals, {} proof steps, {} oracle bytes",
+                    report.goals,
+                    report.steps,
+                    oracle.len()
+                ),
+                None => println!(
+                    "ACCEPT (cubical script): {} goals, {} proof steps",
+                    report.goals, report.steps
+                ),
+            }
             let used = &script.certified.rules_used;
             let generated = used.iter().filter(|r| r.contains('/')).count();
             println!(
@@ -174,15 +189,15 @@ fn run_cubical(args: &[String]) -> Result<(), String> {
                     .map_err(|e| format!("cannot create new directory {dir}: {e}"))?;
                 let dir = std::path::Path::new(dir);
                 fs::write(dir.join("goals"), &generated.goals).map_err(|e| e.to_string())?;
-                fs::write(dir.join("proof.oracle"), &generated.oracle)
-                    .map_err(|e| e.to_string())?;
+                let oracle = generated.oracle.as_deref().ok_or("no oracle")?;
+                fs::write(dir.join("proof.oracle"), oracle).map_err(|e| e.to_string())?;
             }
             let bundled = cubical::EXAMPLES.iter().find(|e| e.name == *name);
             println!(
                 "ACCEPT (regenerated cubical {name}): {} goals, {} proof steps, {} oracle bytes, {} of {} rules used{}",
                 generated.checked.goals,
                 generated.checked.steps,
-                generated.oracle.len(),
+                generated.oracle.as_ref().map_or(0, Vec::len),
                 generated.rules_used.len(),
                 cubical::generate::rule_count(&generated.theory),
                 match bundled {

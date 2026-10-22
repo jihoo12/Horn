@@ -1311,27 +1311,62 @@ pub fn check_with_rules(
     goals: &str,
     oracle: &[u8],
 ) -> Result<(crate::kernel::Report, Vec<String>)> {
+    check_text_with_rules(theory, goals, |out| {
+        decode(theory, goals, oracle, out).map(drop)
+    })
+}
+
+/// The pipe `check_text_with_rules` hands its writer: proof text written here
+/// goes to the kernel, and the rule of each step line is noted on the way.
+pub struct ProofSink(RuleScan<std::io::BufWriter<std::io::PipeWriter>>);
+
+impl Write for ProofSink {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
+/// Check the derivation that `write` streams as proof text with the ground
+/// kernel against `theory` and the exact `goals`, also returning the sorted
+/// names of the rules its accepted steps use. `write` runs on the calling
+/// thread and the kernel reads its output through a pipe, so no proof file
+/// is materialized; a writer failure is never acceptance.
+pub fn check_text_with_rules(
+    theory: &str,
+    goals: &str,
+    write: impl FnOnce(&mut ProofSink) -> Result<()>,
+) -> Result<(crate::kernel::Report, Vec<String>)> {
     use std::io::{BufReader, BufWriter};
     let checker = crate::kernel::Theory::parse(theory)?;
     let (reader, writer) = std::io::pipe().map_err(|e| e.to_string())?;
-    let (report, decoded) = std::thread::scope(|scope| {
-        let decoder = scope.spawn(|| {
-            let mut scan = RuleScan {
-                inner: BufWriter::with_capacity(1 << 20, writer),
-                line: Vec::new(),
-                spaces: 0,
-                rules: Default::default(),
-            };
-            decode(theory, goals, oracle, &mut scan)?;
-            scan.flush().map_err(|e| e.to_string())?;
-            Ok::<_, String>(scan.rules.into_iter().collect::<Vec<_>>())
+    let (report, written) = std::thread::scope(|scope| {
+        let kernel =
+            scope.spawn(|| checker.check_reader(goals, BufReader::with_capacity(1 << 20, reader)));
+        let mut sink = ProofSink(RuleScan {
+            inner: BufWriter::with_capacity(1 << 20, writer),
+            line: Vec::new(),
+            spaces: 0,
+            rules: Default::default(),
         });
-        let report = checker.check_reader(goals, BufReader::with_capacity(1 << 20, reader));
-        (report, decoder.join())
+        let written = write(&mut sink)
+            .and_then(|()| sink.flush().map_err(|e| e.to_string()))
+            .map(|()| {
+                std::mem::take(&mut sink.0.rules)
+                    .into_iter()
+                    .collect::<Vec<_>>()
+            });
+        // Closing the pipe ends the kernel's input.
+        drop(sink);
+        let report = kernel
+            .join()
+            .unwrap_or_else(|_| Err("kernel panicked".to_string()));
+        (report, written)
     });
-    let decoded = decoded.map_err(|_| "decoder panicked".to_string())?;
-    // A kernel rejection explains more than the decoder's broken pipe.
+    // A kernel rejection explains more than the writer's broken pipe.
     let report = report?;
-    let rules = decoded?;
+    let rules = written?;
     Ok((report, rules))
 }

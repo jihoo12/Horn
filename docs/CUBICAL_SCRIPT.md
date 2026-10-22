@@ -3,9 +3,13 @@
 `horn cubical eval FILE.hcs` reads definitions, typing checks and
 evaluations, elaborates them to the cubical core, and certifies them with
 the engine moved from kamo3 (`cubical::engine`). Every form becomes a fixed
-goal of one derivation. The derivation is encoded as an oracle and checked
-by the unchanged ground kernel against the bundled theory. Values are
-printed only after that check succeeds.
+goal of one derivation. The derivation streams from the engine to the
+unchanged ground kernel, which checks it against the bundled theory. Values
+are printed only after that check succeeds. With `--emit`, the derivation is
+instead encoded as an oracle, and the kernel checks the decoded oracle, so
+the certificate written out is exactly what was accepted. Both paths check
+the same steps against the same goals. The direct path skips encoding and
+decoding, which took about half the time of a run.
 
 ```text
 (def not (pi b bool bool) (lam b bool (bif c bool bfalse btrue b)))
@@ -28,7 +32,7 @@ along-ua = bfalse : bool
 ACCEPT (cubical script): 6 goals, 83756 proof steps, 15467 oracle bytes
 ```
 
-This takes about 1.5 seconds and 0.1 GB. `--emit NEW_DIR` writes `theory.horn`, `goals` and
+This takes about 0.6 seconds and 0.1 GB. `--emit NEW_DIR` writes `theory.horn`, `goals` and
 `proof.oracle` for independent checking with `oracle-kernel`.
 
 Natural numbers ([nat.hcs](../examples/cubical/script/nat.hcs)) support
@@ -47,7 +51,7 @@ programs by recursion and proofs by induction, in 0.1 s:
 ```
 
 Functions move along ua too ([function.hcs](../examples/cubical/script/function.hcs),
-about 3 s): transporting `not` along the line `i ↦ (ua not i → ua not i)`
+about 1 s): transporting `not` along the line `i ↦ (ua not i → ua not i)`
 gives a function that maps `btrue` to `bfalse` and `bfalse` to `btrue`, as
 conjugating `not` by `not` should. This goes through composition in Pi types,
 then Glue, then bool.
@@ -55,7 +59,7 @@ then Glue, then bool.
 ## Declared data types
 
 `(data NAME (CTOR ARG-TYPE...) ...)` declares a closed data type
-([data.hcs](../examples/cubical/script/data.hcs), about 2 s):
+([data.hcs](../examples/cubical/script/data.hcs), about 0.6 s):
 
 ```text
 (data color (red) (green) (blue))
@@ -75,7 +79,7 @@ reader sees exactly which rules a script introduced. Nothing about the
 declaration is built into the engine or the kernel.
 
 Type parameters are declared as `(data (list A) (nil) (cons A (list A)))`
-([list.hcs](../examples/cubical/script/list.hcs), about 2 s). Constructor
+([list.hcs](../examples/cubical/script/list.hcs), about 0.6 s). Constructor
 terms do not carry the parameters, `(cons btrue nil)`: the engine reads them
 off a field at a parameter or, as for an unannotated lambda, off the expected
 type; a lone `nil` needs one. The eliminator takes them explicitly,
@@ -104,7 +108,7 @@ path constructors are (below).
 
 ## Programs move along equivalences
 
-[binary.hcs](../examples/cubical/script/binary.hcs) (about 4 s) declares
+[binary.hcs](../examples/cubical/script/binary.hcs) (about 1.3 s) declares
 binary numbers in bijective base 2, `(data bin (bz) (b1 bin) (b2 bin))` for
 0, 2b+1 and 2b+2, proves `nat ≃ bin` with conversions in both directions and
 their inverse laws (by induction, with path composition defined by
@@ -156,7 +160,7 @@ s1rec A b l (hcomp^j [φ ↦ u] u0) ≡ hcomp^j_A [φ ↦ s1rec A b l u] (s1rec 
 Compositions are written `(hcomp j A ((FACE TERM) ...) BASE)`, or
 `(comp j A ...)` when the type depends on `j`, with faces `(= i 0)`,
 `(= i 1)`, `(and F G)`, `(or F G)`. Path composition is then a definition,
-and the winding number of `loop · loop` computes (about 60 s, 2.5 GB):
+and the winding number of `loop · loop` computes (about 18 s, 1.8 GB):
 
 ```text
 (def compose (pi p (path s1 base base) (pi q (path s1 base base) (path s1 base base)))
@@ -194,7 +198,7 @@ Two changes make that run in a minute instead of not finishing:
 ## Declared higher inductive types
 
 A constructor whose last item is `(path LEFT RIGHT)` is a path constructor
-([hit.hcs](../examples/cubical/script/hit.hcs), about 2 s). Its endpoints are
+([hit.hcs](../examples/cubical/script/hit.hcs), about 0.8 s). Its endpoints are
 closed point terms of the type; it may have fields (bool, nat, earlier
 closed data types), and its terms take an interval after them:
 
@@ -234,7 +238,7 @@ higher-dimensional constructors (a torus's square) are not supported.
 
 `ua` and `iso-equiv` are the prelude at level 0; `(ua-at L)` and
 `(iso-equiv-at M N)` are the same closed terms at other levels, checked where
-they are used. [levels.hcs](../examples/cubical/script/levels.hcs) (about 1 s)
+they are used. [levels.hcs](../examples/cubical/script/levels.hcs) (about 0.5 s)
 builds `swap` on pairs of types, which live in `U1`, turns it into a path with
 `(ua-at 1)`, and transports a function out of pairs of types along it.
 
