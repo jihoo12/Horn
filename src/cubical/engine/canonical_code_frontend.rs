@@ -23,7 +23,7 @@ use crate::cubical::engine::transport_equiv_frontend::transport_equiv_type;
 use crate::cubical::engine::transport_frontend::transport_at;
 
 fn at1(k: usize) -> Sexp {
-    call("at1", [(0..k).fold(atom("z"), |n, _| call("s", [n]))])
+    call("at1", [crate::cubical::engine::term::numeral(k)])
 }
 fn one_side(phi: Sexp, t: Sexp) -> Sexp {
     call("system", [call("side", [phi, t, atom("snil")])])

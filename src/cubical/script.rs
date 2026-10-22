@@ -32,7 +32,7 @@ use super::engine::path_frontend::{dim, papp, path, v};
 use super::engine::restricted_frontend::RestrictedProducer;
 use super::engine::term::{Result, Sexp, atom, call, parse};
 use super::engine::ua_frontend::{ua_term, ua_type};
-use super::generate::{Regenerated, certify};
+use super::generate::{Certificate, Regenerated, certify};
 use std::collections::HashMap;
 
 const FUEL: usize = 100_000;
@@ -276,7 +276,7 @@ impl Elaborator {
                     return Ok(t.clone());
                 }
                 let n = level(s)?;
-                Ok((0..n).fold(atom("z"), |t, _| call("s", [t])))
+                Ok(super::engine::term::numeral(n))
             }
             Sexp::List(xs) if xs.len() == 2 && xs[0] == atom("s") => {
                 Ok(call("s", [self.level_term(&xs[1], names)?]))
@@ -811,10 +811,17 @@ fn show(s: &Sexp) -> String {
     }
 }
 
+/// Elaborate, certify and check a script, keeping its oracle.
 pub fn run(source: &str) -> Result<Script> {
+    run_with(source, Certificate::Oracle)
+}
+
+/// `run`, choosing whether the kernel checks an oracle or the derivation
+/// itself; both are checked by the same kernel against the same goals.
+pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
     let source = source.to_owned();
     // Terms are interned per thread, so parsing happens on the worker.
-    let (certified, evaluations) = certify(super::core_theory(), move || {
+    let (certified, evaluations) = certify(super::core_theory(), certificate, move || {
         let forms = parse(&source)?;
         data::clear();
         let mut appended = String::new();

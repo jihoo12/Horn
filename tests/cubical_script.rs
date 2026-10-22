@@ -44,14 +44,14 @@ fn evaluation_is_certified_and_reported() {
     );
     let c = &script.certified;
     assert_eq!(c.checked.goals, 6);
-    oracle::check(&c.theory, &c.goals, &c.oracle).unwrap();
+    oracle::check(&c.theory, &c.goals, c.oracle.as_deref().unwrap()).unwrap();
     // The goal states the computed value; another value is rejected.
     let forged = c.goals.replace(
         "(app (ann (lam (bif bool bfalse btrue (v z))) (pi bool bool)) btrue) bfalse bool)",
         "(app (ann (lam (bif bool bfalse btrue (v z))) (pi bool bool)) btrue) btrue bool)",
     );
     assert_ne!(forged, c.goals);
-    assert!(oracle::check(&c.theory, &forged, &c.oracle).is_err());
+    assert!(oracle::check(&c.theory, &forged, c.oracle.as_deref().unwrap()).is_err());
 }
 
 #[test]
@@ -143,8 +143,8 @@ fn declared_data_types_compute_and_move_along_ua() {
     // The generated rules travel with the certificate.
     let c = &script.certified;
     assert!(c.theory.contains("(rule req.comp-ty/color "));
-    oracle::check(&c.theory, &c.goals, &c.oracle).unwrap();
-    assert!(oracle::check(&cubical::theory(), &c.goals, &c.oracle).is_err());
+    oracle::check(&c.theory, &c.goals, c.oracle.as_deref().unwrap()).unwrap();
+    assert!(oracle::check(&cubical::theory(), &c.goals, c.oracle.as_deref().unwrap()).is_err());
 }
 
 #[test]
@@ -395,17 +395,21 @@ fn canonical_map_file_is_generated_and_typed_at_levels_0_1_2() {
         std::fs::write(path, &text).unwrap();
     }
     assert_eq!(std::fs::read_to_string(path).unwrap(), text);
-    let (certified, ()) = cubical::generate::certify(cubical::core_theory(), || {
-        let mut p = RestrictedProducer::default();
-        p.f.path.p.archive_judgments();
-        p.reuse_restricted_typings();
-        for l in 0..3 {
-            let t = program(l)?;
-            let (_, id) = p.infer(0, &atom("nil"), &Face::True, &t)?;
-            p.f.path.p.result(&format!("canonical-map-{l}"), id);
-        }
-        Ok((p, (), String::new()))
-    })
+    let (certified, ()) = cubical::generate::certify(
+        cubical::core_theory(),
+        cubical::generate::Certificate::Direct,
+        || {
+            let mut p = RestrictedProducer::default();
+            p.f.path.p.archive_judgments();
+            p.reuse_restricted_typings();
+            for l in 0..3 {
+                let t = program(l)?;
+                let (_, id) = p.infer(0, &atom("nil"), &Face::True, &t)?;
+                p.f.path.p.result(&format!("canonical-map-{l}"), id);
+            }
+            Ok((p, (), String::new()))
+        },
+    )
     .unwrap();
     assert_eq!(certified.checked.goals, 3);
 }

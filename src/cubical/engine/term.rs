@@ -128,51 +128,145 @@ pub type FastMap<K, V> = HashMap<K, V, FastBuild>;
 /// A `HashSet` with the engine's fast hasher.
 pub type FastSet<K> = std::collections::HashSet<K, FastBuild>;
 
+/// An interned list as a table key: it hashes and compares as its children,
+/// so the table is probed with a borrowed slice and the node's own children
+/// serve as the key (no second copy).
+struct Key(Items);
+
+impl Hash for Key {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.0.items.hash(state);
+    }
+}
+impl PartialEq for Key {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.0.items == other.0.0.items
+    }
+}
+impl Eq for Key {}
+impl std::borrow::Borrow<[Sexp]> for Key {
+    fn borrow(&self) -> &[Sexp] {
+        &self.0.0.items
+    }
+}
+
 #[derive(Default)]
 struct Interner {
-    lists: FastMap<Box<[Sexp]>, Items>,
+    lists: std::collections::HashSet<Key, FastBuild>,
     atoms: FastMap<Box<str>, Rc<str>>,
+    /// Atoms by the address and length of the text they were last requested
+    /// with. Rule and constructor names are string literals, so this mostly
+    /// avoids hashing their text; a hit is confirmed by comparing the text.
+    recent: FastMap<(usize, usize), Rc<str>>,
+    /// Children of the list being built, reused so a lookup that finds an
+    /// existing list allocates nothing.
+    scratch: Vec<Sexp>,
+    /// Unary numerals `(s ... (s z))` by value.
+    numerals: Vec<Sexp>,
+}
+
+/// The table lives as long as its thread unless `keep_terms_until_exit` was
+/// called: then freeing millions of nodes is left to the operating system.
+struct Table(std::mem::ManuallyDrop<RefCell<Interner>>);
+
+impl Drop for Table {
+    fn drop(&mut self) {
+        if !KEEP_UNTIL_EXIT.load(std::sync::atomic::Ordering::Relaxed) {
+            // SAFETY: dropped exactly once, here.
+            unsafe { std::mem::ManuallyDrop::drop(&mut self.0) }
+        }
+    }
+}
+
+static KEEP_UNTIL_EXIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Do not free interned terms when a thread ends. For command-line runs that
+/// exit right after, where the teardown is pure cost.
+pub fn keep_terms_until_exit() {
+    KEEP_UNTIL_EXIT.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 thread_local! {
-    static INTERNER: RefCell<Interner> = RefCell::new(Interner::default());
+    static INTERNER: Table = Table(std::mem::ManuallyDrop::new(RefCell::new(Interner::default())));
+}
+
+fn interned(interner: &mut Interner, items: &[Sexp]) -> Sexp {
+    if let Some(found) = interner.lists.get(items) {
+        return Sexp::List(found.0.clone());
+    }
+    let id = interner.lists.len() as u64;
+    let node = Items(Rc::new(Node {
+        id,
+        items: items.into(),
+    }));
+    interner.lists.insert(Key(node.clone()));
+    Sexp::List(node)
 }
 
 /// The interned list with these children.
 pub fn list(items: Vec<Sexp>) -> Sexp {
-    INTERNER.with(|cell| {
-        let mut interner = cell.borrow_mut();
-        if let Some(found) = interner.lists.get(items.as_slice()) {
-            return Sexp::List(found.clone());
+    INTERNER.with(|cell| interned(&mut cell.0.borrow_mut(), &items))
+}
+
+fn atom_in(interner: &mut Interner, s: &str) -> Sexp {
+    let place = (s.as_ptr() as usize, s.len());
+    if let Some(found) = interner.recent.get(&place)
+        && **found == *s
+    {
+        return Sexp::Atom(found.clone());
+    }
+    let shared = match interner.atoms.get(s) {
+        Some(found) => found.clone(),
+        None => {
+            let shared: Rc<str> = Rc::from(s);
+            interner.atoms.insert(s.into(), shared.clone());
+            shared
         }
-        let items = items.into_boxed_slice();
-        let id = interner.lists.len() as u64;
-        let node = Items(Rc::new(Node {
-            id,
-            items: items.clone(),
-        }));
-        interner.lists.insert(items, node.clone());
-        Sexp::List(node)
-    })
+    };
+    interner.recent.insert(place, shared.clone());
+    Sexp::Atom(shared)
 }
 
 pub fn atom(s: impl AsRef<str>) -> Sexp {
-    let s = s.as_ref();
-    INTERNER.with(|cell| {
-        let mut interner = cell.borrow_mut();
-        if let Some(found) = interner.atoms.get(s) {
-            return Sexp::Atom(found.clone());
-        }
-        let shared: Rc<str> = Rc::from(s);
-        interner.atoms.insert(s.into(), shared.clone());
-        Sexp::Atom(shared)
-    })
+    INTERNER.with(|cell| atom_in(&mut cell.0.borrow_mut(), s.as_ref()))
 }
 
 pub fn call(name: &str, args: impl IntoIterator<Item = Sexp>) -> Sexp {
-    let mut items = vec![atom(name)];
-    items.extend(args);
-    list(items)
+    // Arguments are built before the table is borrowed: building one may
+    // intern other terms.
+    let args = args.into_iter();
+    INTERNER.with(|cell| {
+        let mut guard = cell.0.borrow_mut();
+        let interner = &mut *guard;
+        let mut items = std::mem::take(&mut interner.scratch);
+        items.clear();
+        items.push(atom_in(interner, name));
+        drop(guard);
+        items.extend(args);
+        let mut interner = cell.0.borrow_mut();
+        let out = interned(&mut interner, &items);
+        items.clear();
+        interner.scratch = items;
+        out
+    })
+}
+
+/// The unary numeral `(s ... (s z))` for `n`.
+pub fn numeral(n: usize) -> Sexp {
+    INTERNER.with(|cell| {
+        let mut interner = cell.0.borrow_mut();
+        if interner.numerals.is_empty() {
+            let z = atom_in(&mut interner, "z");
+            interner.numerals.push(z);
+        }
+        while interner.numerals.len() <= n {
+            let s = atom_in(&mut interner, "s");
+            let previous = interner.numerals.last().unwrap().clone();
+            let next = interned(&mut interner, &[s, previous]);
+            interner.numerals.push(next);
+        }
+        interner.numerals[n].clone()
+    })
 }
 
 impl FromIterator<Sexp> for Items {

@@ -93,7 +93,7 @@ impl Face {
     }
 }
 fn number(n: usize) -> Sexp {
-    (0..n).fold(atom("z"), |n, _| call("s", [n]))
+    crate::cubical::engine::term::numeral(n)
 }
 fn context(fs: &[Face]) -> Sexp {
     fs.iter()
