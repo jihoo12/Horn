@@ -129,6 +129,46 @@ impl Graph {
     }
 }
 
+/// A map keyed by dense node numbers that clears in constant time.
+struct Memo {
+    stamp: Vec<u32>,
+    value: Vec<u32>,
+    now: u32,
+}
+
+impl Memo {
+    fn new() -> Self {
+        Memo {
+            stamp: Vec::new(),
+            value: Vec::new(),
+            now: 1,
+        }
+    }
+
+    fn clear(&mut self) {
+        self.now += 1;
+        if self.now == u32::MAX {
+            self.stamp.fill(0);
+            self.now = 1;
+        }
+    }
+
+    fn get(&self, k: u32) -> Option<u32> {
+        let k = k as usize;
+        (self.stamp.get(k) == Some(&self.now)).then(|| self.value[k])
+    }
+
+    fn insert(&mut self, k: u32, v: u32) {
+        let k = k as usize;
+        if k >= self.stamp.len() {
+            self.stamp.resize(k + 1, 0);
+            self.value.resize(k + 1, 0);
+        }
+        self.stamp[k] = self.now;
+        self.value[k] = v;
+    }
+}
+
 /// One derived rule: a skeleton's most general judgment.
 struct Class {
     /// Pattern node of the conclusion. Variables are numbered from zero,
@@ -231,8 +271,8 @@ impl Analysis<'_> {
     }
 
     /// Copy a pattern into the graph with fresh variables.
-    fn copy(&mut self, p: u32, memo: &mut Map<u32, u32>, class: &Class, vars: &mut [u32]) -> u32 {
-        if let Some(&x) = memo.get(&p) {
+    fn copy(&mut self, p: u32, memo: &mut Memo, class: &Class, vars: &mut [u32]) -> u32 {
+        if let Some(x) = memo.get(p) {
             return x;
         }
         let node = self.pat.node(p);
@@ -273,13 +313,13 @@ impl Analysis<'_> {
     fn resolve(
         &mut self,
         x: u32,
-        memo: &mut Map<u32, u32>,
+        memo: &mut Memo,
         numbering: &mut Map<u32, u32>,
         fixed: &Map<u32, u32>,
         number_all: bool,
     ) -> Result<u32> {
         let x = self.graph.find(x);
-        if let Some(&p) = memo.get(&x) {
+        if let Some(p) = memo.get(x) {
             return Ok(p);
         }
         let h = self.graph.head[x as usize];
@@ -497,7 +537,8 @@ fn run(
     let mut classes: Vec<Class> = Vec::new();
     let mut instances: Vec<usize> = Vec::new();
     let mut class_of = vec![NONE; n];
-    let mut copy_memo = Map::default();
+    let mut copy_memo = Memo::new();
+    let mut memo = Memo::new();
     for s in 0..n {
         if !needed[s] {
             continue;
@@ -558,7 +599,7 @@ fn run(
         }
         let conclusion = an.instantiate(&rule.conclusion, &env);
         let mut numbering = Map::default();
-        let mut memo = Map::default();
+        memo.clear();
         let none = Map::default();
         let pattern = an.resolve(conclusion, &mut memo, &mut numbering, &none, true)?;
         // Rigid variables absent from the conclusion take the first
