@@ -572,7 +572,7 @@ fn run(
     let mut class_of = vec![NONE; n];
     let mut copy_memo = Memo::new();
     let mut memo = Memo::new();
-    // Per-step tables, cleared rather than rebuilt for each step.
+    // Per-step tables, emptied at the end of each step rather than rebuilt.
     let (mut numbering, mut fixed, mut seen) = (Map::default(), Map::default(), Set::default());
     let none = Map::default();
     for s in 0..n {
@@ -634,13 +634,10 @@ fn run(
             copies.push(vars);
         }
         let conclusion = an.instantiate(&rule.conclusion, &env);
-        reuse(&mut numbering);
         memo.clear();
         let pattern = an.resolve(conclusion, &mut memo, &mut numbering, &none, true)?;
         // Rigid variables absent from the conclusion take the first
         // instance's ground values; that instance proves the result.
-        reuse(&mut fixed);
-        reuse(&mut seen);
         for &(inst, g) in &premises {
             an.fix(inst, g, &numbering, &mut fixed, &mut seen);
         }
@@ -656,6 +653,11 @@ fn run(
         for (&x, &k) in &numbering {
             flex[k as usize] = an.graph.flex[x as usize];
         }
+        // Empty the step's tables now, so that a table one large step grew
+        // is released before the next step builds anything.
+        reuse(&mut numbering);
+        reuse(&mut fixed);
+        reuse(&mut seen);
         stats.class_vars += flex.len();
         stats.flex_vars += flex.iter().filter(|&&f| f).count();
         let c = classes.len() as u32;
