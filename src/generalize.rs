@@ -169,6 +169,39 @@ impl Memo {
     }
 }
 
+/// Empty a per-step table for the next step. Clearing costs its capacity, so
+/// a table that one large step grew is dropped instead.
+fn reuse<T: Default + Len>(table: &mut T) {
+    if table.capacity() > 1 << 12 {
+        *table = T::default();
+    } else {
+        table.clear();
+    }
+}
+
+trait Len {
+    fn capacity(&self) -> usize;
+    fn clear(&mut self);
+}
+
+impl<K, V> Len for Map<K, V> {
+    fn capacity(&self) -> usize {
+        Map::capacity(self)
+    }
+    fn clear(&mut self) {
+        Map::clear(self)
+    }
+}
+
+impl<K> Len for Set<K> {
+    fn capacity(&self) -> usize {
+        Set::capacity(self)
+    }
+    fn clear(&mut self) {
+        Set::clear(self)
+    }
+}
+
 /// One derived rule: a skeleton's most general judgment.
 struct Class {
     /// Pattern node of the conclusion. Variables are numbered from zero,
@@ -539,6 +572,9 @@ fn run(
     let mut class_of = vec![NONE; n];
     let mut copy_memo = Memo::new();
     let mut memo = Memo::new();
+    // Per-step tables, cleared rather than rebuilt for each step.
+    let (mut numbering, mut fixed, mut seen) = (Map::default(), Map::default(), Set::default());
+    let none = Map::default();
     for s in 0..n {
         if !needed[s] {
             continue;
@@ -598,14 +634,13 @@ fn run(
             copies.push(vars);
         }
         let conclusion = an.instantiate(&rule.conclusion, &env);
-        let mut numbering = Map::default();
+        reuse(&mut numbering);
         memo.clear();
-        let none = Map::default();
         let pattern = an.resolve(conclusion, &mut memo, &mut numbering, &none, true)?;
         // Rigid variables absent from the conclusion take the first
         // instance's ground values; that instance proves the result.
-        let mut fixed = Map::default();
-        let mut seen = Set::default();
+        reuse(&mut fixed);
+        reuse(&mut seen);
         for &(inst, g) in &premises {
             an.fix(inst, g, &numbering, &mut fixed, &mut seen);
         }
