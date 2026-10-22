@@ -1691,8 +1691,11 @@ impl RestrictedProducer {
         if let Some(id) = self.equalities.get(&key) {
             return Ok(*id);
         }
-        // Whether a hole will fit is for the user to see from its goal.
+        // Whether a hole will fit is for the user to see from its goal; each
+        // side is checked at the type so that its holes are recorded.
         if has_hole(a) || has_hole(b) {
+            let _ = self.check(d, g, phi, a, ty);
+            let _ = self.check(d, g, phi, b, ty);
             return Ok(self.emit("hole", vec![], key));
         }
         if !self.equality_active.insert(key.clone()) {

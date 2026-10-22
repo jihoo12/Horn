@@ -541,3 +541,32 @@ fn holes_report_faces_shadowing_and_unknown_types() {
         .unwrap();
     assert!(head.contains("its type is not known here"), "{head}");
 }
+
+#[test]
+fn holes_in_equalities_types_and_unreached_positions_are_all_reported() {
+    let equal = cubical::script::run("(equal e ? ? nat)").err().unwrap();
+    assert_eq!(
+        equal,
+        "equal e: 2 goals to fill\n\n?1\n  ⊢ nat\n\n?2\n  ⊢ nat"
+    );
+    let app = cubical::script::run("(eval x (app ? ?))").err().unwrap();
+    assert!(app.starts_with("eval x: 2 goals to fill"), "{app}");
+    assert!(app.contains("?2\n  (not reached by the checker"), "{app}");
+    // Holes inside a goal print as written, not as internal numbers.
+    let path = cubical::script::run("(def x (path ? ? ?) (plam i ?))")
+        .err()
+        .unwrap();
+    assert!(
+        path.ends_with(
+            "?4\n  i : I\n  ⊢ ?1\n  where i = 0 must give ?2\n        i = 1 must give ?3"
+        ),
+        "{path}"
+    );
+    // A shadowed dimension is marked like a shadowed variable.
+    let dims = cubical::script::run(
+        "(def shade (path (path nat 0 0) (plam i 0) (plam i 0)) (plam i (plam i ?)))",
+    )
+    .err()
+    .unwrap();
+    assert!(dims.contains("\n  i✝ i : I\n"), "{dims}");
+}

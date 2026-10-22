@@ -9,6 +9,8 @@ use std::collections::HashMap;
 pub struct Printer<'a> {
     /// Closed terms to print as a name: definitions and prelude terms.
     pub known: &'a HashMap<Sexp, String>,
+    /// How each hole `(hole K)` was written: `?1`, `?step`, ...
+    pub holes: &'a [String],
 }
 
 /// Names of the ordinary variables and dimensions in scope, outermost first.
@@ -209,7 +211,12 @@ impl Printer<'_> {
                 )
             }
             ("loop", [r]) => format!("(loop {})", self.interval(r, scope)),
-            ("hole", [k]) => format!("?{k}"),
+            ("hole", [k]) => k
+                .atom()
+                .ok()
+                .and_then(|k| k.parse::<usize>().ok())
+                .and_then(|k| self.holes.get(k).cloned())
+                .unwrap_or_else(|| format!("?{k}")),
             (h, xs) if super::engine::data::motive_index(h).is_some_and(|m| m < xs.len()) => {
                 // (elim T (PARAMS) k MOTIVE (METHODS) x): the motive binds one
                 // variable.

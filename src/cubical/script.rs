@@ -425,7 +425,7 @@ impl Elaborator {
             }
             n
         }
-        if self.p.holes.is_empty() {
+        if self.p.holes.is_empty() && self.holes.is_empty() {
             return format!("{what}: {err}");
         }
         let mut known = HashMap::new();
@@ -435,7 +435,11 @@ impl Elaborator {
         for (name, t) in &self.prelude {
             known.insert(t.clone(), (*name).to_owned());
         }
-        let printer = Printer { known: &known };
+        let hole_names: Vec<String> = self.holes.iter().map(|(n, _)| n.clone()).collect();
+        let printer = Printer {
+            known: &known,
+            holes: &hole_names,
+        };
         // One goal per hole: where it was checked in the context it was
         // written in, if it was; otherwise where it was first met.
         let mut shown_holes: Vec<&crate::cubical::engine::restricted_frontend::Hole> = Vec::new();
@@ -458,19 +462,30 @@ impl Elaborator {
                 None => shown_holes.push(hole),
             }
         }
-        shown_holes.sort_by_key(|h| h.id.atom().ok().and_then(|a| a.parse::<usize>().ok()));
-        let count = shown_holes.len();
+        // Every hole written, in order; those the checker never reached (it
+        // stopped before them, or never checks that position) have no goal.
+        let hole_number = |h: &crate::cubical::engine::restricted_frontend::Hole| -> usize {
+            h.id.atom().ok().and_then(|a| a.parse().ok()).unwrap_or(0)
+        };
+        let order: Vec<(
+            usize,
+            Option<&crate::cubical::engine::restricted_frontend::Hole>,
+        )> = (0..self.holes.len().max(shown_holes.len()))
+            .map(|k| (k, shown_holes.iter().copied().find(|h| hole_number(h) == k)))
+            .collect();
+        let count = order.len();
         let mut out = format!(
             "{what}: {count} goal{} to fill",
             if count == 1 { "" } else { "s" }
         );
-        for hole in shown_holes {
-            let k: usize = hole
-                .id
-                .atom()
-                .ok()
-                .and_then(|a| a.parse().ok())
-                .unwrap_or(0);
+        for (k, hole) in order {
+            let Some(hole) = hole else {
+                out.push_str(&format!(
+                    "\n\n{}\n  (not reached by the checker, so it has no goal yet; fill the others first)",
+                    self.holes[k].0
+                ));
+                continue;
+            };
             let (shown, names) = match self.holes.get(k) {
                 Some((shown, names)) => (shown.clone(), names.clone()),
                 None => (format!("?{k}"), Names::default()),
@@ -499,11 +514,16 @@ impl Elaborator {
                     vars[i].push('✝');
                 }
             }
-            let dims: Vec<String> = if names.dimensions.len() == hole.dimensions {
+            let mut dims: Vec<String> = if names.dimensions.len() == hole.dimensions {
                 names.dimensions.clone()
             } else {
                 (0..hole.dimensions).map(|i| format!("i{i}")).collect()
             };
+            for i in 0..dims.len() {
+                if dims[i + 1..].contains(&dims[i]) {
+                    dims[i].push('✝');
+                }
+            }
             for (i, ty) in entries.iter().enumerate() {
                 let scope = Scope {
                     vars: vars[..i].to_vec(),
@@ -1077,7 +1097,7 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
             }
             // Checking goes past holes to find them all; a form with one is
             // reported, never certified.
-            if !e.p.holes.is_empty() {
+            if !e.holes.is_empty() {
                 return Err(e.explain(&what, String::new()));
             }
         }
