@@ -684,3 +684,57 @@ fn equations_outside_a_path_and_holes_in_declarations_read_well() {
         "{data}"
     );
 }
+
+#[test]
+fn wrong_proofs_say_what_is_wrong_by_name() {
+    // A missing `suc` in the induction step: the path starts in the wrong place.
+    let step = cubical::script::run(&format!(
+        "{ADD}
+(def zero-add (pi n nat (path nat (app add 0 n) n))
+  (lam n nat
+    (natrec k (path nat (app add 0 k) k)
+      (plam i 0)
+      (lam k nat (lam p (path nat (app add 0 k) k) (plam i (papp p i))))
+      n)))"
+    ))
+    .err()
+    .unwrap();
+    assert!(
+        step.starts_with("def zero-add: the path does not end where it must, at i = 0"),
+        "{step}"
+    );
+    assert!(
+        step.contains("\n  p : (path nat (app add 0 k) k)\n"),
+        "{step}"
+    );
+    assert!(
+        step.contains("\n  it is (papp p 0), which computes to "),
+        "{step}"
+    );
+    assert!(
+        step.contains("\n  but must be (app add 0 (suc k)), which computes to (suc "),
+        "{step}"
+    );
+    let ty = cubical::script::run(&format!(
+        "{ADD}\n(def bad (pi n nat bool) (lam n nat (app add n 1)))"
+    ))
+    .err()
+    .unwrap();
+    assert_eq!(
+        ty,
+        "def bad: a term does not have the type it must
+
+  n : nat
+
+  the term (app add n 1)
+  has type nat
+  but must have bool"
+    );
+    let former = cubical::script::run("(def notfun nat (lam x nat x))")
+        .err()
+        .unwrap();
+    assert!(
+        former.starts_with("def notfun: a function (lam) cannot have this type"),
+        "{former}"
+    );
+}
