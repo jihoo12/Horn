@@ -150,9 +150,18 @@ impl Producer {
         String::from_utf8(bytes).expect("producer emitted UTF-8")
     }
     #[allow(dead_code)]
-    pub fn write_reachable(&self, mut out: impl std::io::Write) -> std::io::Result<usize> {
+    pub fn write_reachable(&self, out: impl std::io::Write) -> std::io::Result<usize> {
+        self.write_reachable_of(&self.results, out)
+    }
+
+    /// `write_reachable` for the given results only.
+    pub fn write_reachable_of(
+        &self,
+        results: &[(String, usize)],
+        mut out: impl std::io::Write,
+    ) -> std::io::Result<usize> {
         let mut keep = vec![false; self.steps.len()];
-        let mut pending: Vec<_> = self.results.iter().map(|(_, i)| *i).collect();
+        let mut pending: Vec<_> = results.iter().map(|(_, i)| *i).collect();
         while let Some(i) = pending.pop() {
             if keep[i] {
                 continue;
@@ -208,7 +217,7 @@ impl Producer {
             }
             out.write_all(b")\n")?;
         }
-        for (name, id) in &self.results {
+        for (name, id) in results {
             writeln!(
                 out,
                 "(result {name} {})",

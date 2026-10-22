@@ -253,7 +253,7 @@ reach canonical form when they are data (booleans, numbers, declared types).
 ## Level variables
 
 `(def-poly NAME (L) TYPE TERM)` states a definition for every universe level
-`L` ([poly.hcs](../examples/cubical/script/poly.hcs), about 6 s, most of it
+`L` ([poly.hcs](../examples/cubical/script/poly.hcs), about 5 s, most of it
 univalence). Levels are numerals, a level variable, or `(s LEVEL)`;
 `(ua-at LEVEL)`, `(iso-equiv-at LEVEL)` and `(univalence-at LEVEL)` accept
 level variables. `(at NAME LEVEL)` uses a definition at a level, including

@@ -187,24 +187,21 @@ fn producer() -> RestrictedProducer {
     p
 }
 
-/// Prove `t0 : ty0` (the level-0 instance) on its own, generalize the proof
-/// over universe levels, check the schematic certificate, and require its
-/// goal to be exactly `expected`, the user's statement with level `L`.
+/// Generalize the derivation `id` of `t0 : ty0` (the level-0 instance, in
+/// the script's producer) over universe levels, check the schematic
+/// certificate, and require its goal to be exactly `expected`, the user's
+/// statement with level `L`. Only the steps `id` depends on are generalized.
 fn generalize_definition(
     name: &str,
-    t0: &Sexp,
-    ty0: &Sexp,
+    steps: &crate::cubical::engine::frontend::Producer,
+    id: usize,
     expected: &Sexp,
     theory: &str,
 ) -> Result<Polymorphic> {
-    let mut p = producer();
-    let id = p.check(0, &atom("nil"), &Face::True, t0, ty0)?;
-    p.f.path.p.result(name, id);
-    let goals = format!("(goal {name} {})\n", p.f.path.p.judgment(id));
+    let goals = format!("(goal {name} {})\n", steps.judgment(id));
     let mut proof = Vec::new();
-    p.f.path
-        .p
-        .write_reachable(&mut proof)
+    steps
+        .write_reachable_of(&[(name.to_owned(), id)], &mut proof)
         .map_err(|e| e.to_string())?;
     let (mut sg, mut sp) = (Vec::new(), Vec::new());
     crate::generalize::generalize(
@@ -866,7 +863,7 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
                     let expected = call("rhas", [atom("z"), nil.clone(), atom("ft"), tl, tyl]);
                     let theory = super::core_theory() + &appended;
                     polymorphic.push(
-                        generalize_definition(&name, &t0, &ty0, &expected, &theory)
+                        generalize_definition(&name, &e.p.f.path.p, id, &expected, &theory)
                             .map_err(|err| format!("def-poly {name}: {err}"))?,
                     );
                 }
