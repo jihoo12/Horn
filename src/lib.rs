@@ -5,6 +5,7 @@ pub mod kernel;
 pub mod lang;
 pub mod lex;
 pub mod oracle;
+pub(crate) mod pipe;
 pub mod replay;
 pub mod schematic;
 pub mod sexp;

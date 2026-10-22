@@ -1347,7 +1347,7 @@ pub fn check_with_rules(
 
 /// The pipe `check_text_with_rules` hands its writer: proof text written here
 /// goes to the kernel, and the rule of each step line is noted on the way.
-pub struct ProofSink(RuleScan<std::io::BufWriter<std::io::PipeWriter>>);
+pub struct ProofSink(RuleScan<crate::pipe::ChunkWriter>);
 
 impl Write for ProofSink {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
@@ -1361,20 +1361,18 @@ impl Write for ProofSink {
 /// Check the derivation that `write` streams as proof text with the ground
 /// kernel against `theory` and the exact `goals`, also returning the sorted
 /// names of the rules its accepted steps use. `write` runs on the calling
-/// thread and the kernel reads its output through a pipe, so no proof file
+/// thread and the kernel reads its output through an in-process pipe, so no proof file
 /// is materialized; a writer failure is never acceptance.
 pub fn check_text_with_rules(
     theory: &str,
     goals: &str,
     write: impl FnOnce(&mut ProofSink) -> Result<()>,
 ) -> Result<(crate::kernel::Report, Vec<String>)> {
-    use std::io::{BufReader, BufWriter};
     let checker = crate::kernel::Theory::parse(theory)?;
-    let (reader, writer) = std::io::pipe().map_err(|e| e.to_string())?;
+    let (reader, writer) = crate::pipe::pipe();
     let (report, written) = std::thread::scope(|scope| {
-        let kernel =
-            scope.spawn(|| checker.check_reader(goals, BufReader::with_capacity(1 << 20, reader)));
-        let mut sink = ProofSink(RuleScan::new(BufWriter::with_capacity(1 << 20, writer)));
+        let kernel = scope.spawn(|| checker.check_reader(goals, reader));
+        let mut sink = ProofSink(RuleScan::new(writer));
         let written = write(&mut sink)
             .and_then(|()| sink.flush().map_err(|e| e.to_string()))
             .map(|()| {
