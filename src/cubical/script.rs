@@ -594,7 +594,7 @@ impl Elaborator {
             // An equation may sit outside binders its holes are under (a
             // path's ends): use their names for the variables and the outer
             // dimensions it has.
-            let named = self.holes.iter().find_map(|(_, names)| {
+            let fits = |names: &Option<Names>| {
                 let names = names.clone()?;
                 (names.ordinary.len() == context_length(&c.context)
                     && names.dimensions.len() >= c.dimensions)
@@ -602,7 +602,16 @@ impl Elaborator {
                         dimensions: names.dimensions[..c.dimensions].to_vec(),
                         ..names
                     })
-            });
+            };
+            // The scope of a hole the equation contains, else of any hole
+            // with as many variables.
+            let mut inside = Vec::new();
+            hole_numbers(&c.left, &mut inside);
+            hole_numbers(&c.right, &mut inside);
+            let named = inside
+                .iter()
+                .find_map(|k| self.holes.get(*k).and_then(|(_, names)| fits(names)))
+                .or_else(|| self.holes.iter().find_map(|(_, names)| fits(names)));
             let scope = match named {
                 Some(names) => Scope {
                     vars: names.ordinary,
@@ -1086,12 +1095,13 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
             let what = format!("{head} {name}");
             match (head, &xs[2..]) {
                 ("data", ctors) => {
-                    appended.push_str(&e.declare(&xs[1], ctors)?);
-                    // A declaration's terms (path constructor ends) are not
-                    // checked by the engine, so its holes have no goals.
-                    for (_, scope) in &mut e.holes {
-                        *scope = None;
+                    // A declaration's terms (field types, path constructor
+                    // ends) are not checked by the engine, so its holes
+                    // have no goals; report them before reading it.
+                    if !e.holes.is_empty() {
+                        return Err(e.explain(&what, String::new()));
                     }
+                    appended.push_str(&e.declare(&xs[1], ctors)?);
                 }
                 ("def-poly", [params, ty, t]) => {
                     e.fresh(&name)?;
@@ -1223,5 +1233,19 @@ fn number_holes(s: &Sexp, written: &mut Vec<String>) -> Result<Sexp> {
                 .collect::<Result<_>>()?,
         )),
         Sexp::Atom(_) => Ok(s.clone()),
+    }
+}
+
+/// The numbers K of the holes `(hole K)` in a core term.
+fn hole_numbers(t: &Sexp, out: &mut Vec<usize>) {
+    if let Sexp::List(xs) = t {
+        if xs.first().and_then(|h| h.atom().ok()) == Some("hole")
+            && let Some(k) = xs.get(1).and_then(|k| k.atom().ok()?.parse().ok())
+        {
+            out.push(k);
+        }
+        for x in xs.iter() {
+            hole_numbers(x, out);
+        }
     }
 }

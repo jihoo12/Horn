@@ -660,6 +660,20 @@ fn equations_outside_a_path_and_holes_in_declarations_read_well() {
             .err()
             .unwrap();
     assert!(ends.contains("(suc ?1) = n : nat"), "{ends}");
+    // Equations name their variables after the holes they contain.
+    let two = cubical::script::run(
+        "(def f (sigma p (pi a nat (path nat a a)) (pi b nat (path nat b b)))
+           (pair (lam a nat (plam i (suc ?))) (lam b nat (plam j (suc ?)))))",
+    )
+    .err()
+    .unwrap();
+    assert!(two.contains("(suc ?1) = a : nat"), "{two}");
+    assert!(two.contains("(suc ?2) = b : nat"), "{two}");
+    let field = cubical::script::run("(data t (a ?))").err().unwrap();
+    assert!(
+        field.contains("?1\n  (in a position that is not checked"),
+        "{field}"
+    );
     let data = cubical::script::run("(data t (a nat) (p (path (a ?) (a 0))))")
         .err()
         .unwrap();
