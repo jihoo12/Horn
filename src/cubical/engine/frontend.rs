@@ -1,6 +1,6 @@
 //! Untrusted proof producer. Lambda domains are annotations erased by quote().
 //! Equality search is deliberately limited to chains of root beta steps.
-use crate::cubical::engine::term::{Result, Sexp, atom, call};
+use crate::cubical::engine::term::{FastMap, Result, Sexp, atom, call};
 
 #[derive(Clone, Debug)]
 pub enum E {
@@ -173,28 +173,40 @@ impl Producer {
                 }
             })
             .collect();
-        let mut names = std::collections::HashMap::new();
+        let mut names = FastMap::default();
         for (i, (rule, refs, j)) in self.steps.iter().enumerate() {
             let Some(id) = ids[i] else {
                 continue;
             };
-            let refs: Vec<String> = refs
-                .iter()
-                .map(|r| ids[*r].expect("retained earlier premise").to_string())
-                .collect();
             // The judgment's arguments refer to shared definitions, so the
             // text grows with the number of distinct subterms, not their size.
-            let Sexp::List(parts) = j else {
-                writeln!(out, "(step {id} {rule} ({}) {j})", refs.join(" "))?;
-                continue;
-            };
-            let mut judgment = format!("({}", parts[0]);
-            for arg in &parts[1..] {
-                judgment.push(' ');
-                judgment.push_str(&shared(arg, &mut names, &mut out)?);
+            if let Sexp::List(parts) = j {
+                for arg in &parts[1..] {
+                    define(arg, &mut names, &mut out)?;
+                }
             }
-            judgment.push(')');
-            writeln!(out, "(step {id} {rule} ({}) {judgment})", refs.join(" "))?;
+            write!(out, "(step {id} {rule} (")?;
+            for (k, r) in refs.iter().enumerate() {
+                let r = ids[*r].expect("retained earlier premise");
+                if k == 0 {
+                    write!(out, "{r}")?;
+                } else {
+                    write!(out, " {r}")?;
+                }
+            }
+            out.write_all(b") ")?;
+            match j {
+                Sexp::List(parts) => {
+                    write!(out, "({}", parts[0])?;
+                    for arg in &parts[1..] {
+                        out.write_all(b" ")?;
+                        reference(arg, &names, &mut out)?;
+                    }
+                    out.write_all(b")")?;
+                }
+                atom => write!(out, "{atom}")?,
+            }
+            out.write_all(b")\n")?;
         }
         for (name, id) in &self.results {
             writeln!(
@@ -474,25 +486,41 @@ pub fn dtt_demo() -> Result<Producer> {
 
 /// The text for `t` in a compact certificate: an atom itself, or `?dN` for a
 /// compound term, writing its `def` (after those of its subterms) once.
-fn shared(
+/// Write a definition for every list in `t` that has none yet, children
+/// first, numbering them in the order they are written.
+fn define(
     t: &Sexp,
-    names: &mut std::collections::HashMap<Sexp, usize>,
+    names: &mut FastMap<Sexp, usize>,
     out: &mut impl std::io::Write,
-) -> std::io::Result<String> {
+) -> std::io::Result<()> {
     let Sexp::List(xs) = t else {
-        return Ok(t.to_string());
+        return Ok(());
     };
-    if let Some(n) = names.get(t) {
-        return Ok(format!("?d{n}"));
+    if names.contains_key(t) {
+        return Ok(());
     }
-    let mut text = format!("({}", xs[0]);
     for x in &xs[1..] {
-        text.push(' ');
-        text.push_str(&shared(x, names, out)?);
+        define(x, names, out)?;
     }
-    text.push(')');
     let n = names.len();
-    writeln!(out, "(def ?d{n} {text})")?;
+    write!(out, "(def ?d{n} ({}", xs[0])?;
+    for x in &xs[1..] {
+        out.write_all(b" ")?;
+        reference(x, names, out)?;
+    }
+    out.write_all(b"))\n")?;
     names.insert(t.clone(), n);
-    Ok(format!("?d{n}"))
+    Ok(())
+}
+
+/// An atom, or the name of a defined list.
+fn reference(
+    t: &Sexp,
+    names: &FastMap<Sexp, usize>,
+    out: &mut impl std::io::Write,
+) -> std::io::Result<()> {
+    match t {
+        Sexp::List(_) => write!(out, "?d{}", names[t]),
+        Sexp::Atom(a) => out.write_all(a.as_bytes()),
+    }
 }

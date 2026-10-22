@@ -8,7 +8,7 @@ use super::engine::{canonicity_frontend, deep_univalence_frontend, ua_transport_
 use crate::kernel::Report;
 use crate::oracle;
 use crate::sexp::Result;
-use std::io::{BufReader, BufWriter, Write};
+use std::io::{BufWriter, Write};
 
 /// Producer recursion follows the term structure, which is deep.
 const STACK_BYTES: usize = 1 << 30;
@@ -122,11 +122,9 @@ enum Outcome {
 
 /// Stream the producer's reachable derivation into the oracle encoder.
 fn encode(steps: &super::engine::frontend::Producer, theory: &str, goals: &str) -> Result<Vec<u8>> {
-    let (reader, writer) = std::io::pipe().map_err(|e| e.to_string())?;
+    let (reader, mut writer) = crate::pipe::pipe();
     std::thread::scope(|inner| -> Result<Vec<u8>> {
-        let encoder = inner
-            .spawn(|| oracle::encode(theory, goals, BufReader::with_capacity(1 << 20, reader)));
-        let mut writer = BufWriter::with_capacity(1 << 20, writer);
+        let encoder = inner.spawn(|| oracle::encode(theory, goals, reader));
         let written = steps
             .write_reachable(&mut writer)
             .and_then(|_| writer.flush())
