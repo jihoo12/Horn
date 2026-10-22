@@ -35,7 +35,7 @@ const MAX_DEPTH: usize = 1 << 16;
 const STACK_BYTES: usize = 1 << 30;
 
 #[derive(Default, Clone, Copy)]
-struct Fx(u64);
+pub(crate) struct Fx(u64);
 
 impl Hasher for Fx {
     fn write(&mut self, bytes: &[u8]) {
@@ -61,7 +61,8 @@ impl Fx {
     }
 }
 
-type Map<K, V> = HashMap<K, V, BuildHasherDefault<Fx>>;
+pub(crate) type Map<K, V> = HashMap<K, V, BuildHasherDefault<Fx>>;
+pub(crate) type Set<K> = std::collections::HashSet<K, BuildHasherDefault<Fx>>;
 
 /// Mix a decision context or an index key into one word.
 fn mix(parts: &[u64]) -> u64 {
