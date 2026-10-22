@@ -74,7 +74,13 @@ that no theory accepts), so all holes of a form are shown at once. Terms
 print as they are written: definitions by name, numerals as numbers,
 declared data by their declared names, faces simplified, and a variable
 shadowed by a later one of the same name as `x✝`. A hole whose type the
-checker cannot know there (the head of an application) says so.
+checker cannot know there (the head of an application) says so, and so does
+one whose required type is not a type. Equations between terms with holes,
+as in `(equal e ? 0 nat)`, are listed after the goals (`?1 = 0 : nat`),
+since a hole's type alone does not say what it must equal. Holes are
+numbered in the order they are written; a hole anywhere in a form, even in
+a position the checker does not use, keeps the form from being certified.
+In a `def-poly`, goals show the level variable (`⊢ (u L)`).
 
 Natural numbers ([nat.hcs](../examples/cubical/script/nat.hcs)) support
 programs by recursion and proofs by induction, in 0.1 s:

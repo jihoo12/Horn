@@ -559,6 +559,10 @@ impl Elaborator {
                 out.push_str(&format!("\n  under {}", printer.face(&hole.face, &scope)));
             }
             match &hole.ty {
+                Some(ty) if hole.not_a_type => out.push_str(&format!(
+                    "\n  ⊢ {}  (not a type, so nothing can fill this)",
+                    printer.term(ty, &scope)
+                )),
                 Some(ty) => out.push_str(&format!("\n  ⊢ {}", printer.term(ty, &scope))),
                 None => out
                     .push_str("\n  ⊢ (its type is not known here; annotate it with (ann ? TYPE))"),
@@ -574,6 +578,44 @@ impl Elaborator {
                     printer.term(left, &outer),
                     printer.term(right, &outer)
                 ));
+            }
+        }
+        // Equations between terms with holes, which the goals' types alone
+        // do not express. Their variables are named as in a goal with the
+        // same context, if there is one.
+        if !self.p.constraints.is_empty() {
+            out.push_str("\n\nand these must hold:");
+        }
+        for c in &self.p.constraints {
+            let named = self.p.holes.iter().find_map(|h| {
+                let k: usize = h.id.atom().ok()?.parse().ok()?;
+                let names = self.holes.get(k)?.1.clone()?;
+                (h.context == c.context
+                    && h.dimensions == c.dimensions
+                    && names.ordinary.len() == context_length(&c.context)
+                    && names.dimensions.len() == c.dimensions)
+                    .then_some(names)
+            });
+            let scope = match named {
+                Some(names) => Scope {
+                    vars: names.ordinary,
+                    dims: names.dimensions,
+                },
+                None => Scope {
+                    vars: (0..context_length(&c.context))
+                        .map(|i| format!("x{i}"))
+                        .collect(),
+                    dims: (0..c.dimensions).map(|i| format!("i{i}")).collect(),
+                },
+            };
+            out.push_str(&format!(
+                "\n  {} = {} : {}",
+                printer.term(&c.left, &scope),
+                printer.term(&c.right, &scope),
+                printer.term(&c.ty, &scope)
+            ));
+            if c.face != Face::True {
+                out.push_str(&format!("  under {}", printer.face(&c.face, &scope)));
             }
         }
         out
@@ -1032,6 +1074,7 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
             }
             let empty = Names::default();
             e.p.holes.clear();
+            e.p.constraints.clear();
             e.level_marker = None;
             let what = format!("{head} {name}");
             match (head, &xs[2..]) {

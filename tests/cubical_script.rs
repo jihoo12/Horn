@@ -547,7 +547,7 @@ fn holes_in_equalities_types_and_unreached_positions_are_all_reported() {
     let equal = cubical::script::run("(equal e ? ? nat)").err().unwrap();
     assert_eq!(
         equal,
-        "equal e: 2 goals to fill\n\n?1\n  ⊢ nat\n\n?2\n  ⊢ nat"
+        "equal e: 2 goals to fill\n\n?1\n  ⊢ nat\n\n?2\n  ⊢ nat\n\nand these must hold:\n  ?1 = ?2 : nat"
     );
     let app = cubical::script::run("(eval x (app ? ?))").err().unwrap();
     assert!(app.starts_with("eval x: 2 goals to fill"), "{app}");
@@ -627,4 +627,18 @@ fn def_poly_goals_show_the_level_variable_and_annotations_are_respected() {
         .err()
         .unwrap();
     assert!(other.ends_with("i : I\n  ⊢ bool"), "{other}");
+}
+
+#[test]
+fn goals_keep_equations_and_say_when_their_type_is_not_a_type() {
+    let value = cubical::script::run("(def x btrue ?)").err().unwrap();
+    assert!(
+        value.ends_with("⊢ btrue  (not a type, so nothing can fill this)"),
+        "{value}"
+    );
+    let equation = cubical::script::run("(equal e ? 0 nat)").err().unwrap();
+    assert_eq!(
+        equation,
+        "equal e: 1 goal to fill\n\n?1\n  ⊢ nat\n\nand these must hold:\n  ?1 = 0 : nat"
+    );
 }

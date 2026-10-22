@@ -65,6 +65,20 @@ pub struct Hole {
     /// For the body of a path abstraction: what it must be at i0 and at i1,
     /// in the context outside the abstraction.
     pub boundary: Option<(Sexp, Sexp)>,
+    /// The type is not a type (it has no elements to fill the hole with).
+    pub not_a_type: bool,
+}
+
+/// An equation between terms with holes, left for the user with the holes'
+/// goals: `left = right : ty`.
+#[derive(Clone, PartialEq)]
+pub struct Constraint {
+    pub dimensions: usize,
+    pub context: Sexp,
+    pub face: Face,
+    pub left: Sexp,
+    pub right: Sexp,
+    pub ty: Sexp,
 }
 
 #[derive(Default)]
@@ -72,6 +86,8 @@ pub struct RestrictedProducer {
     pub f: FaceProducer,
     /// Holes met while checking, in order, without repeats.
     pub holes: Vec<Hole>,
+    /// Equations with holes met while checking, without repeats.
+    pub constraints: Vec<Constraint>,
     inferred: FastMap<Sexp, (Sexp, usize)>,
     checked: FastMap<Sexp, usize>,
     equalities: FastMap<Sexp, usize>,
@@ -445,6 +461,7 @@ impl RestrictedProducer {
                 face: phi.clone(),
                 ty: None,
                 boundary: None,
+                not_a_type: false,
             });
         }
         if let Some(hints) = &self.restriction_hints {
@@ -858,6 +875,12 @@ impl RestrictedProducer {
             return Ok(*id);
         }
         if let ("hole", [id]) = shape(t)? {
+            // A goal is only worth showing at a type. A type with holes of
+            // its own is checked too, which records them.
+            let not_a_type = match self.infer(d, g, phi, expected) {
+                Ok((u, _)) => level(&u).is_err(),
+                Err(_) => !has_hole(expected),
+            };
             return Ok(self.fill(Hole {
                 id: id.clone(),
                 dimensions: d,
@@ -865,6 +888,7 @@ impl RestrictedProducer {
                 face: phi.clone(),
                 ty: Some(expected.clone()),
                 boundary: None,
+                not_a_type,
             }));
         }
         if self.certified_check_reuse {
@@ -992,6 +1016,7 @@ impl RestrictedProducer {
                     face: shift_face(phi),
                     ty: Some(a.clone()),
                     boundary: Some((b.clone(), c.clone())),
+                    not_a_type: false,
                 }));
             }
             let (ut, pti) = self.infer(d, g, phi, expected)?;
@@ -1704,6 +1729,17 @@ impl RestrictedProducer {
         if has_hole(a) || has_hole(b) {
             let _ = self.check(d, g, phi, a, ty);
             let _ = self.check(d, g, phi, b, ty);
+            let constraint = Constraint {
+                dimensions: d,
+                context: g.clone(),
+                face: phi.clone(),
+                left: a.clone(),
+                right: b.clone(),
+                ty: ty.clone(),
+            };
+            if !self.constraints.contains(&constraint) {
+                self.constraints.push(constraint);
+            }
             return Ok(self.emit("hole", vec![], key));
         }
         if !self.equality_active.insert(key.clone()) {
