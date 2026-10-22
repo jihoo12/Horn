@@ -498,7 +498,7 @@ impl Elaborator {
                 let why = if scope.is_some() {
                     "not reached by the checker, so it has no goal yet; fill the others first"
                 } else {
-                    "in a position that is not checked, such as a lambda's domain; write it out"
+                    "in a position that is not checked (a lambda's domain, a data declaration); write it out"
                 };
                 out.push_str(&format!("\n\n{shown}\n  ({why})"));
                 continue;
@@ -591,14 +591,17 @@ impl Elaborator {
             out.push_str("\n\nand these must hold:");
         }
         for c in &self.p.constraints {
-            let named = self.p.holes.iter().find_map(|h| {
-                let k: usize = h.id.atom().ok()?.parse().ok()?;
-                let names = self.holes.get(k)?.1.clone()?;
-                (h.context == c.context
-                    && h.dimensions == c.dimensions
-                    && names.ordinary.len() == context_length(&c.context)
-                    && names.dimensions.len() == c.dimensions)
-                    .then_some(names)
+            // An equation may sit outside binders its holes are under (a
+            // path's ends): use their names for the variables and the outer
+            // dimensions it has.
+            let named = self.holes.iter().find_map(|(_, names)| {
+                let names = names.clone()?;
+                (names.ordinary.len() == context_length(&c.context)
+                    && names.dimensions.len() >= c.dimensions)
+                    .then(|| Names {
+                        dimensions: names.dimensions[..c.dimensions].to_vec(),
+                        ..names
+                    })
             });
             let scope = match named {
                 Some(names) => Scope {
@@ -1082,7 +1085,14 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
             e.level_marker = None;
             let what = format!("{head} {name}");
             match (head, &xs[2..]) {
-                ("data", ctors) => appended.push_str(&e.declare(&xs[1], ctors)?),
+                ("data", ctors) => {
+                    appended.push_str(&e.declare(&xs[1], ctors)?);
+                    // A declaration's terms (path constructor ends) are not
+                    // checked by the engine, so its holes have no goals.
+                    for (_, scope) in &mut e.holes {
+                        *scope = None;
+                    }
+                }
                 ("def-poly", [params, ty, t]) => {
                     e.fresh(&name)?;
                     let [param] = params.list()? else {

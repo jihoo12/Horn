@@ -652,3 +652,21 @@ fn goals_keep_equations_and_say_when_their_type_is_not_a_type() {
         "equal e: 1 goal to fill\n\n?1\n  ⊢ nat\n\nand these must hold:\n  ?1 = 0 : nat"
     );
 }
+
+#[test]
+fn equations_outside_a_path_and_holes_in_declarations_read_well() {
+    let ends =
+        cubical::script::run("(def f (pi n nat (path nat n n)) (lam n nat (plam i (suc ?))))")
+            .err()
+            .unwrap();
+    assert!(ends.contains("(suc ?1) = n : nat"), "{ends}");
+    let data = cubical::script::run("(data t (a nat) (p (path (a ?) (a 0))))")
+        .err()
+        .unwrap();
+    assert!(
+        data.ends_with(
+            "(in a position that is not checked (a lambda's domain, a data declaration); write it out)"
+        ),
+        "{data}"
+    );
+}
