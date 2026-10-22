@@ -18,9 +18,8 @@
 //! theory's own rules, falling back to structural induction on the
 //! eigenvariable, and writes the result as a schematic certificate for
 //! `horn::schematic`. Nothing here is trusted; the schematic checker decides.
-use crate::oracle::{Pat, Spec, Store, Truth, deep, read_goals, read_truth};
+use crate::oracle::{Map, Pat, Set, Spec, Store, Truth, deep, read_goals, read_truth};
 use crate::sexp::Result;
-use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::io::{BufRead, Write};
 
@@ -194,12 +193,14 @@ struct Analysis<'s> {
     pat: Store,
     graph: Graph,
     /// Ground node to pattern node.
-    lifted: HashMap<u32, u32>,
+    lifted: Map<u32, u32>,
+    /// Children of the nodes being built by `copy` and `resolve`, as a stack.
+    scratch: Vec<u32>,
 }
 
 impl Analysis<'_> {
     /// Variables occurring as argument `pos` of constructor `ctor`.
-    fn at(&self, p: u32, ctor: u32, pos: usize, out: &mut HashSet<u32>) {
+    fn at(&self, p: u32, ctor: u32, pos: usize, out: &mut Set<u32>) {
         let node = self.pat.node(p);
         if node[0] == VAR {
             return;
@@ -230,27 +231,27 @@ impl Analysis<'_> {
     }
 
     /// Copy a pattern into the graph with fresh variables.
-    fn copy(
-        &mut self,
-        p: u32,
-        memo: &mut HashMap<u32, u32>,
-        class: &Class,
-        vars: &mut [u32],
-    ) -> u32 {
+    fn copy(&mut self, p: u32, memo: &mut Map<u32, u32>, class: &Class, vars: &mut [u32]) -> u32 {
         if let Some(&x) = memo.get(&p) {
             return x;
         }
-        let node = self.pat.node(p).to_vec();
-        let x = if node[0] == VAR {
-            let v = self.graph.var(node[2], class.flex[node[1] as usize]);
-            vars[node[1] as usize] = v;
+        let node = self.pat.node(p);
+        let (head, arity) = (node[0], node.len() - 1);
+        let x = if head == VAR {
+            let (number, sort) = (node[1], node[2]);
+            let v = self.graph.var(sort, class.flex[number as usize]);
+            vars[number as usize] = v;
             v
         } else {
-            let args: Vec<u32> = node[1..]
-                .iter()
-                .map(|&a| self.copy(a, memo, class, vars))
-                .collect();
-            self.graph.push(node[0], NONE, &args)
+            let base = self.scratch.len();
+            for i in 0..arity {
+                let a = self.pat.node(p)[i + 1];
+                let x = self.copy(a, memo, class, vars);
+                self.scratch.push(x);
+            }
+            let x = self.graph.push(head, NONE, &self.scratch[base..]);
+            self.scratch.truncate(base);
+            x
         };
         memo.insert(p, x);
         x
@@ -272,9 +273,9 @@ impl Analysis<'_> {
     fn resolve(
         &mut self,
         x: u32,
-        memo: &mut HashMap<u32, u32>,
-        numbering: &mut HashMap<u32, u32>,
-        fixed: &HashMap<u32, u32>,
+        memo: &mut Map<u32, u32>,
+        numbering: &mut Map<u32, u32>,
+        fixed: &Map<u32, u32>,
         number_all: bool,
     ) -> Result<u32> {
         let x = self.graph.find(x);
@@ -299,12 +300,21 @@ impl Analysis<'_> {
             }
         } else {
             let n = self.spec.inputs[h as usize].len();
-            let mut key = vec![h];
+            let base = self.scratch.len();
+            self.scratch.push(h);
             for i in 0..n {
                 let a = self.graph.args(x, n)[i];
-                key.push(self.resolve(a, memo, numbering, fixed, number_all)?);
+                match self.resolve(a, memo, numbering, fixed, number_all) {
+                    Ok(p) => self.scratch.push(p),
+                    Err(e) => {
+                        self.scratch.truncate(base);
+                        return Err(e);
+                    }
+                }
             }
-            self.pat.intern(&key)
+            let p = self.pat.intern(&self.scratch[base..]);
+            self.scratch.truncate(base);
+            p
         };
         memo.insert(x, p);
         Ok(p)
@@ -316,9 +326,9 @@ impl Analysis<'_> {
         &self,
         x: u32,
         g: u32,
-        numbering: &HashMap<u32, u32>,
-        fixed: &mut HashMap<u32, u32>,
-        seen: &mut HashSet<(u32, u32)>,
+        numbering: &Map<u32, u32>,
+        fixed: &mut Map<u32, u32>,
+        seen: &mut Set<(u32, u32)>,
     ) {
         let x = self.graph.find(x);
         if !seen.insert((x, g)) {
@@ -381,7 +391,7 @@ impl Analysis<'_> {
     }
 
     /// Match a ground term against a pattern, recording variable values.
-    fn bind(&self, p: u32, g: u32, out: &mut HashMap<u32, u32>) {
+    fn bind(&self, p: u32, g: u32, out: &mut Map<u32, u32>) {
         let node = self.pat.node(p);
         if node[0] == VAR {
             out.entry(node[1]).or_insert(g);
@@ -394,7 +404,7 @@ impl Analysis<'_> {
 }
 
 /// `PRED` or `PRED:POSITION,...`: the positions are functional outputs.
-fn parse_cut(spec: &Spec, cut: &[&str]) -> Result<HashMap<u32, Vec<usize>>> {
+fn parse_cut(spec: &Spec, cut: &[&str]) -> Result<Map<u32, Vec<usize>>> {
     cut.iter()
         .map(|c| {
             let mut parts = c.split(':');
@@ -440,7 +450,7 @@ fn run(
     spec: &Spec,
     goals_source: &str,
     proof: impl BufRead,
-    cut: &HashMap<u32, Vec<usize>>,
+    cut: &Map<u32, Vec<usize>>,
     abstract_at: Option<(u32, usize)>,
     out: Option<(&mut (dyn Write + Send), &mut (dyn Write + Send))>,
 ) -> Result<(Stats, Option<Emitted>)> {
@@ -451,7 +461,7 @@ fn run(
 
     // Merge repeated judgments into their first step, then keep only steps
     // that some result depends on.
-    let mut first: HashMap<u32, u32> = HashMap::new();
+    let mut first: Map<u32, u32> = Map::default();
     let canon: Vec<u32> = (0..n as u32)
         .map(|s| *first.entry(truth.judgment[s as usize]).or_insert(s))
         .collect();
@@ -476,16 +486,18 @@ fn run(
         ground,
         pat: Store::new(),
         graph: Graph::default(),
-        lifted: HashMap::new(),
+        lifted: Map::default(),
+        scratch: Vec::new(),
     };
     let mut stats = Stats {
         ground_nodes: an.ground.len(),
         ..Stats::default()
     };
-    let mut skeletons: HashMap<Vec<u32>, u32> = HashMap::new();
+    let mut skeletons: Map<Vec<u32>, u32> = Map::default();
     let mut classes: Vec<Class> = Vec::new();
     let mut instances: Vec<usize> = Vec::new();
     let mut class_of = vec![NONE; n];
+    let mut copy_memo = Map::default();
     for s in 0..n {
         if !needed[s] {
             continue;
@@ -537,21 +549,22 @@ fn run(
             let child = class_of[r as usize];
             let child = &classes[child as usize];
             let mut vars = vec![NONE; child.flex.len()];
-            let copy = an.copy(child.conclusion, &mut HashMap::new(), child, &mut vars);
+            copy_memo.clear();
+            let copy = an.copy(child.conclusion, &mut copy_memo, child, &mut vars);
             let inst = an.instantiate(p, &env);
             an.graph.unify(spec, inst, copy)?;
             premises.push((inst, truth.judgment[r as usize]));
             copies.push(vars);
         }
         let conclusion = an.instantiate(&rule.conclusion, &env);
-        let mut numbering = HashMap::new();
-        let mut memo = HashMap::new();
-        let none = HashMap::new();
+        let mut numbering = Map::default();
+        let mut memo = Map::default();
+        let none = Map::default();
         let pattern = an.resolve(conclusion, &mut memo, &mut numbering, &none, true)?;
         // Rigid variables absent from the conclusion take the first
         // instance's ground values; that instance proves the result.
-        let mut fixed = HashMap::new();
-        let mut seen = HashSet::new();
+        let mut fixed = Map::default();
+        let mut seen = Set::default();
         for &(inst, g) in &premises {
             an.fix(inst, g, &numbering, &mut fixed, &mut seen);
         }
@@ -595,7 +608,7 @@ fn run(
             .ok_or_else(|| format!("no result for goal {name}"))?;
         let c = class_of[canon[s as usize] as usize];
         let class = &classes[c as usize];
-        let mut values = HashMap::new();
+        let mut values = Map::default();
         an.bind(class.conclusion, g, &mut values);
         let mut vars: Vec<(u32, String, bool, String)> = values
             .iter()
@@ -636,7 +649,7 @@ fn run(
                     .iter()
                     .map(|(_, c, _, _)| {
                         let class = &classes[*c as usize];
-                        let mut open = HashSet::new();
+                        let mut open = Set::default();
                         match abstract_at {
                             Some((ctor, pos)) => an.at(class.conclusion, ctor, pos, &mut open),
                             None => open.extend(
@@ -659,10 +672,10 @@ fn run(
 struct Input<'a> {
     truth: &'a Truth,
     canon: &'a [u32],
-    cut: &'a HashMap<u32, Vec<usize>>,
+    cut: &'a Map<u32, Vec<usize>>,
     /// For each goal, the variables of its generalized statement to replace
     /// by the eigenvariable.
-    open: Vec<HashSet<u32>>,
+    open: Vec<Set<u32>>,
 }
 
 struct Emitter<'a, 's> {
@@ -672,24 +685,24 @@ struct Emitter<'a, 's> {
     /// Pattern node of the eigenvariable, and its name.
     eigen: u32,
     eigen_name: String,
-    proved: HashMap<u32, u32>,
+    proved: Map<u32, u32>,
     /// Steps already written, by judgment.
-    derived: HashMap<u32, u32>,
+    derived: Map<u32, u32>,
     /// Hypotheses in scope during an induction case, by judgment.
-    hyps: HashMap<u32, u32>,
-    defs: HashMap<u32, String>,
+    hyps: Map<u32, u32>,
+    defs: Map<u32, String>,
     /// Names of case variables, by pattern node.
-    names: HashMap<u32, String>,
+    names: Map<u32, String>,
 }
 struct Snapshot {
     out: usize,
     steps: usize,
     inductions: usize,
     definitions: usize,
-    proved: HashMap<u32, u32>,
-    derived: HashMap<u32, u32>,
-    defs: HashMap<u32, String>,
-    names: HashMap<u32, String>,
+    proved: Map<u32, u32>,
+    derived: Map<u32, u32>,
+    defs: Map<u32, String>,
+    names: Map<u32, String>,
 }
 
 impl Emitter<'_, '_> {
@@ -952,7 +965,7 @@ fn replace(store: &mut Store, p: u32, from: u32, to: u32) -> u32 {
 struct Global {
     g: Graph,
     judgment: Vec<u32>,
-    lowered: HashMap<u32, u32>,
+    lowered: Map<u32, u32>,
     eigen: u32,
 }
 
@@ -994,7 +1007,7 @@ impl Global {
         an: &mut Analysis,
         x: u32,
         eigen: u32,
-        memo: &mut HashMap<u32, u32>,
+        memo: &mut Map<u32, u32>,
         depth: usize,
     ) -> Option<u32> {
         let x = self.g.find(x);
@@ -1020,7 +1033,7 @@ impl Global {
     }
 
     /// Bind unbound variables to the values of a ground instance.
-    fn settle(&mut self, an: &Analysis, x: u32, g: u32, seen: &mut HashSet<(u32, u32)>) {
+    fn settle(&mut self, an: &Analysis, x: u32, g: u32, seen: &mut Set<(u32, u32)>) {
         let x = self.g.find(x);
         if !seen.insert((x, g)) {
             return;
@@ -1063,13 +1076,13 @@ fn instantiate(g: &mut Graph, p: &Pat, env: &[u32]) -> u32 {
 fn emit(
     an: &mut Analysis,
     classes: &[Class],
-    roots: &[(String, u32, HashMap<u32, u32>, u32)],
+    roots: &[(String, u32, Map<u32, u32>, u32)],
     input: &Input,
     goals_out: &mut (dyn Write + Send),
     proof_out: &mut (dyn Write + Send),
 ) -> Result<Emitted> {
     let spec = an.spec;
-    let mut sorts = HashSet::new();
+    let mut sorts = Set::default();
     for (i, (_, _, values, _)) in roots.iter().enumerate() {
         for &k in values.keys() {
             if input.open[i].contains(&k) {
@@ -1092,11 +1105,11 @@ fn emit(
         stats: Emitted::default(),
         eigen,
         eigen_name: eigen_name.clone(),
-        proved: HashMap::new(),
-        derived: HashMap::new(),
-        hyps: HashMap::new(),
-        defs: HashMap::new(),
-        names: HashMap::new(),
+        proved: Map::default(),
+        derived: Map::default(),
+        hyps: Map::default(),
+        defs: Map::default(),
+        names: Map::default(),
     };
     let mut goals_text = format!("(var {eigen_name} {})\n", sort_name(spec, sort));
     let mut results = String::new();
@@ -1136,9 +1149,9 @@ fn emit(
 fn derive_goal(
     em: &mut Emitter,
     classes: &[Class],
-    (name, c, values, root): &(String, u32, HashMap<u32, u32>, u32),
+    (name, c, values, root): &(String, u32, Map<u32, u32>, u32),
     input: &Input,
-    open: Option<&HashSet<u32>>,
+    open: Option<&Set<u32>>,
     sort: u32,
 ) -> Result<(u32, u32)> {
     let spec = em.an.spec;
@@ -1163,7 +1176,7 @@ fn derive_goal(
     let mut gl = Global {
         g: Graph::default(),
         judgment: vec![NONE; truth.rule.len()],
-        lowered: HashMap::new(),
+        lowered: Map::default(),
         eigen: NONE,
     };
     gl.eigen = gl.g.var(sort, false);
@@ -1232,7 +1245,7 @@ fn derive_goal(
             let pred = gl.g.head[node as usize];
             let arity = spec.inputs[pred as usize].len();
             let args = gl.g.args(node, arity).to_vec();
-            let memo = &mut HashMap::new();
+            let memo = &mut Map::default();
             let raised: Vec<Option<u32>> = args
                 .iter()
                 .map(|&a| gl.raise(em.an, a, eigen, memo, 0))
@@ -1277,7 +1290,7 @@ fn derive_goal(
             break;
         }
     }
-    let mut seen = HashSet::new();
+    let mut seen = Set::default();
     for (s, _) in mine.iter().enumerate().filter(|(_, m)| **m) {
         if !is_cut(em.an, s) {
             gl.settle(em.an, gl.judgment[s], truth.judgment[s], &mut seen);
@@ -1288,7 +1301,7 @@ fn derive_goal(
     }
 
     let mut index = vec![NONE; truth.rule.len()];
-    let memo = &mut HashMap::new();
+    let memo = &mut Map::default();
     for s in 0..truth.rule.len() {
         if !mine[s] || is_cut(em.an, s) {
             continue;
