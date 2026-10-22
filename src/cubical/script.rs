@@ -179,6 +179,7 @@ fn producer() -> RestrictedProducer {
     p.f.path.p.archive_judgments();
     p.reuse_restricted_typings();
     p.f.path.memoize_transformations();
+    p.f.path.use_scoped_identities();
     p.reuse_certified_checks();
     p.strengthen_typings();
     p.keep_reduct_types();

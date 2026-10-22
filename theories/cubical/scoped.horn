@@ -1,0 +1,17 @@
+; Appended after closed.horn.
+; Substitution and shifting leave a term unchanged when it has no variable
+; they act on. `scoped ?d ?n ?t` says that every free ordinary variable of t
+; is below n and every free dimension below d. shift and subst at k act only
+; on ordinary variables at or above k, and dshift and dsubst at k only on
+; dimensions at or above k, so for k at least the bound they return t
+; itself. This is the meaning of the structural rules: by induction on the
+; scoped derivation, each scope.X rule's premises give the premises of
+; shift.X, subst.X, dshift.X or dsubst.X with the term unchanged, with the
+; cutoff raised under a binder (scope raises n or d there too) and the
+; replacement shifted (shift and dshift are defined on every term). These
+; rules state that conclusion in one step, so a large term that a
+; substitution does not reach is not rebuilt node by node.
+(rule shift.scoped ((scoped ?d ?n ?t) (le ?n ?k)) (shift ?t ?k ?t))
+(rule subst.scoped ((scoped ?d ?n ?t) (le ?n ?k)) (subst ?t ?k ?r ?t))
+(rule dshift.scoped ((scoped ?d ?n ?t) (le ?d ?k)) (dshift ?t ?k ?t))
+(rule dsubst.scoped ((scoped ?d ?n ?t) (le ?d ?k)) (dsubst ?t ?k ?s ?t))

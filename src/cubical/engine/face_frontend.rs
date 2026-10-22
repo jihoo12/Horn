@@ -158,25 +158,7 @@ impl FaceProducer {
         Ok((out, self.emit(&rule, refs, j)))
     }
     pub fn face(&mut self, d: usize, f: &Face) -> Result<usize> {
-        if self.path.memoization_enabled()
-            && let Some(id) = self
-                .path
-                .p
-                .known_judgment(&call("face", [number(d), f.quote()]))
-        {
-            return Ok(id);
-        }
-        let (rule, refs) = match f {
-            Face::False => ("face.ff", vec![]),
-            Face::True => ("face.ft", vec![]),
-            Face::End(n, b) => (
-                if *b { "face.1" } else { "face.0" },
-                vec![self.path.interval(d, &dim(*n))?],
-            ),
-            Face::And(a, b) => ("face.and", vec![self.face(d, a)?, self.face(d, b)?]),
-            Face::Or(a, b) => ("face.or", vec![self.face(d, a)?, self.face(d, b)?]),
-        };
-        Ok(self.emit(rule, refs, call("face", [number(d), f.quote()])))
+        self.path.face(d, f)
     }
     fn member(&mut self, fs: &[Face], i: usize) -> usize {
         let refs = if i == 0 {
