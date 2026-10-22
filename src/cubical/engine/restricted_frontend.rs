@@ -1742,10 +1742,19 @@ impl RestrictedProducer {
         if matches!(shape(b)?.0, "lam" | "pair" | "plam") {
             self.check(d, g, phi, b, ty)?;
         }
+        // When one side steps to the other, that step is the proof. Going on
+        // would derive `a = b` again by another route, and `emit` would keep
+        // the first derivation and orphan everything built for the second.
         let (aa, aty, ai) = self.reduce_at(d, g, phi, a, ty)?;
-        let (bb, bty, bi) = self.reduce_at(d, g, phi, b, ty)?;
         let ai = self.retype_eq(d, g, phi, a, &aa, &aty, ty, ai)?;
+        if aa == *b {
+            return Ok(ai);
+        }
+        let (bb, bty, bi) = self.reduce_at(d, g, phi, b, ty)?;
         let bi = self.retype_eq(d, g, phi, b, &bb, &bty, ty, bi)?;
+        if bb == *a {
+            return Ok(self.eq(d, g, phi, a, b, ty, "req.sym", vec![bi]));
+        }
         let middle = if aa == bb {
             None
         } else if aa != *a || bb != *b {

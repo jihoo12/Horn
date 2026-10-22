@@ -1256,20 +1256,35 @@ pub fn check(theory: &str, goals: &str, oracle: &[u8]) -> Result<crate::kernel::
 /// Passes decoded text through, collecting the rule named by each step line.
 struct RuleScan<W> {
     inner: W,
+    /// The start of the current line, up to the space after its rule name.
     line: Vec<u8>,
     /// Spaces in `line`.
     spaces: usize,
+    /// The rest of the line cannot change the rule: it does not start with
+    /// `(step `, or the rule name has been read. Skip to its end.
+    skipping: bool,
     rules: std::collections::BTreeSet<String>,
 }
 
 impl<W: Write> RuleScan<W> {
-    /// Whether the line read so far may still end inside the rule name of
-    /// `(step N RULE ...)`: it is a prefix of `(step ` or starts with it,
-    /// and the space after the rule name has not been read yet.
-    fn wants_more(&self) -> bool {
+    fn new(inner: W) -> Self {
+        RuleScan {
+            inner,
+            line: Vec::new(),
+            spaces: 0,
+            skipping: false,
+            rules: Default::default(),
+        }
+    }
+
+    /// Read one byte of a line that may still name a rule.
+    fn push(&mut self, b: u8) {
         const STEP: &[u8] = b"(step ";
-        let start = self.line.len().min(STEP.len());
-        self.line[..start] == STEP[..start] && self.spaces < 3
+        let at = self.line.len();
+        self.line.push(b);
+        self.spaces += usize::from(b == b' ');
+        // `(step N RULE ` ends at the third space.
+        self.skipping = (at < STEP.len() && STEP[at] != b) || self.spaces == 3;
     }
 
     fn scan(&mut self) {
@@ -1282,18 +1297,31 @@ impl<W: Write> RuleScan<W> {
         }
         self.line.clear();
         self.spaces = 0;
+        self.skipping = false;
     }
 }
 
 impl<W: Write> Write for RuleScan<W> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let n = self.inner.write(buf)?;
-        for &b in &buf[..n] {
-            if b == b'\n' {
-                self.scan();
-            } else if self.wants_more() {
-                self.line.push(b);
-                self.spaces += usize::from(b == b' ');
+        let mut rest = &buf[..n];
+        while !rest.is_empty() {
+            if self.skipping {
+                match rest.iter().position(|b| *b == b'\n') {
+                    Some(end) => {
+                        self.scan();
+                        rest = &rest[end + 1..];
+                    }
+                    None => break,
+                }
+            } else {
+                let b = rest[0];
+                rest = &rest[1..];
+                if b == b'\n' {
+                    self.scan();
+                } else {
+                    self.push(b);
+                }
             }
         }
         Ok(n)
@@ -1345,12 +1373,7 @@ pub fn check_text_with_rules(
     let (report, written) = std::thread::scope(|scope| {
         let kernel =
             scope.spawn(|| checker.check_reader(goals, BufReader::with_capacity(1 << 20, reader)));
-        let mut sink = ProofSink(RuleScan {
-            inner: BufWriter::with_capacity(1 << 20, writer),
-            line: Vec::new(),
-            spaces: 0,
-            rules: Default::default(),
-        });
+        let mut sink = ProofSink(RuleScan::new(BufWriter::with_capacity(1 << 20, writer)));
         let written = write(&mut sink)
             .and_then(|()| sink.flush().map_err(|e| e.to_string()))
             .map(|()| {
