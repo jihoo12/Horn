@@ -636,6 +636,16 @@ fn goals_keep_equations_and_say_when_their_type_is_not_a_type() {
         value.ends_with("⊢ btrue  (not a type, so nothing can fill this)"),
         "{value}"
     );
+    for bad in [
+        "(def x (path btrue btrue btrue) (plam i ?))",
+        "(def x (path nat btrue btrue) (plam i ?))",
+    ] {
+        let path = cubical::script::run(bad).err().unwrap();
+        assert!(
+            path.contains("(but the path type it is in is not a type"),
+            "{path}"
+        );
+    }
     let equation = cubical::script::run("(equal e ? 0 nat)").err().unwrap();
     assert_eq!(
         equation,

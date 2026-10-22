@@ -1008,6 +1008,12 @@ impl RestrictedProducer {
                 inner = x;
             }
             if let ("hole", [id]) = shape(inner)? {
+                // The path type must itself be a type (family and ends).
+                // A path type with holes is checked too, which records them.
+                let not_a_type = match self.infer(d, g, phi, expected) {
+                    Ok((u, _)) => level(&u).is_err(),
+                    Err(_) => !has_hole(expected),
+                };
                 let (g2, _) = self.f.path.dshiftctx(g, 0)?;
                 return Ok(self.fill(Hole {
                     id: id.clone(),
@@ -1016,7 +1022,7 @@ impl RestrictedProducer {
                     face: shift_face(phi),
                     ty: Some(a.clone()),
                     boundary: Some((b.clone(), c.clone())),
-                    not_a_type: false,
+                    not_a_type,
                 }));
             }
             let (ut, pti) = self.infer(d, g, phi, expected)?;

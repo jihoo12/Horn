@@ -559,6 +559,10 @@ impl Elaborator {
                 out.push_str(&format!("\n  under {}", printer.face(&hole.face, &scope)));
             }
             match &hole.ty {
+                Some(ty) if hole.not_a_type && hole.boundary.is_some() => out.push_str(&format!(
+                    "\n  ⊢ {}  (but the path type it is in is not a type, so nothing can fill this)",
+                    printer.term(ty, &scope)
+                )),
                 Some(ty) if hole.not_a_type => out.push_str(&format!(
                     "\n  ⊢ {}  (not a type, so nothing can fill this)",
                     printer.term(ty, &scope)
