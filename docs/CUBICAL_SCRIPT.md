@@ -160,7 +160,7 @@ s1rec A b l (hcomp^j [φ ↦ u] u0) ≡ hcomp^j_A [φ ↦ s1rec A b l u] (s1rec 
 Compositions are written `(hcomp j A ((FACE TERM) ...) BASE)`, or
 `(comp j A ...)` when the type depends on `j`, with faces `(= i 0)`,
 `(= i 1)`, `(and F G)`, `(or F G)`. Path composition is then a definition,
-and the winding number of `loop · loop` computes (about 5 s, 0.7 GB):
+and the winding number of `loop · loop` computes (about 3.5 s, 0.45 GB):
 
 ```text
 (def compose (pi p (path s1 base base) (pi q (path s1 base base) (path s1 base base)))
@@ -329,7 +329,7 @@ axiom, and neither adds a rule.
 ## Trust
 
 The elaborator, the engine's search and the oracle encoder are untrusted.
-Scripts are checked against the core theory (366 rules: the bundled theory
+Scripts are checked against the core theory (403 rules: the bundled theory
 without its unrestricted judgment layer and one subsumed rule; see
 [TRUST.md](TRUST.md)) plus the rules of their data declarations. Acceptance
 means the fixed goals are derivable from those rules,

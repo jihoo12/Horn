@@ -365,105 +365,10 @@ impl RestrictedProducer {
         Ok((n, id))
     }
     pub fn scope(&mut self, d: usize, n: usize, t: &Sexp) -> Result<usize> {
-        if self.f.path.memoization_enabled()
-            && let Some(id) = self
-                .f
-                .path
-                .p
-                .known_judgment(&call("scoped", [num(d), num(n), t.clone()]))
-        {
-            return Ok(id);
-        }
-        let (head, args) = shape(t)?;
-        let refs = match (head, args) {
-            ("u", [_]) | ("nat" | "zero", []) => vec![],
-            ("bool" | "btrue" | "bfalse", []) => vec![],
-            ("s1" | "base", []) => vec![],
-            ("loop", [r]) => vec![self.f.path.interval(d, r)?],
-            ("s1rec", xs) if xs.len() == 4 => {
-                let mut refs = Vec::new();
-                for x in xs {
-                    refs.push(self.scope(d, n, x)?);
-                }
-                refs
-            }
-            ("suc", [x]) => vec![self.scope(d, n, x)?],
-            ("bif" | "natrec", [p, tt, f, b]) => vec![
-                self.scope(d, n + 1, p)?,
-                self.scope(d, n, tt)?,
-                self.scope(d, n, f)?,
-                self.scope(d, n, b)?,
-            ],
-            ("v", [k]) => vec![self.f.path.comparison(natural(k)?, n, true)?],
-            ("pi" | "sigma", [a, b]) => vec![self.scope(d, n, a)?, self.scope(d, n + 1, b)?],
-            ("lam", [t]) => vec![self.scope(d, n + 1, t)?],
-            ("app" | "pair" | "ann", [f, t]) => vec![self.scope(d, n, f)?, self.scope(d, n, t)?],
-            ("fst" | "snd" | "unglue", [t]) => vec![self.scope(d, n, t)?],
-            ("glue-type", [a, phi, t, e]) => vec![
-                self.scope(d, n, a)?,
-                self.f.face(d, &Face::parse(phi)?)?,
-                self.scope(d, n, t)?,
-                self.scope(d, n, e)?,
-            ],
-            ("glue", [g, t, a]) => vec![
-                self.scope(d, n, g)?,
-                self.scope(d, n, t)?,
-                self.scope(d, n, a)?,
-            ],
-            ("path", [a, b, c]) => vec![
-                self.scope(d + 1, n, a)?,
-                self.scope(d, n, b)?,
-                self.scope(d, n, c)?,
-            ],
-            ("plam", [t]) => vec![self.scope(d + 1, n, t)?],
-            ("papp", [p, r]) => vec![self.scope(d, n, p)?, self.f.path.interval(d, r)?],
-            ("system", [s]) => vec![self.sscope(d, n, s)?],
-            ("comp", [a, phi, tube, base]) => vec![
-                self.scope(d + 1, n, a)?,
-                self.f.face(d, &Face::parse(phi)?)?,
-                self.scope(d + 1, n, tube)?,
-                self.scope(d, n, base)?,
-            ],
-            (h, xs) if crate::cubical::engine::data::is_declared(h) => {
-                let motive = crate::cubical::engine::data::motive_index(h);
-                let interval = crate::cubical::engine::data::interval_index(h);
-                let mut refs = Vec::new();
-                for (i, x) in xs.iter().enumerate() {
-                    if Some(i) == interval {
-                        refs.push(self.f.path.interval(d, x)?);
-                        continue;
-                    }
-                    let depth = if Some(i) == motive { n + 1 } else { n };
-                    refs.push(self.scope(d, depth, x)?);
-                }
-                refs
-            }
-            _ => return Err(format!("unsupported syntax in scope: {t}")),
-        };
-        Ok(self.emit(
-            &format!("scope.{head}"),
-            refs,
-            call("scoped", [num(d), num(n), t.clone()]),
-        ))
+        self.f.path.scope(d, n, t)
     }
     fn sscope(&mut self, d: usize, n: usize, s: &Sexp) -> Result<usize> {
-        let (suffix, refs) = match shape(s)? {
-            ("snil", []) => ("nil", vec![]),
-            ("side", [phi, t, rest]) => (
-                "side",
-                vec![
-                    self.f.face(d, &Face::parse(phi)?)?,
-                    self.scope(d, n, t)?,
-                    self.sscope(d, n, rest)?,
-                ],
-            ),
-            _ => return Err("invalid system syntax".into()),
-        };
-        Ok(self.emit(
-            &format!("sscope.{suffix}"),
-            refs,
-            call("sscoped", [num(d), num(n), s.clone()]),
-        ))
+        self.f.path.sscope(d, n, s)
     }
     pub fn infer(&mut self, d: usize, g: &Sexp, phi: &Face, t: &Sexp) -> Result<(Sexp, usize)> {
         let key = call("rhas-key", [num(d), g.clone(), phi.quote(), t.clone()]);
