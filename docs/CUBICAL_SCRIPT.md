@@ -160,7 +160,7 @@ s1rec A b l (hcomp^j [φ ↦ u] u0) ≡ hcomp^j_A [φ ↦ s1rec A b l u] (s1rec 
 Compositions are written `(hcomp j A ((FACE TERM) ...) BASE)`, or
 `(comp j A ...)` when the type depends on `j`, with faces `(= i 0)`,
 `(= i 1)`, `(and F G)`, `(or F G)`. Path composition is then a definition,
-and the winding number of `loop · loop` computes (about 3.5 s, 0.45 GB):
+and the winding number of `loop · loop` computes (about 2 s, 0.3 GB):
 
 ```text
 (def compose (pi p (path s1 base base) (pi q (path s1 base base) (path s1 base base)))
@@ -193,7 +193,9 @@ Two changes make that run in a minute instead of not finishing:
   restricted context, with its dimensions and face; the engine uses them
   for annotated closed terms such as `ua`, `iso-equiv` and the line
   equivalence, which were otherwise re-checked at every dimension depth and
-  face they were used under.
+  face they were used under, and for every other closed term that types in
+  the empty context (`int`, closed Π and Σ types, ...), which were
+  otherwise lifted into each context one binder at a time.
 
 ## Declared higher inductive types
 

@@ -63,6 +63,8 @@ pub struct RestrictedProducer {
     /// Type closed annotated terms once, in the empty context, and weaken
     /// them to every other context with `rhas.closed`.
     pub closed_term_reuse: bool,
+    /// Closed terms that do not type in the empty context on their own.
+    not_closed_typable: FastSet<Sexp>,
     type_directed_composition: bool,
     certified_check_reuse: bool,
     typed_beta_reuse: bool,
@@ -401,6 +403,34 @@ impl RestrictedProducer {
             self.remember(d, g, phi, t, &ty, id);
             return Ok((ty, id));
         }
+        // A closed term is typed once, in the empty context, and weakened to
+        // this one in one step (rhas.closed), rather than lifted one binder
+        // at a time. A closed annotation must type there; another closed
+        // term may not (a system needs its face), and then falls through.
+        if self.closed_term_reuse
+            && (d, g, phi) != (0, &atom("nil"), &Face::True)
+            && !unannotated_head(t)
+            && closed(t, 0, 0)
+            && (matches!(shape(t)?.0, "ann") || !self.not_closed_typable.contains(t))
+        {
+            let nil = atom("nil");
+            let typed = if matches!(shape(t)?.0, "ann") {
+                Some(self.infer(0, &nil, &Face::True, t)?)
+            } else {
+                let typed = self.infer(0, &nil, &Face::True, t).ok();
+                if typed.is_none() {
+                    self.not_closed_typable.insert(t.clone());
+                }
+                typed
+            };
+            if let Some((ty, source)) = typed {
+                let scoped = self.scope(0, 0, t)?;
+                let ctx = self.ctx(d, g, phi)?;
+                let id = self.has(d, g, phi, t, &ty, "rhas.closed", vec![source, scoped, ctx]);
+                self.remember(d, g, phi, t, &ty, id);
+                return Ok((ty, id));
+            }
+        }
         // A failed attempt in the shorter context falls back to the ordinary
         // search, which may try other candidates.
         // Not for a term headed by an unannotated introduction: its type is
@@ -416,19 +446,6 @@ impl RestrictedProducer {
             if t2 == *t {
                 return Ok((a, id));
             }
-        }
-        if self.closed_term_reuse
-            && (d, g, phi) != (0, &atom("nil"), &Face::True)
-            && matches!(shape(t)?.0, "ann")
-            && closed(t, 0, 0)
-        {
-            let nil = atom("nil");
-            let (ty, source) = self.infer(0, &nil, &Face::True, t)?;
-            let scoped = self.scope(0, 0, t)?;
-            let ctx = self.ctx(d, g, phi)?;
-            let id = self.has(d, g, phi, t, &ty, "rhas.closed", vec![source, scoped, ctx]);
-            self.remember(d, g, phi, t, &ty, id);
-            return Ok((ty, id));
         }
         let (ty, rule, refs) = match shape(t)? {
             ("ann", [t, a]) => {
