@@ -309,6 +309,9 @@ struct Elaborator {
     /// The names in scope where each core term of the current form was
     /// written, to show a mismatch by name.
     scopes: HashMap<Sexp, Names>,
+    /// The same scopes in the order they were met, for a term that computing
+    /// produced and so was never written.
+    scope_order: Vec<Names>,
     defs: HashMap<String, Sexp>,
     /// Definitions whose type starts with implicit binders: how many.
     implicit: HashMap<String, usize>,
@@ -411,6 +414,7 @@ impl Elaborator {
             holes: Vec::new(),
             level_marker: None,
             scopes: HashMap::new(),
+            scope_order: Vec::new(),
             defs: HashMap::new(),
             implicit: HashMap::new(),
             def_ty: HashMap::new(),
@@ -957,7 +961,6 @@ impl Elaborator {
 
     /// Show a mismatch in the user's names, with what each side computes to.
     fn mismatch(&mut self, what: &str, m: &Mismatch) -> String {
-        let names = self.scopes.get(&m.term).cloned().unwrap_or_default();
         let mut entries = Vec::new();
         let mut tail = &m.context;
         while let Sexp::List(xs) = tail
@@ -967,6 +970,23 @@ impl Elaborator {
             tail = &xs[2];
         }
         entries.reverse();
+        // The names where the term was written; for a term that computing
+        // produced, those of the other side of an equation, or else the
+        // latest scope of the same shape.
+        let fits =
+            |n: &Names| n.ordinary.len() == entries.len() && n.dimensions.len() == m.dimensions;
+        let other = match &m.wrong {
+            Wrong::Unequal { other, .. } => self.scopes.get(other).cloned(),
+            _ => None,
+        };
+        let names = self
+            .scopes
+            .get(&m.term)
+            .cloned()
+            .filter(fits)
+            .or(other.filter(fits))
+            .or_else(|| self.scope_order.iter().rev().find(|n| fits(n)).cloned())
+            .unwrap_or_default();
         let mut vars: Vec<String> = if names.ordinary.len() == entries.len() {
             names.ordinary.clone()
         } else {
@@ -1023,6 +1043,51 @@ impl Elaborator {
                     ],
                 )
             }
+            Wrong::Uninferable => (
+                format!(
+                    "the type of this {} cannot be worked out from the term alone",
+                    match shape_head(&m.term) {
+                        "lam" => "function (lam)",
+                        "pair" => "pair",
+                        "plam" => "path (plam)",
+                        _ => "term",
+                    }
+                ),
+                vec![("the term".into(), m.term.clone(), None)],
+            ),
+            Wrong::NotA { former, got } => {
+                let universe = self
+                    .p
+                    .infer(m.dimensions, &m.context, &m.face, got)
+                    .ok()
+                    .map(|(u, _)| u);
+                let g = universe.and_then(|u| normal(self, got, &u));
+                (
+                    format!(
+                        "this term is used as a {}, but it is not one",
+                        match *former {
+                            "pi" => "function",
+                            "sigma" => "pair",
+                            _ => "path",
+                        }
+                    ),
+                    vec![
+                        ("the term".into(), m.term.clone(), None),
+                        ("has type".into(), got.clone(), g),
+                    ],
+                )
+            }
+            Wrong::Unequal { other, ty } => {
+                let (a, b) = (normal(self, &m.term, ty), normal(self, other, ty));
+                (
+                    "two terms that must be equal are not".into(),
+                    vec![
+                        ("this".into(), m.term.clone(), a),
+                        ("differs from".into(), other.clone(), b),
+                        ("at type".into(), ty.clone(), None),
+                    ],
+                )
+            }
             Wrong::Former { want } => (
                 format!(
                     "a {} cannot have this type",
@@ -1069,6 +1134,11 @@ impl Elaborator {
                 out.push_str(&format!(", which computes to {}", printer.term(&v, &scope)));
             }
         }
+        if let Wrong::Uninferable = m.wrong {
+            out.push_str(
+                "\n\n  Give it a type where it is written, with (ann TERM TYPE), or use it\n  where one is expected: an argument of a known function, a def's body,\n  or (eval NAME TERM TYPE).",
+            );
+        }
         out
     }
 
@@ -1089,6 +1159,11 @@ impl Elaborator {
         self.scopes
             .entry(t.clone())
             .or_insert_with(|| names.clone());
+        if self.scope_order.last().is_none_or(|last| {
+            last.ordinary != names.ordinary || last.dimensions != names.dimensions
+        }) {
+            self.scope_order.push(names.clone());
+        }
         Ok(t)
     }
 
@@ -1696,6 +1771,7 @@ fn run_expanded(source: String, certificate: Certificate) -> Result<Script> {
             e.p.constraints.clear();
             e.level_marker = None;
             e.scopes.clear();
+            e.scope_order.clear();
             e.p.mismatches.clear();
             let what = format!("{head} {name}");
             match (head, &xs[2..]) {

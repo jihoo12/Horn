@@ -975,3 +975,44 @@ fn imports_bring_declarations_once_and_reject_cycles() {
     assert!(run("uses.hcs").err().unwrap().contains("invalid form"));
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+/// Failures that used to print engine messages and core terms are shown in
+/// the user's names: an uninferable term with how to give it a type, a
+/// term used as a function that is not one, and two terms that differ.
+#[test]
+fn errors_name_uninferable_terms_non_functions_and_unequal_sides() {
+    for (source, expected) in [
+        (
+            "(eval e (lam x nat x))",
+            vec![
+                "cannot be worked out from the term alone",
+                "the term (lam x x)",
+                "(ann TERM TYPE)",
+            ],
+        ),
+        (
+            "(eval e (app 3 4))",
+            vec![
+                "used as a function, but it is not one",
+                "the term 3",
+                "has type nat",
+            ],
+        ),
+        (
+            "(def f (pi x nat nat) (lam x nat (suc x)))
+             (equal e (lam x nat (app f x)) (lam x nat x) (pi x nat nat))",
+            vec![
+                "must be equal are not",
+                "x : nat",
+                "this (suc x)",
+                "differs from x",
+            ],
+        ),
+    ] {
+        let err = cubical::script::run(source).err().unwrap();
+        for part in expected {
+            assert!(err.contains(part), "{source}: {err}");
+        }
+        assert!(!err.contains("(v z)"), "{source}: {err}");
+    }
+}

@@ -1,6 +1,6 @@
 //! Partial, untrusted congruence and interval simplification search.
 //! All successful branches emit only deep object-theory derivations.
-use super::{RestrictedProducer, level, shape};
+use super::{RestrictedProducer, Wrong, level, shape};
 use crate::cubical::engine::face_frontend::Face;
 use crate::cubical::engine::frontend::number;
 use crate::cubical::engine::path_frontend::{Op, cons, dim, papp};
@@ -294,10 +294,15 @@ impl RestrictedProducer {
             return Ok(eq);
         }
         if ah != bh {
-            return Err(format!(
+            let message = format!(
                 "local equality search failed: {a} versus {b} : {ty} under {} in {d} dimensions",
                 phi.quote()
-            ));
+            );
+            let wrong = Wrong::Unequal {
+                other: b.clone(),
+                ty: ty.clone(),
+            };
+            return Err(self.fail(d, g, phi, a, wrong, &message));
         }
         let (rule, refs) = match (ah, ax, bx, th, tx) {
             ("comp", [af, face, at, ab], [bf, other_face, bt, bb], _, _) => {
