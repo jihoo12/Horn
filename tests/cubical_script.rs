@@ -812,10 +812,22 @@ fn implicit_arguments_are_inferred_from_explicit_ones() {
         ("(check c (pi {A} (u 0) A) (u 1))", "implicit binder"),
         // A wrong guess is still checked.
         ("(check d (app sym (plam i 1)) (path nat 0 0))", "must have"),
+        // A family that uses the path's own dimension is no solution.
+        (
+            "(def P (path (u 0) nat nat) (plam i nat))
+             (check e (app sym (ann (plam i 0) (path i (papp P i) 0 0))) (path nat 0 0))",
+            "cannot infer",
+        ),
     ] {
         let err = cubical::script::run(&format!("{sym}\n{bad}"))
             .err()
             .unwrap();
         assert!(err.contains(says), "{bad}: {err}");
     }
+    // A solution under the domain's path binder may use an outer dimension,
+    // which moves out with it.
+    let outer = "(def P (path (u 0) nat nat) (plam i nat))
+      (check outer (plam r (app sym (ann (plam i 0) (path (papp P r) 0 0))))
+        (path i (path (papp P i) 0 0) (plam i 0) (plam i 0)))";
+    cubical::script::run(&format!("{sym}\n{outer}")).unwrap();
 }

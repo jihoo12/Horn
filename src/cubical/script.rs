@@ -32,7 +32,7 @@ use super::engine::iso_equiv_frontend::{iso_equiv_term, iso_equiv_type};
 use super::engine::path_frontend::{Op, dim, natural, papp, path, shape, v};
 use super::engine::restricted_frontend::RestrictedProducer;
 use super::engine::restricted_frontend::{Mismatch, Wrong};
-use super::engine::term::{Result, Sexp, atom, call, parse};
+use super::engine::term::{Result, Sexp, atom, call, numeral, parse};
 use super::engine::ua_frontend::{ua_term, ua_type};
 use super::generate::{Certificate, Regenerated, certify};
 use std::collections::HashMap;
@@ -120,8 +120,7 @@ fn implicit_binder(s: &Sexp) -> Option<&str> {
     a.strip_prefix('{')?.strip_suffix('}')
 }
 
-/// Whether a core term mentions a dimension or a hole: a solution found
-/// under a dimension binder, or one that contains a hole, is not used.
+/// Whether a core term has a subterm with one of these heads.
 fn mentions(t: &Sexp, heads: &[&str]) -> bool {
     match t {
         Sexp::Atom(_) => false,
@@ -133,20 +132,25 @@ fn mentions(t: &Sexp, heads: &[&str]) -> bool {
     }
 }
 
-/// A core term found under `by` ordinary binders, moved out of them: its
-/// variables at or above `cutoff + by` drop by `by`; `None` if it uses one
-/// of the binders.
-fn lower(t: &Sexp, by: usize, cutoff: usize) -> Option<Sexp> {
-    if by == 0 {
-        return Some(t.clone());
-    }
-    if let Ok(("v", [n])) = shape(t) {
+/// A core term found under `by` binders, ordinary and dimension, moved out
+/// of them: a variable at or above `cut + by` drops by `by`, of each kind;
+/// `None` if it uses one of the binders. `cut` counts the binders entered
+/// inside the term itself.
+fn lower(t: &Sexp, by: (usize, usize), cut: (usize, usize)) -> Option<Sexp> {
+    let index = |n: &Sexp, by: usize, cut: usize| -> Option<Option<usize>> {
         let n = natural(n).ok()?;
-        return match n {
-            n if n < cutoff => Some(t.clone()),
-            n if n < cutoff + by => None,
-            n => Some(v(n - by)),
-        };
+        Some(match n {
+            n if n < cut => Some(n),
+            n if n < cut + by => None,
+            n => Some(n - by),
+        })
+    };
+    match shape(t) {
+        Ok(("v", [n])) => return index(n, by.0, cut.0)?.map(v),
+        Ok((h @ ("dim" | "at0" | "at1"), [n])) => {
+            return index(n, by.1, cut.1)?.map(|n| call(h, [numeral(n)]));
+        }
+        _ => {}
     }
     match t {
         Sexp::Atom(_) => Some(t.clone()),
@@ -154,7 +158,8 @@ fn lower(t: &Sexp, by: usize, cutoff: usize) -> Option<Sexp> {
             let head = xs[0].atom().unwrap_or("");
             let mut out = Vec::new();
             for (i, x) in xs[1..].iter().enumerate() {
-                out.push(lower(x, by, cutoff + binds(head, i).0)?);
+                let (o, d) = binds(head, i);
+                out.push(lower(x, by, (cut.0 + o, cut.1 + d))?);
             }
             Some(call(head, out))
         }
@@ -165,7 +170,7 @@ fn lower(t: &Sexp, by: usize, cutoff: usize) -> Option<Sexp> {
 fn binds(head: &str, k: usize) -> (usize, usize) {
     match (head, k) {
         ("pi" | "sigma", 1) | ("lam", 0) | ("bif" | "natrec", 0) => (1, 0),
-        ("plam" | "path", 0) => (0, 1),
+        ("plam" | "path" | "comp", 0) | ("comp", 2) => (0, 1),
         _ => match data::motive_index(head) {
             Some(m) if m == k => (1, 0),
             _ => (0, 0),
@@ -195,9 +200,7 @@ fn matches_domain(
         }
         let m = n - depth - j;
         if m < k {
-            if (dims == 0 || !mentions(target, &["dim"]))
-                && let Some(t) = lower(target, depth, 0)
-            {
+            if let Some(t) = lower(target, (depth, dims), (0, 0)) {
                 out.push((k - 1 - m, t));
             }
             return true;
