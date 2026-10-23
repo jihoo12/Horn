@@ -338,10 +338,10 @@ impl RestrictedProducer {
             && let ("comp", [family, psi, tube, u]) = (xh, xargs)
             && shape(family)?.0 == data.ty
             && self.f.entails(d, phi, &Face::parse(psi)?).is_err()
+            && let Some(out) =
+                self.eliminate_composition(d, g, phi, t, ty, ti, &data, family, psi, tube, u)?
         {
-            return self
-                .eliminate_composition(d, g, phi, t, ty, ti, &data, psi, tube, u)
-                .map(Some);
+            return Ok(Some(out));
         }
         let dty = data::apply(&data.ty, args[..np].to_vec());
         let (x2, xty, ex) = self.reduce(d, g, phi, x)?;
@@ -359,7 +359,9 @@ impl RestrictedProducer {
     }
 
     /// The eliminator of a higher inductive type on a formal composition:
-    /// composition in the motive along the filler (`req.E.hcomp`).
+    /// composition in the motive along the filler (`req.E.hcomp`). Only a
+    /// homogeneous one: a family that varies is a transport, which reduces
+    /// in the scrutinee instead.
     #[allow(clippy::too_many_arguments)]
     fn eliminate_composition(
         &mut self,
@@ -370,10 +372,11 @@ impl RestrictedProducer {
         ty: &Sexp,
         ti: usize,
         data: &Data,
+        family: &Sexp,
         psi: &Sexp,
         tube: &Sexp,
         u: &Sexp,
-    ) -> Result<(Sexp, Sexp, usize)> {
+    ) -> Result<Option<(Sexp, Sexp, usize)>> {
         let (_, args) = shape(t)?;
         let (np, k) = (data.params, data.ctors.len());
         let (params, p, methods) = (&args[..np], &args[np], &args[np + 1..np + 1 + k]);
@@ -385,11 +388,10 @@ impl RestrictedProducer {
             refs.push(bi);
             weak.push(b);
         }
-        let family = data::apply(&data.ty, weak.clone());
-        if shape(&args[np + 1 + k])?.1[0] != family {
-            return Err(format!("{} composed along a varying family", data.name));
+        if *family != data::apply(&data.ty, weak.clone()) {
+            return Ok(None);
         }
-        let (fill, fi) = self.filling(&family, &Face::parse(psi)?, tube, u)?;
+        let (fill, fi) = self.filling(family, &Face::parse(psi)?, tube, u)?;
         let (p1, pi) = self.f.path.transform(p, &Op::DShift(0))?;
         let (pf, si) = self.f.path.transform(&p1, &Op::Subst(0, fill))?;
         refs.extend([fi, pi, si]);
@@ -415,7 +417,7 @@ impl RestrictedProducer {
         refs.push(self.check(d, g, phi, &out, ty)?);
         let rule = format!("req.{}.hcomp", data.elim);
         let eq = self.eq(d, g, phi, t, &out, ty, &rule, refs);
-        Ok((out, ty.clone(), eq))
+        Ok(Some((out, ty.clone(), eq)))
     }
 
     /// Composition in a declared type: a closed type returns its base; a

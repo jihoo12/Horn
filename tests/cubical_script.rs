@@ -480,6 +480,23 @@ fn constructors_with_open_parameters_keep_every_type() {
       (equal m (elim susp (nat) k (susp bool) (north south (lam a nat (plam i (merid btrue i)))) (merid 3 i0))
         north (susp bool))";
     cubical::script::run(source).unwrap();
+    // A parameter field whose own type is open does not fix the parameter.
+    let nested = "(data (box A) (z)) (data (wrap A) (w A))
+      (check c (w z) (wrap (box nat)))
+      (eval e (w z))";
+    assert!(cubical::script::run(nested).is_err());
+}
+
+/// The eliminator on a transport along a varying family reduces the
+/// transport constructorwise; only a homogeneous composition is formal.
+#[test]
+fn eliminating_a_transport_in_a_parameterized_higher_type_reduces_it() {
+    let source = "(data (susp A) (north) (south) (merid A (path north south)))
+      (def P (path (u 0) nat nat) (plam i nat))
+      (equal r (elim susp (nat) k bool (btrue btrue (lam a nat (plam i btrue)))
+          (transport j (susp (papp P j)) north))
+        btrue bool)";
+    cubical::script::run(source).unwrap();
 }
 
 #[test]

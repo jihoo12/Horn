@@ -173,8 +173,8 @@ pub fn is_declared(symbol: &str) -> bool {
     by_type(symbol).is_some() || by_elim(symbol).is_some() || by_ctor(symbol).is_some()
 }
 /// Whether a constructor term's type follows from its fields: every
-/// parameter is the type of one of them, or a recursive field's type
-/// follows from its own.
+/// parameter is the type of a field whose own type follows, or a recursive
+/// field's type follows from its own.
 pub fn determined(t: &Sexp) -> bool {
     let (head, fields): (&str, &[Sexp]) = match t {
         Sexp::Atom(a) => (a, &[]),
@@ -187,12 +187,16 @@ pub fn determined(t: &Sexp) -> bool {
         return true;
     };
     let args = &data.ctors[i].args;
-    (0..data.params).all(|j| args.iter().any(|a| matches!(a, ArgTy::Param(k) if *k == j)))
-        || args
+    let fields: Vec<(&ArgTy, &Sexp)> = args.iter().zip(fields).collect();
+    (0..data.params).all(|j| {
+        fields
             .iter()
-            .zip(fields)
-            .any(|(a, f)| matches!(a, ArgTy::Rec) && determined(f))
+            .any(|(a, f)| matches!(a, ArgTy::Param(k) if *k == j) && determined(f))
+    }) || fields
+        .iter()
+        .any(|(a, f)| matches!(a, ArgTy::Rec) && determined(f))
 }
+
 /// The argument position of a path constructor's interval.
 pub fn interval_index(symbol: &str) -> Option<usize> {
     let (data, i) = by_ctor(symbol)?;
