@@ -355,8 +355,11 @@ engine, in the context of the binders around it. It then matches that type
 against the parameter's domain, computing the type to weak-head normal form
 if the shapes differ. This step is not trusted. The application is written
 out with the arguments it found and then checked like any other term, so a
-wrong guess is reported as a type mismatch. An argument whose type cannot
-be inferred, such as an unannotated lambda, contributes nothing. If no
+wrong guess is reported as a type mismatch. A lambda argument is typed from its
+own text: its written domain, and its body's type (a body that is itself a
+lambda is typed the same way), never from a type recorded for the same
+core term at another use, which could be a different, equally valid one.
+Any other argument whose type cannot be inferred contributes nothing. If no
 argument determines an implicit argument, elaboration stops and asks for
 `(@ f)`. Implicit binders appear only at the start of a def's type, and a
 bare reference to such a def is an error.
@@ -389,6 +392,28 @@ live in and lifted (`req.shift`), so a structure's types compared under the
 laws' binders are not compared again at every depth. `Hom (op C) x y ≡ Hom C
 y x` checks, and the opposite category is an involution judgmentally:
 `op (op C) ≡ C` holds by `refl` (about 5 s).
+
+## Functors and natural transformations
+
+[functor.hcs](../examples/cubical/script/functor.hcs) (about 1.4 s) builds on
+the same definitions. It defines functors as a Σ of an object map, a
+morphism map and the two functor laws, together with:
+
+- the identity functor and composite functors, whose laws are paths built
+  from the components' laws with `ap` and `trans`;
+- the identity functor as a unit for composition on both maps, by `refl`;
+- natural transformations, and the identity on a functor, natural by the
+  target category's unit laws;
+- vertical composition, natural by associativity and the two naturality
+  squares (five steps of `trans`).
+
+The functor laws of a composite with the identity are not the original laws
+judgmentally: `trans p refl` is not `p` without regularity. So equality of
+whole functors is not by `refl`; it is equal on the object and morphism maps.
+
+An argument written as a lambda, such as `(app ap (lam k T body) p)`,
+supplies implicit arguments through its written domain (see Implicit
+arguments).
 
 ## Universe levels
 
