@@ -20,9 +20,12 @@
 //!   the standard models of inductive families. Other compositions in a
 //!   parameterized type are left without a rule.
 //!
-//! - a type with a path constructor (a higher inductive type, closed) is
-//!   not discrete: a composition in it is a formal point, and the
-//!   eliminator commutes with it along the filler (CHM 2018).
+//! - a type with a path constructor (a higher inductive type) is not
+//!   discrete: a homogeneous composition in it is a formal point, and the
+//!   eliminator commutes with it along the filler (CHM 2018). With
+//!   parameters, it also transports constructorwise; a path constructor
+//!   keeps its interval, which agrees with its boundary because endpoints
+//!   are built from constructors and fields.
 //!
 //! A path constructor has closed discrete fields and recursive fields; its
 //! endpoints are point constructors applied to its fields and closed terms,
@@ -168,6 +171,27 @@ pub fn by_ctor_name(name: &str) -> Option<(Rc<Data>, usize)> {
 /// Any declared head: a type, constructor or eliminator symbol.
 pub fn is_declared(symbol: &str) -> bool {
     by_type(symbol).is_some() || by_elim(symbol).is_some() || by_ctor(symbol).is_some()
+}
+/// Whether a constructor term's type follows from its fields: every
+/// parameter is the type of one of them, or a recursive field's type
+/// follows from its own.
+pub fn determined(t: &Sexp) -> bool {
+    let (head, fields): (&str, &[Sexp]) = match t {
+        Sexp::Atom(a) => (a, &[]),
+        Sexp::List(xs) => (
+            xs.first().and_then(|h| h.atom().ok()).unwrap_or(""),
+            &xs[1..],
+        ),
+    };
+    let Some((data, i)) = by_ctor(head) else {
+        return true;
+    };
+    let args = &data.ctors[i].args;
+    (0..data.params).all(|j| args.iter().any(|a| matches!(a, ArgTy::Param(k) if *k == j)))
+        || args
+            .iter()
+            .zip(fields)
+            .any(|(a, f)| matches!(a, ArgTy::Rec) && determined(f))
 }
 /// The argument position of a path constructor's interval.
 pub fn interval_index(symbol: &str) -> Option<usize> {
@@ -736,16 +760,29 @@ impl Data {
         // The eliminator on a formal composition (CHM 2018): composition in
         // the motive along the filler, of the eliminator on tube and base.
         if self.is_higher() {
-            let scrutinee = format!("(comp {t} ?phi ?t ?u)");
+            // The composition's family is the eliminator's type, weakened by
+            // its dimension: a homogeneous composition.
+            let weak: Vec<String> = (0..np).map(|j| format!("?B{j}")).collect();
+            let family = if np == 0 {
+                t.clone()
+            } else {
+                format!("({t} {})", weak.join(" "))
+            };
+            let scrutinee = format!("(comp {family} ?phi ?t ?u)");
             let shifted: Vec<String> = (0..k).map(|i| format!("?n{i}")).collect();
-            let mut prems = vec![
-                format!("(rhas ?d ?g ?psi {} ?ty)", head_args(&scrutinee)),
-                format!("(filldef {t} ?phi ?t ?u ?fill)"),
+            let mut prems = vec![format!("(rhas ?d ?g ?psi {} ?ty)", head_args(&scrutinee))];
+            prems.extend((0..np).map(|j| format!("(dshift ?A{j} z ?B{j})")));
+            prems.extend([
+                format!("(filldef {family} ?phi ?t ?u ?fill)"),
                 "(dshift ?p z ?p1)".to_owned(),
                 "(subst ?p1 z ?fill ?pf)".to_owned(),
-            ];
+            ]);
             prems.extend((0..k).map(|i| format!("(dshift ?m{i} z ?n{i})")));
-            let tube = format!("({e} ?p1 {} ?t)", shifted.join(" "));
+            let mut inner = weak.clone();
+            inner.push("?p1".into());
+            inner.extend(shifted.iter().cloned());
+            inner.push("?t".into());
+            let tube = format!("({e} {})", inner.join(" "));
             let rhs = format!("(comp ?pf ?phi {tube} {})", head_args("?u"));
             prems.push(format!("(rhas ?d ?g ?psi {rhs} ?ty)"));
             let _ = writeln!(
@@ -791,16 +828,23 @@ impl Data {
         // Composition. A higher inductive type is not discrete: a
         // composition in it is a formal point, taken apart by the
         // eliminator's hcomp rule above.
-        if self.is_higher() {
+        if self.is_higher() && np == 0 {
         } else if np == 0 {
             let _ = writeln!(
                 w,
                 "(rule req.comp-{t} ((rhas ?d ?g ?psi (comp {t} ?phi ?t ?b) {t})) (req ?d ?g ?psi (comp {t} ?phi ?t ?b) ?b {t}))"
             );
         } else {
+            // Transport constructorwise, a path constructor at the same
+            // interval: its endpoints are constructors of its fields, so
+            // transport commutes with them strictly.
             for c in &self.ctors {
                 let a: Vec<String> = (0..c.args.len()).map(|j| format!("?a{j}")).collect();
                 let wrap = |xs: &[String]| {
+                    let mut xs = xs.to_vec();
+                    if c.boundary.is_some() {
+                        xs.push("?i".into());
+                    }
                     if xs.is_empty() {
                         c.symbol.clone()
                     } else {

@@ -306,11 +306,33 @@ elim P m… (hcomp^j_T [φ ↦ u] u0)
 ```
 
 with the filler given by `filldef`, so the motive may depend on the point.
+For a type with parameters the composition must be homogeneous: its family
+is the type at the parameters weakened by the composition's dimension.
 A type with a path constructor is not discrete, so it gets no rule that
 returns a composition's base. With the declared circle, `wind (lp · lp)`
 also computes to `(pos 2)` (about 60 s), through this dependent rule
-rather than the built-in `s1rec` one. Path constructors need a type without
-parameters and point endpoints; higher-dimensional constructors (a torus's
+rather than the built-in `s1rec` one.
+
+A higher inductive type may have parameters
+([hit-params.hcs](../examples/cubical/script/hit-params.hcs), about 0.5 s),
+and its fields may be at a parameter:
+
+```text
+(data (susp A) (north) (south) (merid A (path north south)))
+(data (ptrunc A) (inc A) (squash (x (ptrunc A)) (y (ptrunc A)) (path x y)))
+(equal flip-merid
+  (plam i (transport j (susp (papp flip j)) (merid btrue i)))   ; flip = ua not
+  (plam i (merid bfalse i))
+  (path (susp bool) north south))
+```
+
+Transport along the empty face moves a path constructor's fields and keeps
+its interval, `transp (T A) (c a… r) = c (transp A a)… r`. Endpoints are
+built from constructors and fields, and transport commutes with those
+strictly, so this agrees with the boundary at `r = 0` and `r = 1`; no
+correcting composition is needed (CHM 2018 need one for general endpoints).
+Transport of a formal composition has no rule yet and stays unevaluated.
+Endpoints are point terms; higher-dimensional constructors (a torus's
 square) are not supported.
 
 ## Universe levels

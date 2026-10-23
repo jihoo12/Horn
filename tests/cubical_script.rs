@@ -453,9 +453,40 @@ fn declared_higher_inductive_types_compute() {
 }
 
 #[test]
-fn path_constructors_are_restricted_to_closed_types_and_point_endpoints() {
+fn parameterized_higher_inductive_types_transport_and_eliminate() {
+    let script =
+        cubical::script::run(include_str!("../examples/cubical/script/hit-params.hcs")).unwrap();
+    let used = &script.certified.rules_used;
+    for rule in [
+        "req.comp-ty/susp.ctor/susp/merid",
+        "req.comp-ty/ptrunc.ctor/ptrunc/squash",
+        "req.elim/ptrunc.hcomp",
+        "req.elim/ptrunc.ctor/ptrunc/squash",
+        "req.ctor/ptrunc/squash-0",
+    ] {
+        assert!(used.iter().any(|r| r == rule), "{rule}");
+    }
+}
+
+/// A constructor whose fields leave a parameter open has no single type, so
+/// checking it at one does not make that type its inferred one.
+#[test]
+fn constructors_with_open_parameters_keep_every_type() {
+    let source = "(data (box A) (z) (s (box A)))
+      (data (susp A) (north) (south) (merid A (path north south)))
+      (def f (pi x (box nat) (box bool))
+        (lam x (box nat) (elim box (nat) k (box bool) ((s z) (lam y (box nat) (lam h (box bool) (s h)))) x)))
+      (equal e (app f (s z)) (s (s z)) (box bool))
+      (equal m (elim susp (nat) k (susp bool) (north south (lam a nat (plam i (merid btrue i)))) (merid 3 i0))
+        north (susp bool))";
+    cubical::script::run(source).unwrap();
+}
+
+#[test]
+fn path_constructors_are_restricted_to_point_endpoints() {
     for bad in [
-        "(data (t A) (a) (p (path a a)))",
+        "(data (t A) (a A) (p (x A) (path (a x) a)))",
+        "(data (t A) (a A) (p (x A) (path (a btrue) (a x))))",
         "(data t (a) (p (path a q)))",
         "(data t (a) (p (path a a)) (q (path p a)))",
         // An endpoint field must have the type of its position.

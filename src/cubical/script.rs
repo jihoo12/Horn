@@ -1083,18 +1083,6 @@ impl Elaborator {
                 };
                 args.push(arg);
             }
-            if boundary.is_some() {
-                if !params.is_empty() {
-                    return Err(format!(
-                        "{name}: path constructors need a type without parameters"
-                    ));
-                }
-                if args.iter().any(|a| matches!(a, ArgTy::Param(_))) {
-                    return Err(format!(
-                        "path constructor {cname}: fields must be bool, nat, earlier closed data types or the type itself"
-                    ));
-                }
-            }
             out.push(Ctor {
                 name: cname.to_owned(),
                 symbol: format!("ctor/{name}/{cname}"),
@@ -1144,6 +1132,7 @@ impl Elaborator {
                 (None, ArgTy::Rec) => true,
                 (Some(ArgTy::Rec), ArgTy::Rec) => true,
                 (Some(ArgTy::Closed(a)), ArgTy::Closed(b)) => a == b,
+                (Some(ArgTy::Param(a)), ArgTy::Param(b)) => a == b,
                 _ => false,
             };
             if !fits {
@@ -1151,8 +1140,12 @@ impl Elaborator {
             }
             return Ok(End::Field(k));
         }
-        if let Some(ArgTy::Closed(_)) = at {
-            return Ok(End::Closed(self.term(s, &Names::default())?));
+        match at {
+            Some(ArgTy::Closed(_)) => return Ok(End::Closed(self.term(s, &Names::default())?)),
+            Some(ArgTy::Param(_)) => {
+                return Err(format!("endpoint {s} at a parameter must be a field"));
+            }
+            _ => {}
         }
         let (head, args) = match s {
             Sexp::Atom(a) => (&**a, &[][..]),

@@ -1,0 +1,52 @@
+; Higher inductive types with parameters: the suspension and the
+; propositional truncation of any type. Transport in them moves the fields
+; and keeps a path constructor's interval; the eliminator takes a
+; composition apart along the filler, as for closed types.
+(data (susp A) (north) (south) (merid A (path north south)))
+(data (ptrunc A) (inc A) (squash (x (ptrunc A)) (y (ptrunc A)) (path x y)))
+
+; The suspension is functorial.
+(def susp-map (pi f (pi x nat bool) (pi s (susp nat) (susp bool)))
+  (lam f (pi x nat bool) (lam s (susp nat)
+    (elim susp (nat) k (susp bool)
+      (north south (lam a nat (plam i (merid (app f a) i))))
+      s))))
+(equal map-merid
+  (plam i (app (app susp-map (lam x nat btrue)) (merid 3 i)))
+  (plam i (merid btrue i))
+  (path (susp bool) north south))
+
+; Any two points of a truncation are equal, and maps out into a truncation
+; send squash to squash.
+(def any-two (pi a nat (pi b nat (path (ptrunc nat) (inc a) (inc b))))
+  (lam a nat (lam b nat (plam i (squash (inc a) (inc b) i)))))
+(def bump (pi s (ptrunc nat) (ptrunc nat))
+  (lam s (ptrunc nat)
+    (elim ptrunc (nat) k (ptrunc nat)
+      ((lam a nat (inc (suc a)))
+       (lam x (ptrunc nat) (lam y (ptrunc nat)
+         (lam hx (ptrunc nat) (lam hy (ptrunc nat) (plam i (squash hx hy i)))))))
+      s)))
+(equal bump-squash
+  (plam i (app bump (squash (inc 0) (inc 1) i)))
+  (plam i (squash (inc 1) (inc 2) i))
+  (path (ptrunc nat) (inc 1) (inc 2)))
+(equal bump-composition
+  (plam i (app bump (hcomp j (ptrunc nat) (((= i 0) (inc 0)) ((= i 1) (inc 1))) (squash (inc 0) (inc 1) i))))
+  (plam i (hcomp j (ptrunc nat) (((= i 0) (inc 1)) ((= i 1) (inc 2))) (squash (inc 1) (inc 2) i)))
+  (path (ptrunc nat) (inc 1) (inc 2)))
+
+; Transport along the univalence path of negation.
+(def not (pi b bool bool) (lam b bool (bif c bool bfalse btrue b)))
+(def not-not (pi b bool (path bool (app not (app not b)) b))
+  (lam b bool (bif c (path bool (app not (app not c)) c) (plam i btrue) (plam i bfalse) b)))
+(def flip (path (u 0) bool bool)
+  (app ua bool bool (pair not (app iso-equiv bool bool not not not-not not-not))))
+(equal flip-merid
+  (plam i (transport j (susp (papp flip j)) (merid btrue i)))
+  (plam i (merid bfalse i))
+  (path (susp bool) north south))
+(equal flip-squash
+  (plam i (transport j (ptrunc (papp flip j)) (squash (inc btrue) (inc bfalse) i)))
+  (plam i (squash (inc bfalse) (inc btrue) i))
+  (path (ptrunc bool) (inc bfalse) (inc btrue)))
