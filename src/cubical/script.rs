@@ -1585,10 +1585,87 @@ pub fn run(source: &str) -> Result<Script> {
     run_with(source, Certificate::Oracle)
 }
 
+/// `run` on a file, whose imports are found next to it.
+pub fn run_file(path: &std::path::Path, certificate: Certificate) -> Result<Script> {
+    let source = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let base = path.parent().unwrap_or(std::path::Path::new("."));
+    let mut stack = vec![canonical(path)?];
+    let expanded = expand(&source, base, &mut stack, &mut Default::default(), true)?;
+    run_expanded(expanded, certificate)
+}
+
 /// `run`, choosing whether the kernel checks an oracle or the derivation
 /// itself; both are checked by the same kernel against the same goals.
+/// Imports are found relative to the working directory.
 pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
-    let source = source.to_owned();
+    let base = std::path::Path::new(".");
+    let expanded = expand(source, base, &mut Vec::new(), &mut Default::default(), true)?;
+    run_expanded(expanded, certificate)
+}
+
+fn canonical(path: &std::path::Path) -> Result<std::path::PathBuf> {
+    path.canonicalize()
+        .map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The script with every `(import FILE)` replaced by FILE's declarations
+/// (`data`, `def`, `def-poly`, and its own imports), each file once, in the
+/// order first imported. An imported file's checks and evaluations are its
+/// own tests and are not run again. Its definitions are elaborated and
+/// checked here like any other: an import adds no trust.
+fn expand(
+    source: &str,
+    base: &std::path::Path,
+    stack: &mut Vec<std::path::PathBuf>,
+    seen: &mut std::collections::HashSet<std::path::PathBuf>,
+    whole: bool,
+) -> Result<String> {
+    let mut out = String::new();
+    for form in crate::sexp::parse(source)? {
+        let head = match &form {
+            crate::sexp::Sexp::List(xs) => xs.first().and_then(|h| h.atom().ok()),
+            _ => None,
+        };
+        match (head, &form) {
+            (Some("import"), crate::sexp::Sexp::List(xs)) => {
+                let [_, file] = &xs[..] else {
+                    return Err(format!("invalid import {form}"));
+                };
+                let file = file.atom()?.trim_matches('"');
+                let path = canonical(&base.join(file))?;
+                if stack.contains(&path) {
+                    return Err(format!("import cycle through {}", path.display()));
+                }
+                if !seen.insert(path.clone()) {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path)
+                    .map_err(|e| format!("{}: {e}", path.display()))?;
+                let dir = path
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."))
+                    .to_owned();
+                stack.push(path.clone());
+                let inner = expand(&text, &dir, stack, seen, false)
+                    .map_err(|e| format!("{}: {e}", path.display()))?;
+                stack.pop();
+                out.push_str(&inner);
+            }
+            (Some("data" | "def" | "def-poly"), _) => {
+                out.push_str(&form.to_string());
+                out.push('\n');
+            }
+            _ if whole => {
+                out.push_str(&form.to_string());
+                out.push('\n');
+            }
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
+fn run_expanded(source: String, certificate: Certificate) -> Result<Script> {
     // Terms are interned per thread, so parsing happens on the worker.
     let (certified, evaluations) = certify(super::core_theory(), certificate, move || {
         let forms = parse(&source)?;

@@ -857,7 +857,7 @@ fn types_that_compute_to_a_former_support_eta_and_beta() {
 /// later component's type under binders recovers the type it was checked at.
 #[test]
 fn categories_and_their_opposites_check() {
-    cubical::script::run(include_str!("../examples/cubical/script/category.hcs")).unwrap();
+    example("category.hcs");
 }
 
 /// A definition is a constant whose typing and unfolding rules both need
@@ -906,9 +906,8 @@ fn equations_are_derived_once_and_lifted_under_binders() {
 /// composition, through the target category's laws.
 #[test]
 fn functors_and_natural_transformations_check() {
-    let script =
-        cubical::script::run(include_str!("../examples/cubical/script/functor.hcs")).unwrap();
-    assert_eq!(script.certified.checked.goals, 18);
+    let script = example("functor.hcs");
+    assert_eq!(script.certified.checked.goals, 20);
 }
 
 /// A written lambda argument has no inferable core type, but its domain is
@@ -931,4 +930,44 @@ fn implicit_arguments_are_read_from_written_lambdas() {
     )
     .unwrap();
     assert_eq!(script.evaluations[0].value, "bool");
+}
+
+/// Run an example script from its file, so that its imports resolve.
+fn example(name: &str) -> cubical::script::Script {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/cubical/script")
+        .join(name);
+    cubical::script::run_file(&path, cubical::generate::Certificate::Oracle).unwrap()
+}
+
+/// An import brings in a file's declarations once, however often it is
+/// imported, and not its checks; a cycle is an error.
+#[test]
+fn imports_bring_declarations_once_and_reject_cycles() {
+    let dir = std::env::temp_dir().join(format!("horn-imports-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let write = |name: &str, text: &str| std::fs::write(dir.join(name), text).unwrap();
+    write("base.hcs", "(def two nat 2)\n(check bad two bool)\n");
+    write("left.hcs", "(import base.hcs)\n(def three nat (suc two))\n");
+    write(
+        "right.hcs",
+        "(import base.hcs)\n(def four nat (suc (suc two)))\n",
+    );
+    write(
+        "main.hcs",
+        "(import left.hcs)\n(import right.hcs)\n(eval seven (app (lam n nat (suc (suc (suc n)))) four))\n",
+    );
+    let run = |name: &str| {
+        cubical::script::run_file(&dir.join(name), cubical::generate::Certificate::Direct)
+    };
+    // base.hcs is imported twice and checked once; its failing check is its
+    // own test and is not run here.
+    let script = run("main.hcs").unwrap();
+    assert_eq!(script.evaluations[0].value, "7");
+    assert_eq!(script.certified.checked.goals, 4);
+    write("a.hcs", "(import b.hcs)\n(def a nat 0)\n");
+    write("b.hcs", "(import a.hcs)\n(def b nat 0)\n");
+    assert!(run("a.hcs").err().unwrap().contains("import cycle"));
+    assert!(run("missing.hcs").is_err());
+    std::fs::remove_dir_all(&dir).unwrap();
 }

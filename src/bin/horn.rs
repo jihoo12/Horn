@@ -106,14 +106,13 @@ fn run_cubical(args: &[String]) -> Result<(), String> {
             {
                 return Err(format!("{dir} already exists"));
             }
-            let source = fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
             // An oracle is only built when it is written out; otherwise the
             // kernel checks the derivation as the engine streams it.
             let certificate = match output {
                 Some(_) => cubical::generate::Certificate::Oracle,
                 None => cubical::generate::Certificate::Direct,
             };
-            let script = cubical::script::run_with(&source, certificate)
+            let script = cubical::script::run_file(std::path::Path::new(path), certificate)
                 .map_err(|e| format!("{path}: {e}"))?;
             if let Some(dir) = output {
                 fs::create_dir(dir)

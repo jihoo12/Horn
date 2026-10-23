@@ -126,7 +126,7 @@ reports them (`relies on N of M rules`, and `--emit` writes `rules-used`):
 | `circle.hcs`: winding numbers, including `loop · loop` | 370 of 490 (56 generated) |
 | `hit.hcs`: declared circle and suspension | 456 of 652 (161 generated) |
 | `category.hcs`: categories, opposites, `op (op C) ≡ C` | 164 of 453 (36 generated) |
-| `functor.hcs`: functors and natural transformations | 229 of 516 (66 generated) |
+| `functor.hcs`: functors and natural transformations | 229 of 530 (66 generated) |
 | ua-transport, univalence, canonicity (bundled, snapshot theory) | 253, 267, 297 of 396 |
 
 A `def NAME TYPE TERM` is the constant `def/NAME` with seven generated
