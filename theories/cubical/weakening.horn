@@ -1,0 +1,10 @@
+; Appended after scoped.horn.
+; Equation weakening, as rhas.shift is for typing: an equation keeps holding
+; under one more ordinary binder, with its terms and type shifted past it.
+; Weakening is admissible for every equality rule; this states it, so that
+; an equation is derived once, in the shortest context its terms live in,
+; and lifted, instead of being derived again under every binder it is
+; carried under.
+(rule req.shift ((req ?d ?g ?phi ?t ?s ?a) (rhas ?d ?g ?phi ?b (u ?l))
+    (shift ?t z ?t2) (shift ?s z ?s2) (shift ?a z ?a2))
+  (req ?d (cons ?b ?g) ?phi ?t2 ?s2 ?a2))

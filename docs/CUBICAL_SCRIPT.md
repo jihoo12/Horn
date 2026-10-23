@@ -363,7 +363,7 @@ bare reference to such a def is an error.
 
 ## Categories
 
-[category.hcs](../examples/cubical/script/category.hcs) (about 0.5 s) defines
+[category.hcs](../examples/cubical/script/category.hcs) (about 6 s) defines
 wild precategories as a nested Σ: objects in `U1`, morphisms in `U0`, and
 the unit and associativity laws as paths. It then defines projections, the
 category of types and functions, whose laws hold by `refl`, and the
@@ -384,10 +384,11 @@ Two kinds of engine support make this work:
 Definitions are constants, so terms stay the size they are written at, and
 β through a definition's annotated body derives the typing of an
 introduction-form reduct by subject reduction instead of checking the body
-again. `Hom (op C) x y ≡ Hom C y x` and `Ob (op (op C)) ≡ Ob C` check
-(about 0.5 s together). `Hom (op (op C)) x y ≡ Hom C x y` does not yet
-finish: proving it under the laws' binders weakens typings one binder at a
-time (`rhas.shift`), and those steps multiply.
+again. Equations, like typings, are derived in the shortest context their terms
+live in and lifted (`req.shift`), so a structure's types compared under the
+laws' binders are not compared again at every depth. `Hom (op C) x y ≡ Hom C
+y x` checks, and the opposite category is an involution judgmentally:
+`op (op C) ≡ C` holds by `refl` (about 5 s).
 
 ## Universe levels
 
@@ -488,7 +489,7 @@ axiom, and neither adds a rule.
 ## Trust
 
 The elaborator, the engine's search and the oracle encoder are untrusted.
-Scripts are checked against the core theory (403 rules: the bundled theory
+Scripts are checked against the core theory (404 rules: the bundled theory
 without its unrestricted judgment layer and one subsumed rule; see
 [TRUST.md](TRUST.md)) plus the rules of their data declarations and
 definitions. Acceptance

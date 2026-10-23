@@ -269,6 +269,34 @@ impl RestrictedProducer {
         self.remember(d, &g, phi, &t, &a, id);
         Ok((t, a, id))
     }
+    /// Lift `req d rest φ a0 b0 ty0` (id0) to the context `cons bind rest`,
+    /// where it must state exactly `a = b : ty`.
+    #[allow(clippy::too_many_arguments)] // Context split, both equations, and the proof.
+    fn lift_eq(
+        &mut self,
+        d: usize,
+        bind: &Sexp,
+        rest: &Sexp,
+        phi: &Face,
+        lowered: (&Sexp, &Sexp, &Sexp),
+        id0: usize,
+        want: (&Sexp, &Sexp, &Sexp),
+    ) -> Result<usize> {
+        let (ub, bi) = self.infer(d, rest, phi, bind)?;
+        level(&ub)?;
+        let mut out = Vec::new();
+        let mut refs = vec![id0, bi];
+        for t in [lowered.0, lowered.1, lowered.2] {
+            let (t2, ti) = self.f.path.transform(t, &Op::Shift(0))?;
+            out.push(t2);
+            refs.push(ti);
+        }
+        if (&out[0], &out[1], &out[2]) != want {
+            return Err("lowering did not invert".into());
+        }
+        let g = cons(bind.clone(), rest.clone());
+        Ok(self.eq(d, &g, phi, want.0, want.1, want.2, "req.shift", refs))
+    }
     fn lower(&mut self, t: &Sexp) -> Result<Sexp> {
         Ok(self.f.path.transform(t, &Op::Subst(0, atom("zero")))?.0)
     }
@@ -1989,6 +2017,18 @@ impl RestrictedProducer {
                 self.constraints.push(constraint);
             }
             return Ok(self.emit("hole", vec![], key));
+        }
+        // An equation whose terms and type do not use the newest variable
+        // is derived without it and lifted (req.shift), so it is derived
+        // once however many binders it is carried under.
+        if let Some((bind, rest)) = self.strengthenable(g, a, Some(b))
+            && !mentions(ty, 0)
+            && let (Ok(a0), Ok(b0), Ok(ty0)) = (self.lower(a), self.lower(b), self.lower(ty))
+            && let Ok(id0) = self.equality(d, &rest, phi, &a0, &b0, &ty0)
+            && let Ok(id) = self.lift_eq(d, &bind, &rest, phi, (&a0, &b0, &ty0), id0, (a, b, ty))
+        {
+            self.equalities.insert(key, id);
+            return Ok(id);
         }
         if !self.equality_active.insert(key.clone()) {
             return Err(format!("cyclic equality search: {a} versus {b} : {ty}"));

@@ -51,6 +51,10 @@ pub const FRAGMENTS: &[(&str, &str)] = &[
     ("circle", include_str!("../theories/cubical/circle.horn")),
     ("closed", include_str!("../theories/cubical/closed.horn")),
     ("scoped", include_str!("../theories/cubical/scoped.horn")),
+    (
+        "weakening",
+        include_str!("../theories/cubical/weakening.horn"),
+    ),
 ];
 
 /// Predicates of the snapshot's unrestricted judgment layer. The restricted
