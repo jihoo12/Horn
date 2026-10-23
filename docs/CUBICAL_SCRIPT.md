@@ -390,6 +390,29 @@ laws' binders are not compared again at every depth. `Hom (op C) x y ≡ Hom C
 y x` checks, and the opposite category is an involution judgmentally:
 `op (op C) ≡ C` holds by `refl` (about 5 s).
 
+## Functors and natural transformations
+
+[functor.hcs](../examples/cubical/script/functor.hcs) (about 1.4 s) builds on
+the same definitions. It defines functors as a Σ of an object map, a
+morphism map and the two functor laws, together with:
+
+- the identity functor and composite functors, whose laws are paths built
+  from the components' laws with `ap` and `trans`;
+- the identity functor as a unit for composition on both maps, by `refl`;
+- natural transformations, and the identity on a functor, natural by the
+  target category's unit laws;
+- vertical composition, natural by associativity and the two naturality
+  squares (five steps of `trans`).
+
+The functor laws of a composite with the identity are not the original laws
+judgmentally: `trans p refl` is not `p` without regularity. So equality of
+whole functors is not by `refl`; it is equal on the object and morphism maps.
+
+An argument written as a lambda, `(app ap (lam k T body) p)`, has no
+inferable core type, since the core lambda carries no domain. The written
+domain `T` and the body's inferred type then give its type for inferring
+implicit arguments.
+
 ## Universe levels
 
 `ua` and `iso-equiv` are the prelude at level 0; `(ua-at L)` and

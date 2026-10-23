@@ -115,17 +115,18 @@ reports them (`relies on N of M rules`, and `--emit` writes `rules-used`):
 
 | Result | Rules used |
 | --- | ---: |
-| `nat.hcs`: arithmetic and induction on nat | 109 of 432 (7 generated) |
-| `levels.hcs`: ua one universe up | 269 of 439 (18 generated) |
-| `bool.hcs`: transport along ua not | 297 of 432 (16 generated) |
-| `poly.hcs`: univalence for every level | 304 of 404 |
-| `function.hcs`: a function moved along ua | 309 of 439 (22 generated) |
-| `list.hcs`: lists moved along ua | 329 of 470 (37 generated) |
-| `data.hcs`: declared types and ua | 350 of 524 (77 generated) |
-| `binary.hcs`: addition moved to binary numbers | 380 of 546 (94 generated) |
-| `circle.hcs`: winding numbers, including `loop · loop` | 371 of 490 (56 generated) |
-| `hit.hcs`: declared circle and suspension | 457 of 652 (161 generated) |
-| `category.hcs`: categories, opposites, `op (op C) ≡ C` | 165 of 453 (36 generated) |
+| `nat.hcs`: arithmetic and induction on nat | 108 of 432 (7 generated) |
+| `levels.hcs`: ua one universe up | 268 of 439 (18 generated) |
+| `bool.hcs`: transport along ua not | 296 of 432 (16 generated) |
+| `poly.hcs`: univalence for every level | 303 of 404 |
+| `function.hcs`: a function moved along ua | 308 of 439 (22 generated) |
+| `list.hcs`: lists moved along ua | 328 of 470 (37 generated) |
+| `data.hcs`: declared types and ua | 349 of 524 (77 generated) |
+| `binary.hcs`: addition moved to binary numbers | 379 of 546 (94 generated) |
+| `circle.hcs`: winding numbers, including `loop · loop` | 370 of 490 (56 generated) |
+| `hit.hcs`: declared circle and suspension | 456 of 652 (161 generated) |
+| `category.hcs`: categories, opposites, `op (op C) ≡ C` | 164 of 453 (36 generated) |
+| `functor.hcs`: functors and natural transformations | 229 of 516 (66 generated) |
 | ua-transport, univalence, canonicity (bundled, snapshot theory) | 253, 267, 297 of 396 |
 
 A `def NAME TYPE TERM` is the constant `def/NAME` with seven generated

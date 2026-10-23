@@ -900,3 +900,26 @@ fn equations_are_derived_once_and_lifted_under_binders() {
     .unwrap();
     assert!(script.certified.rules_used.iter().any(|r| r == "req.shift"));
 }
+
+/// Functors and natural transformations: composites, the identity functor
+/// as a unit on both maps, and the naturality of identity and vertical
+/// composition, through the target category's laws.
+#[test]
+fn functors_and_natural_transformations_check() {
+    let script =
+        cubical::script::run(include_str!("../examples/cubical/script/functor.hcs")).unwrap();
+    assert_eq!(script.certified.checked.goals, 18);
+}
+
+/// A written lambda argument has no inferable core type, but its domain is
+/// written: implicit arguments are read from it and its body's type.
+#[test]
+fn implicit_arguments_are_read_from_written_lambdas() {
+    cubical::script::run(
+        "(def ap (pi {A} (u 0) (pi {B} (u 0) (pi {x} A (pi {y} A
+            (pi f (pi a A B) (pi p (path A x y) (path B (app f x) (app f y))))))))
+           (lam f (pi a A B) (lam p (path A x y) (plam i (app f (papp p i))))))
+         (check suc-ap (app ap (lam n nat (suc n)) (plam i 2)) (path nat 3 3))",
+    )
+    .unwrap();
+}

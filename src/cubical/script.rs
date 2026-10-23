@@ -330,6 +330,7 @@ fn producer() -> RestrictedProducer {
     p.reuse_certified_checks();
     p.strengthen_typings();
     p.keep_reduct_types();
+    p.reuse_beta_typing();
     p.enable_composition_computation();
     p.closed_term_reuse = true;
     p
@@ -447,7 +448,7 @@ impl Elaborator {
         let mut solved: Vec<Option<Sexp>> = vec![None; k];
         let context = self.context(names);
         let d = names.dimensions.len();
-        for (j, a) in args.iter().enumerate() {
+        for (j, src) in args.iter().enumerate() {
             let ("pi", [dom, rest]) = shape(&cod)? else {
                 break;
             };
@@ -457,14 +458,18 @@ impl Elaborator {
                 break;
             }
             let Some(g) = &context else { break };
-            let Ok(a) = self.term_unrecorded(a, names) else {
+            let Ok(a) = self.term_unrecorded(src, names) else {
                 continue;
             };
             if mentions(&a, &["hole"]) {
                 continue;
             }
-            let Some(found) = self.quiet_infer(d, g, &a) else {
-                continue;
+            let found = match self.quiet_infer(d, g, &a) {
+                Some(found) => found,
+                None => match self.written_lambda_type(src, &a, names, g) {
+                    Some(found) => found,
+                    None => continue,
+                },
             };
             let mut progress = Vec::new();
             if !matches_domain(&dom, &found, j, k, (0, 0), &mut progress) {
@@ -479,6 +484,36 @@ impl Elaborator {
             }
         }
         self.finish_implicit(name, f, solved, &implicit_names)
+    }
+
+    /// A lambda's type from its written domain and its body's inferred
+    /// type, for an argument the engine cannot infer as a whole: the core
+    /// lambda carries no domain.
+    fn written_lambda_type(
+        &mut self,
+        src: &Sexp,
+        core: &Sexp,
+        names: &Names,
+        g: &Sexp,
+    ) -> Option<Sexp> {
+        let Sexp::List(xs) = src else { return None };
+        let [head, x, domain, _] = &xs[..] else {
+            return None;
+        };
+        let ("lam", [body]) = shape(core).ok()? else {
+            return None;
+        };
+        if *head != atom("lam") {
+            return None;
+        }
+        let domain = self.term_unrecorded(domain, names).ok()?;
+        if mentions(&domain, &["hole"]) {
+            return None;
+        }
+        binder(x).ok()?;
+        let inner = call("cons", [domain.clone(), g.clone()]);
+        let codomain = self.quiet_infer(names.dimensions.len(), &inner, body)?;
+        Some(call("pi", [domain, codomain]))
     }
 
     fn finish_implicit(
