@@ -207,6 +207,18 @@ impl RestrictedProducer {
         let (ah, ax) = shape(a)?;
         let (bh, bx) = shape(b)?;
         let (th, tx) = shape(ty)?;
+        // Eta and the congruence of introduction forms need the type former:
+        // at a type that only computes to one (a definition or a redex),
+        // compare at its weak-head normal form.
+        let intro = |h: &str| matches!(h, "lam" | "pair" | "plam" | "glue");
+        if (intro(ah) || intro(bh)) && !matches!(th, "pi" | "sigma" | "path" | "glue-type") {
+            let (universe, _) = self.infer(d, g, phi, ty)?;
+            let (normal, _) = self.whnf(d, g, phi, ty, &universe, super::FUEL_TYPES)?;
+            if normal != *ty {
+                let eq = self.equality(d, g, phi, a, b, &normal)?;
+                return self.retype_eq(d, g, phi, a, b, &normal, ty, eq);
+            }
+        }
         // Eta is expanded only on one side. Both-pair/both-plam cases below
         // compare the components/bodies, so this search cannot eta-loop.
         if ah == "lam" && bh != "lam" && th == "pi" {
@@ -446,7 +458,7 @@ impl RestrictedProducer {
                 ("req.plam-cong", vec![ai, bi, gi, phii, e])
             }
             ("app", [af, aa], [bf, ba], _, _) => {
-                let (ft, _) = self.infer(d, g, phi, af)?;
+                let (ft, _) = self.infer_as(d, g, phi, af, "pi")?;
                 let ("pi", [dom, cod]) = shape(&ft)? else {
                     return Err("application congruence expects Pi".into());
                 };
@@ -468,7 +480,7 @@ impl RestrictedProducer {
                 return self.retype_eq(d, g, phi, a, b, &bt, ty, eq);
             }
             (head @ ("fst" | "snd"), [at], [bt], _, _) => {
-                let (pt, _) = self.infer(d, g, phi, at)?;
+                let (pt, _) = self.infer_as(d, g, phi, at, "sigma")?;
                 let ("sigma", [dom, cod]) = shape(&pt)? else {
                     return Err("projection congruence expects Sigma".into());
                 };
@@ -503,7 +515,7 @@ impl RestrictedProducer {
                 return self.retype_eq(d, g, phi, a, b, &result_ty, ty, eq);
             }
             ("papp", [ap, ar], [bp, br], _, _) => {
-                let (pt, _) = self.infer(d, g, phi, ap)?;
+                let (pt, _) = self.infer_as(d, g, phi, ap, "path")?;
                 let ("path", [family, _, _]) = shape(&pt)? else {
                     return Err("path congruence expects PathP".into());
                 };

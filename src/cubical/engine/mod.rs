@@ -27,6 +27,7 @@ pub mod homotopy_frontend;
 pub mod identity_frontend;
 pub mod isequiv_prop_frontend;
 pub mod iso_equiv_frontend;
+pub mod lower;
 pub mod path_frontend;
 pub mod restricted_frontend;
 pub mod term;

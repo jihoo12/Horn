@@ -69,6 +69,28 @@ impl RestrictedProducer {
     /// of every type mentioning it, can still infer it. Computation through
     /// such annotations is handled in `reduce_typed`.
     #[allow(clippy::too_many_arguments)] // Equation, reduct, and its type.
+    /// An equation `a = b : ty` at the type former `former`: at `ty` if it is
+    /// one, else at its weak-head normal form, when that is.
+    #[allow(clippy::too_many_arguments)]
+    fn at_former(
+        &mut self,
+        d: usize,
+        g: &Sexp,
+        phi: &Face,
+        a: &Sexp,
+        b: &Sexp,
+        ty: Sexp,
+        eq: usize,
+        former: &str,
+    ) -> Result<(Sexp, usize)> {
+        match self.computed_former(d, g, phi, &ty, former)? {
+            Some(normal) if normal != ty => {
+                let eq = self.retype_eq(d, g, phi, a, b, &ty, &normal, eq)?;
+                Ok((normal, eq))
+            }
+            _ => Ok((ty, eq)),
+        }
+    }
     pub(super) fn keep_type(
         &mut self,
         d: usize,
@@ -130,6 +152,7 @@ impl RestrictedProducer {
                 if f2 == *f {
                     return Ok(None);
                 }
+                let (ft, ef) = self.at_former(d, g, phi, f, &f2, ft, ef, "pi")?;
                 let ("pi", [dom, cod]) = shape(&ft)? else {
                     return Err("eliminator application expects Pi".into());
                 };
@@ -158,6 +181,8 @@ impl RestrictedProducer {
                 if line2 == *line {
                     return Ok(None);
                 }
+                let (line_ty, eline) =
+                    self.at_former(d, g, phi, line, &line2, line_ty, eline, "path")?;
                 let ("path", [family, _, _]) = shape(&line_ty)? else {
                     return Err("path application reduction expects Path".into());
                 };
@@ -210,6 +235,8 @@ impl RestrictedProducer {
                 if arg2 == *arg {
                     return Ok(None);
                 }
+                let (arg_ty, earg) =
+                    self.at_former(d, g, phi, arg, &arg2, arg_ty, earg, "sigma")?;
                 let ("sigma", [dom, cod]) = shape(&arg_ty)? else {
                     return Err("eliminator projection expects Sigma".into());
                 };

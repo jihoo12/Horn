@@ -361,6 +361,32 @@ argument determines an implicit argument, elaboration stops and asks for
 `(@ f)`. Implicit binders appear only at the start of a def's type, and a
 bare reference to such a def is an error.
 
+## Categories
+
+[category.hcs](../examples/cubical/script/category.hcs) (about 0.4 s) defines
+wild precategories as a nested Σ: objects in `U1`, morphisms in `U0`, and
+the unit and associativity laws as paths. It then defines projections, the
+category of types and functions, whose laws hold by `refl`, and the
+opposite of any category.
+
+Two kinds of engine support make this work:
+
+- Types that only *compute* to a type former, such as `(app Hom A B)` for a
+  `Hom` that returns a pi, are brought to weak-head normal form where a
+  former is needed: η and congruence of introduction forms, application,
+  projection and path-application congruence, β through an annotation, and
+  a head step's type.
+- A pair's component appears in the next component's type as a bare
+  introduction form under that type's binders. It gets the type it was
+  checked at, moved under those binders; the candidate is used only if
+  shifting it back gives the term exactly, and it is checked again.
+
+Definitions are inlined as annotated terms, so a term grows with every
+definition it mentions. Projections through `op C` work only with small
+annotations: `Hom (op C) x y ≡ Hom C y x` is not found within the search
+budget, because each step carries the whole `Cat` type. The planned fix is
+definitions as constants with δ-rules.
+
 ## Universe levels
 
 `ua` and `iso-equiv` are the prelude at level 0; `(ua-at L)` and
