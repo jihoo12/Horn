@@ -420,8 +420,9 @@ arguments).
 ## Imports
 
 `(import FILE)` brings in another script's declarations, with `FILE`
-relative to the importing file. The declarations are its `data`, `def` and
-`def-poly` forms, and those of its own imports. Each file is brought in once,
+relative to the importing file: all its forms except its tests, and those of
+its own imports. A form that is not valid is an error there as it would be
+in the file itself. Each file is brought in once,
 in the order first imported, and an import cycle is an error. A file's
 `check`, `eval` and `equal` forms are its own tests and are not run when it
 is imported. Imported definitions are elaborated and checked in the
@@ -514,7 +515,7 @@ It is not meant to become Lean 4. Its distinguishing commitments are:
   apply like functions; `(elim NAME k P (METHODS...) x)` eliminates `x` into
   the motive `P` over `k : NAME`, with one method per constructor taking its
   arguments and then one induction hypothesis per recursive argument.
-- `(import FILE)`: another script's declarations (above).
+- `(import FILE)`: another script's declarations (see Imports).
 - `(def NAME TYPE TERM)`: a closed, transparent definition. Its typing is a goal.
   Later forms mention it as the constant `def/NAME`, which the engine
   unfolds (δ) only where computation needs the body; see [TRUST.md](TRUST.md)

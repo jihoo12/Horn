@@ -969,5 +969,9 @@ fn imports_bring_declarations_once_and_reject_cycles() {
     write("b.hcs", "(import a.hcs)\n(def b nat 0)\n");
     assert!(run("a.hcs").err().unwrap().contains("import cycle"));
     assert!(run("missing.hcs").is_err());
+    // Only tests are skipped: a broken form in a library is still an error.
+    write("broken.hcs", "(deff misspelled nat 0)\n");
+    write("uses.hcs", "(import broken.hcs)\n(def ok nat 0)\n");
+    assert!(run("uses.hcs").err().unwrap().contains("invalid form"));
     std::fs::remove_dir_all(&dir).unwrap();
 }

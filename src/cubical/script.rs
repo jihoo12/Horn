@@ -1608,10 +1608,10 @@ fn canonical(path: &std::path::Path) -> Result<std::path::PathBuf> {
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// The script with every `(import FILE)` replaced by FILE's declarations
-/// (`data`, `def`, `def-poly`, and its own imports), each file once, in the
-/// order first imported. An imported file's checks and evaluations are its
-/// own tests and are not run again. Its definitions are elaborated and
+/// The script with every `(import FILE)` replaced by FILE's forms, each
+/// file once, in the order first imported. An imported file's checks and
+/// evaluations (`check`, `eval`, `equal`) are its own tests and are not run
+/// again; every other form is kept, so an invalid one is still an error. Its definitions are elaborated and
 /// checked here like any other: an import adds no trust.
 fn expand(
     source: &str,
@@ -1651,15 +1651,13 @@ fn expand(
                 stack.pop();
                 out.push_str(&inner);
             }
-            (Some("data" | "def" | "def-poly"), _) => {
+            // An imported file's tests; anything else, including a form
+            // that is not valid, is passed on and handled as if written here.
+            (Some("check" | "eval" | "equal"), _) if !whole => {}
+            _ => {
                 out.push_str(&form.to_string());
                 out.push('\n');
             }
-            _ if whole => {
-                out.push_str(&form.to_string());
-                out.push('\n');
-            }
-            _ => {}
         }
     }
     Ok(out)
