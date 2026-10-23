@@ -1201,7 +1201,7 @@ impl RestrictedProducer {
 
     /// Infer the type of `t` and, if it is not yet a `former` type, bring it
     /// to weak-head normal form and convert the typing.
-    fn infer_as(
+    pub(super) fn infer_as(
         &mut self,
         d: usize,
         g: &Sexp,
@@ -1225,6 +1225,30 @@ impl RestrictedProducer {
     /// Weak-head normal form of `t : ty` with the equation `t ≡ nf : ty`, by
     /// repeated single steps; at most `fuel` steps. The search is untrusted:
     /// the equation is an ordinary derivation for the kernel to check.
+    /// A type with this head, or its weak-head normal form if that has it.
+    pub(super) fn computed_former(
+        &mut self,
+        d: usize,
+        g: &Sexp,
+        phi: &Face,
+        ty: &Sexp,
+        former: &str,
+    ) -> Result<Option<Sexp>> {
+        if shape(ty)?.0 == former {
+            return Ok(Some(ty.clone()));
+        }
+        if !self.reduct_types {
+            return Ok(None);
+        }
+        let Ok((universe, _)) = self.infer(d, g, phi, ty) else {
+            return Ok(None);
+        };
+        let Ok((normal, _)) = self.whnf(d, g, phi, ty, &universe, FUEL_TYPES) else {
+            return Ok(None);
+        };
+        Ok((shape(&normal)?.0 == former).then_some(normal))
+    }
+
     pub fn whnf(
         &mut self,
         d: usize,
@@ -1323,6 +1347,9 @@ impl RestrictedProducer {
     /// `fst/snd (ann (pair x y) Σ)`. The typing of the bare redex is built
     /// from the annotation (rhas.app, rhas.fst, rhas.snd), so the
     /// introduction form is never inferred on its own.
+    ///
+    /// An annotation that only computes to the type former (a definition or
+    /// a redex) is used at its weak-head normal form.
     fn compute_through_annotation(
         &mut self,
         d: usize,
@@ -1333,22 +1360,26 @@ impl RestrictedProducer {
         ti: usize,
     ) -> Result<Option<(Sexp, Sexp, usize)>> {
         if let ("app", [f, r]) = shape(t)?
-            && let ("ann", [lam, pi_ty]) = shape(f)?
+            && let ("ann", [lam, written]) = shape(f)?
             && let ("lam", [body]) = shape(lam)?
-            && let ("pi", [a, b]) = shape(pi_ty)?
+            && let Some(pi_ty) = self.computed_former(d, g, phi, written, "pi")?
+            && let ("pi", [a, b]) = shape(&pi_ty)?
         {
-            let annotated_i = self.check(d, g, phi, f, pi_ty)?;
-            let lam_i = self.check(d, g, phi, lam, pi_ty)?;
+            let pi_ty = &pi_ty;
+            let annotated_i = self.check(d, g, phi, f, written)?;
+            let lam_i = self.check(d, g, phi, lam, written)?;
             let head = self.eq(
                 d,
                 g,
                 phi,
                 f,
                 lam,
-                pi_ty,
+                written,
                 "req.ann",
                 vec![annotated_i, lam_i],
             );
+            let head = self.retype_eq(d, g, phi, f, lam, written, pi_ty, head)?;
+            let lam_i = self.check(d, g, phi, lam, pi_ty)?;
             let (ua, ai) = self.infer(d, g, phi, a)?;
             level(&ua)?;
             let ri = self.check(d, g, phi, r, a)?;
@@ -1391,22 +1422,26 @@ impl RestrictedProducer {
             return Ok(Some((out, ty.clone(), eq)));
         }
         if let (head @ ("fst" | "snd"), [inner]) = shape(t)?
-            && let ("ann", [pair, sigma_ty]) = shape(inner)?
+            && let ("ann", [pair, written]) = shape(inner)?
             && let ("pair", [x, y]) = shape(pair)?
-            && let ("sigma", [a, b]) = shape(sigma_ty)?
+            && let Some(sigma_ty) = self.computed_former(d, g, phi, written, "sigma")?
+            && let ("sigma", [a, b]) = shape(&sigma_ty)?
         {
-            let annotated_i = self.check(d, g, phi, inner, sigma_ty)?;
-            let pair_i = self.check(d, g, phi, pair, sigma_ty)?;
+            let sigma_ty = &sigma_ty;
+            let annotated_i = self.check(d, g, phi, inner, written)?;
+            let pair_i = self.check(d, g, phi, pair, written)?;
             let inner_eq = self.eq(
                 d,
                 g,
                 phi,
                 inner,
                 pair,
-                sigma_ty,
+                written,
                 "req.ann",
                 vec![annotated_i, pair_i],
             );
+            let inner_eq = self.retype_eq(d, g, phi, inner, pair, written, sigma_ty, inner_eq)?;
+            let pair_i = self.check(d, g, phi, pair, sigma_ty)?;
             let bare = call(head, [pair.clone()]);
             let (ua, ui) = self.infer(d, g, phi, a)?;
             level(&ua)?;
@@ -1970,7 +2005,7 @@ impl RestrictedProducer {
     }
 
     #[allow(clippy::too_many_arguments)] // Explicit context, equation, type, and certificate.
-    fn retype_eq(
+    pub(super) fn retype_eq(
         &mut self,
         d: usize,
         g: &Sexp,
@@ -2125,7 +2160,7 @@ impl RestrictedProducer {
             return Ok(None);
         }
         let Some(known) = self.checked_forms.get(t) else {
-            return Ok(None);
+            return self.recall_lowered_form(d, g, phi, t);
         };
         // The rank of a recorded typing, (added variables, added dimensions),
         // follows from the context lengths alone when the recorded context,
@@ -2162,6 +2197,49 @@ impl RestrictedProducer {
             }
             if let Ok(id) = self.check(d, g, phi, t, &a1) {
                 return Ok(Some((a1, id)));
+            }
+        }
+        self.recall_lowered_form(d, g, phi, t)
+    }
+
+    /// A type for an introduction form from where it was typed before being
+    /// carried under more ordinary binders (a pair's component substituted
+    /// into a type under a binder): `t` is that form shifted. The form is
+    /// `t` moved out of its innermost binders, kept only if shifting it back
+    /// gives `t` exactly; its type there is shifted alike and checked again.
+    fn recall_lowered_form(
+        &mut self,
+        d: usize,
+        g: &Sexp,
+        phi: &Face,
+        t: &Sexp,
+    ) -> Result<Option<(Sexp, usize)>> {
+        let mut tail = g.clone();
+        for by in 1..=context_length(g) {
+            let ("cons", [_, rest]) = shape(&tail)? else {
+                break;
+            };
+            tail = rest.clone();
+            let Some(form) = super::lower::lower(t, by) else {
+                continue;
+            };
+            let key = call(
+                "rhas-key",
+                [num(d), tail.clone(), phi.quote(), form.clone()],
+            );
+            let Some((ty, _)) = self.inferred.get(&key).cloned() else {
+                continue;
+            };
+            let (mut back, mut ty) = (form, ty);
+            for _ in 0..by {
+                back = self.f.path.transform(&back, &Op::Shift(0))?.0;
+                ty = self.f.path.transform(&ty, &Op::Shift(0))?.0;
+            }
+            if back != *t {
+                continue;
+            }
+            if let Ok(id) = self.check(d, g, phi, t, &ty) {
+                return Ok(Some((ty, id)));
             }
         }
         Ok(None)

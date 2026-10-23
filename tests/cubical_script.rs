@@ -831,3 +831,31 @@ fn implicit_arguments_are_inferred_from_explicit_ones() {
         (path i (path (papp P i) 0 0) (plam i 0) (plam i 0)))";
     cubical::script::run(&format!("{sym}\n{outer}")).unwrap();
 }
+
+/// Eta, congruence and beta at types that only compute to a former: a
+/// definition applied to arguments, as morphism types of a category are.
+#[test]
+fn types_that_compute_to_a_former_support_eta_and_beta() {
+    let defs = "(def H (pi x (u 0) (pi y (u 0) (u 0))) (lam x (u 0) (lam y (u 0) (pi z x y))))
+      (def I (pi x (u 0) (app H x x)) (lam A (u 0) (lam a A a)))";
+    for goal in [
+        // Eta at (app H A A), a redex for a pi.
+        "(check eta (lam A (u 0) (lam f (app H A A) (plam i f)))
+           (pi A (u 0) (pi f (app H A A) (path (app H A A) (lam x A (app f x)) f))))",
+        // Beta through I's annotation, which computes to a pi, inside a
+        // lambda compared at (app H A B).
+        "(check beta (lam A (u 0) (lam B (u 0) (lam f (app H A B) (plam i f))))
+           (pi A (u 0) (pi B (u 0) (pi f (app H A B)
+             (path (app H A B) (lam x A (app f (app I A x))) f)))))",
+    ] {
+        cubical::script::run(&format!("{defs}\n{goal}")).unwrap();
+    }
+}
+
+/// A category as a nested Sigma: the category of types satisfies its laws,
+/// and the opposite of any category is one. A component substituted into a
+/// later component's type under binders recovers the type it was checked at.
+#[test]
+fn categories_and_their_opposites_check() {
+    cubical::script::run(include_str!("../examples/cubical/script/category.hcs")).unwrap();
+}
