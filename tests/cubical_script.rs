@@ -886,3 +886,17 @@ fn definitions_are_constants_with_premised_rules() {
     let used = &script.certified.rules_used;
     assert!(used.iter().any(|r| r == "req.delta.def/double"));
 }
+
+/// An equation is derived in the shortest context its terms live in and
+/// lifted by req.shift, rather than derived again under each binder: here
+/// the codomains of two pi types are compared under a binder they ignore.
+#[test]
+fn equations_are_derived_once_and_lifted_under_binders() {
+    let script = cubical::script::run(
+        "(def idn (pi n nat nat) (lam n nat n))
+         (check deep (lam a nat (lam f (pi n nat (path nat (app idn a) a)) f))
+           (pi a nat (pi f (pi n nat (path nat (app idn a) a)) (pi n nat (path nat a a)))))",
+    )
+    .unwrap();
+    assert!(script.certified.rules_used.iter().any(|r| r == "req.shift"));
+}

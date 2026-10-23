@@ -53,3 +53,7 @@
   (pi C Cat (pi x (app Ob C) (pi y (app Ob C) (path (u 0) (app Hom (app op C) x y) (app Hom C y x))))))
 (check ob-op-op (lam C Cat (plam i (app Ob C)))
   (pi C Cat (path (u 1) (app Ob (app op (app op C))) (app Ob C))))
+; Reversing twice gives the category back, judgmentally: every component of
+; op (op C) computes to C's (the laws through sym (sym p) = p), and the
+; whole structure is C by eta.
+(check op-op (lam C Cat (plam i C)) (pi C Cat (path Cat (app op (app op C)) C)))

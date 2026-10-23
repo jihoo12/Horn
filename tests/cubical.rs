@@ -143,9 +143,10 @@ fn the_core_theory_drops_the_unrestricted_layer_and_subsumed_rules() {
     let full = cubical::theory();
     let count = |t: &str| cubical::generate::rule_count(t);
     // 396 rules from the kamo3 snapshot plus bool and nat, then 31 for the
-    // circle, 2 for closed-term weakening and 4 for scoped identities; the
-    // core drops 29 unrestricted-layer rules and one subsumed rule.
-    assert_eq!((count(&full), count(&core)), (433, 403));
+    // circle, 2 for closed-term weakening, 4 for scoped identities and 1 for
+    // equation weakening; the core drops 29 unrestricted-layer rules and one
+    // subsumed rule.
+    assert_eq!((count(&full), count(&core)), (434, 404));
     for form in horn::sexp::parse(&core).unwrap() {
         let text = form.to_string();
         for p in cubical::UNRESTRICTED {
