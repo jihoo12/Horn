@@ -87,7 +87,8 @@ largest open question in this project.
   true goals.
 - Categories are wild: hom-types are not required to be sets.
 - The script language is a prototype: imports are textual, with no
-  namespaces, and some errors still show core terms.
+  namespaces, and errors name a term's variables by the nearest written
+  scope when computing produced it.
 
 ## In more detail
 

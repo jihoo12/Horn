@@ -97,6 +97,15 @@ pub enum Wrong {
     /// An introduction form (lam, pair, plam) where the type, `want`, has no
     /// such elements.
     Former { want: Sexp },
+    /// The term's type cannot be inferred from the term alone (a lambda,
+    /// pair or path abstraction with no type around it).
+    Uninferable,
+    /// The term is used as a function, pair or path (`former` is `pi`,
+    /// `sigma` or `path`), but its type `got` is not one.
+    NotA { former: &'static str, got: Sexp },
+    /// The term must equal `other` at `ty`, and the two differ in their
+    /// head after computing.
+    Unequal { other: Sexp, ty: Sexp },
 }
 
 /// A term that did not check, with where it was checked.
@@ -357,6 +366,25 @@ impl RestrictedProducer {
             return Err("annotation was not closed in ordinary variables".into());
         }
         Ok(term_id)
+    }
+    /// Record why `t` failed, for the elaborator to show; the message.
+    pub(super) fn fail(
+        &mut self,
+        d: usize,
+        g: &Sexp,
+        phi: &Face,
+        t: &Sexp,
+        wrong: Wrong,
+        message: &str,
+    ) -> String {
+        self.mismatches.push(Mismatch {
+            dimensions: d,
+            context: g.clone(),
+            face: phi.clone(),
+            term: t.clone(),
+            wrong,
+        });
+        message.to_owned()
     }
     fn emit(&mut self, rule: &str, refs: Vec<usize>, j: Sexp) -> usize {
         self.f.path.p.emit(rule, refs, j)
@@ -755,7 +783,11 @@ impl RestrictedProducer {
                     fty = target;
                 }
                 let ("pi", [dom, _]) = shape(&fty)? else {
-                    return Err("application expects Pi".into());
+                    let wrong = Wrong::NotA {
+                        former: "pi",
+                        got: fty.clone(),
+                    };
+                    return Err(self.fail(d, g, phi, f, wrong, "application expects Pi"));
                 };
                 let mut checked = self.check(d, g, phi, a, dom);
                 // A lambda's remembered type may come from another use.
@@ -781,7 +813,11 @@ impl RestrictedProducer {
             (head @ ("fst" | "snd"), [t]) => {
                 let (tt, ti) = self.infer_as(d, g, phi, t, "sigma")?;
                 let ("sigma", [a, b]) = shape(&tt)? else {
-                    return Err("projection expects Sigma".into());
+                    let wrong = Wrong::NotA {
+                        former: "sigma",
+                        got: tt.clone(),
+                    };
+                    return Err(self.fail(d, g, phi, t, wrong, "projection expects Sigma"));
                 };
                 if head == "fst" {
                     let (ua, ai) = self.infer(d, g, phi, a)?;
@@ -875,7 +911,11 @@ impl RestrictedProducer {
             ("papp", [p, r]) => {
                 let (ty, pi) = self.infer_as(d, g, phi, p, "path")?;
                 let ("path", [a, _, _]) = shape(&ty)? else {
-                    return Err("expected PathP".into());
+                    let wrong = Wrong::NotA {
+                        former: "path",
+                        got: ty.clone(),
+                    };
+                    return Err(self.fail(d, g, phi, p, wrong, "expected PathP"));
                 };
                 let ri = self.f.path.interval(d, r)?;
                 let (ar, si) = self.f.path.transform(a, &Op::DSubst(0, r.clone()))?;
@@ -933,7 +973,8 @@ impl RestrictedProducer {
                 if let Some(found) = self.recall_checked_form(d, g, phi, t)? {
                     return Ok(found);
                 }
-                return Err(format!("restricted inference needs an annotation for {t}"));
+                let message = format!("restricted inference needs an annotation for {t}");
+                return Err(self.fail(d, g, phi, t, Wrong::Uninferable, &message));
             }
         };
         let id = self.has(d, g, phi, t, &ty, rule, refs);

@@ -84,10 +84,19 @@ In a `def-poly`, goals show the level variable (`⊢ (u L)`).
 
 ## When a proof is wrong
 
-A form that does not check says where, in the same names: a path that does
-not end where it must, a term whose type is not the one required, or a
-function, pair or path given where the type has no such elements. Each side
-is also shown evaluated when that differs. Forgetting `suc` in the step of
+A form that does not check says where, in the same names. The reports are:
+
+- a path that does not end where it must;
+- a term whose type is not the one required;
+- a function, pair or path given where the type has no such elements;
+- a term used as a function, pair or path whose type is none;
+- two terms that must be equal and differ;
+- a lambda, pair or path abstraction whose type cannot be worked out from
+  the term alone, with how to give it one.
+
+Each side is also shown evaluated when that differs. A term that only
+computing produced is shown in the names of the nearest written term of the
+same shape. Forgetting `suc` in the step of
 `zero-add` above gives:
 
 ```text
@@ -99,6 +108,19 @@ error: def zero-add: the path does not end where it must, at i = 0
 
   it is (papp p 0), which computes to (natrec x nat 0 (lam x (lam y (suc y))) k)
   but must be (app add 0 (suc k)), which computes to (suc (natrec x nat 0 (lam x (lam y (suc y))) k))
+```
+
+Two sides of an equation that differ are shown where they first differ,
+here under a lambda:
+
+```text
+error: equal e: two terms that must be equal are not
+
+  x : nat
+
+  this (suc x)
+  differs from x
+  at type nat
 ```
 
 The checker's search may fail in several places before giving up; the
