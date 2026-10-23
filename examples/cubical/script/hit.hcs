@@ -73,3 +73,24 @@
   (plam i (app to-circle (hcomp j susp (((= i 0) north) ((= i 1) south)) (merid btrue i))))
   (plam i (hcomp j circle (((= i 0) pt) ((= i 1) pt)) (lp i)))
   (path circle pt pt))
+
+; Endpoints may use the constructor's fields, named `(x TYPE)`. A recursive
+; field's endpoint is its induction hypothesis in the eliminator: the
+; propositional truncation of nat, eliminated into itself.
+(data trunc (inc nat) (squash (x trunc) (y trunc) (path x y)))
+(def retrunc (pi x trunc trunc)
+  (lam x trunc
+    (elim trunc k trunc
+      ((lam n nat (inc n))
+       (lam x trunc (lam y trunc (lam hx trunc (lam hy trunc (plam i (squash hx hy i)))))))
+      x)))
+(equal along-squash
+  (plam i (app retrunc (squash (squash (inc 0) (inc 2) i1) (inc 1) i)))
+  (plam i (squash (inc 2) (inc 1) i))
+  (path trunc (inc 2) (inc 1)))
+
+; A field inside a point constructor: two copies of nat, glued pointwise.
+(data glued (left nat) (right nat) (seg (n nat) (path (left n) (right n))))
+(def forget (pi x glued nat)
+  (lam x glued (elim glued k nat ((lam n nat n) (lam n nat n) (lam n nat (plam i n))) x)))
+(equal along-seg (plam i (app forget (seg 4 i))) (plam i 4) (path nat 4 4))

@@ -25,7 +25,7 @@
 //! (`Π X Y f g s t. isEquiv f`) are closed library terms, checked like any
 //! definition; neither is an axiom. Definitions are closed and transparent.
 use super::display::{Printer, Scope};
-use super::engine::data::{self, ArgTy, Ctor, Data};
+use super::engine::data::{self, ArgTy, Ctor, Data, End};
 use super::engine::deep_univalence_frontend;
 use super::engine::face_frontend::Face;
 use super::engine::iso_equiv_frontend::{iso_equiv_term, iso_equiv_type};
@@ -1035,7 +1035,28 @@ impl Elaborator {
                 _ => (&xs[1..], None),
             };
             let mut args = Vec::new();
+            let mut field_names = Vec::new();
             for a in fields {
+                // A field may be named, `(x TYPE)`, for the endpoints.
+                let a = match a {
+                    Sexp::List(ys)
+                        if ys.len() == 2
+                            && let Sexp::Atom(x) = &ys[0]
+                            && &**x != name
+                            && data::by_name(x).is_none() =>
+                    {
+                        binder(&ys[0])?;
+                        if field_names.contains(&Some(x.to_string())) {
+                            return Err(format!("constructor {cname}: duplicate field {x}"));
+                        }
+                        field_names.push(Some(x.to_string()));
+                        &ys[1]
+                    }
+                    _ => {
+                        field_names.push(None);
+                        a
+                    }
+                };
                 // Fields: discrete closed types, a parameter, or the type
                 // itself at its own parameters (uniform recursion).
                 let own = Sexp::List(
@@ -1062,35 +1083,24 @@ impl Elaborator {
                 };
                 args.push(arg);
             }
-            if boundary.is_some() {
-                if !params.is_empty() {
-                    return Err(format!(
-                        "{name}: path constructors need a type without parameters"
-                    ));
-                }
-                if args.iter().any(|a| !matches!(a, ArgTy::Closed(_))) {
-                    return Err(format!(
-                        "path constructor {cname}: fields must be bool, nat or earlier closed data types"
-                    ));
-                }
-            }
             out.push(Ctor {
                 name: cname.to_owned(),
                 symbol: format!("ctor/{name}/{cname}"),
                 args,
                 boundary: None,
             });
-            sources.push(boundary);
+            sources.push((boundary, field_names));
         }
         if out.is_empty() {
             return Err(format!("data {name} needs a constructor"));
         }
-        // Endpoints are closed point terms of the type, elaborated once all
-        // constructors are known.
+        // Endpoints are point terms of the type over the constructor's
+        // fields, elaborated once all constructors are known.
         for i in 0..out.len() {
-            if let Some((l, r)) = &sources[i] {
-                let l = self.endpoint(l, &out)?;
-                let r = self.endpoint(r, &out)?;
+            if let (Some((l, r)), names) = &sources[i] {
+                let fields = (names.as_slice(), out[i].args.as_slice());
+                let l = self.endpoint(l, None, fields, &out)?;
+                let r = self.endpoint(r, None, fields, &out)?;
                 out[i].boundary = Some((l, r));
             }
         }
@@ -1104,18 +1114,51 @@ impl Elaborator {
         Ok(d.theory())
     }
 
-    /// A path constructor's endpoint: a point constructor of the type being
-    /// declared, applied to closed terms.
-    fn endpoint(&mut self, s: &Sexp, ctors: &[Ctor]) -> Result<Sexp> {
+    /// A path constructor's endpoint at a field type (`None`: the type being
+    /// declared): one of the constructor's fields of that type, a point
+    /// constructor applied to endpoints, or, at a closed type, a closed term.
+    fn endpoint(
+        &mut self,
+        s: &Sexp,
+        at: Option<&ArgTy>,
+        fields: (&[Option<String>], &[ArgTy]),
+        ctors: &[Ctor],
+    ) -> Result<End> {
+        let (names, tys) = fields;
+        if let Sexp::Atom(x) = s
+            && let Some(k) = names.iter().position(|n| n.as_deref() == Some(&**x))
+        {
+            let fits = match (at, &tys[k]) {
+                (None, ArgTy::Rec) => true,
+                (Some(ArgTy::Rec), ArgTy::Rec) => true,
+                (Some(ArgTy::Closed(a)), ArgTy::Closed(b)) => a == b,
+                (Some(ArgTy::Param(a)), ArgTy::Param(b)) => a == b,
+                _ => false,
+            };
+            if !fits {
+                return Err(format!("endpoint field {x} has the wrong type"));
+            }
+            return Ok(End::Field(k));
+        }
+        match at {
+            Some(ArgTy::Closed(_)) => return Ok(End::Closed(self.term(s, &Names::default())?)),
+            Some(ArgTy::Param(_)) => {
+                return Err(format!("endpoint {s} at a parameter must be a field"));
+            }
+            _ => {}
+        }
         let (head, args) = match s {
             Sexp::Atom(a) => (&**a, &[][..]),
             Sexp::List(xs) if !xs.is_empty() => (xs[0].atom()?, &xs[1..]),
             _ => return Err(format!("invalid endpoint {s}")),
         };
-        let c = ctors
+        let i = ctors
             .iter()
-            .find(|c| c.name == head && c.boundary.is_none())
-            .ok_or_else(|| format!("endpoint {s} must be a point constructor of the type"))?;
+            .position(|c| c.name == head && c.boundary.is_none())
+            .ok_or_else(|| {
+                format!("endpoint {s} must be a field or a point constructor of the type")
+            })?;
+        let c = &ctors[i];
         if args.len() != c.args.len() {
             return Err(format!(
                 "endpoint {s}: {head} needs {} arguments",
@@ -1124,12 +1167,9 @@ impl Elaborator {
         }
         let mut out = Vec::new();
         for (a, ty) in args.iter().zip(&c.args) {
-            out.push(match ty {
-                ArgTy::Rec => self.endpoint(a, ctors)?,
-                _ => self.term(a, &Names::default())?,
-            });
+            out.push(self.endpoint(a, Some(ty), fields, ctors)?);
         }
-        Ok(data::apply(&c.symbol, out))
+        Ok(End::Ctor(i, out))
     }
 
     fn fresh(&self, name: &str) -> Result<()> {

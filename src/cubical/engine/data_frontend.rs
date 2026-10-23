@@ -123,13 +123,29 @@ impl RestrictedProducer {
             if c.boundary.is_some() {
                 env.insert("i".into(), args[c.args.len()].clone());
             }
-            // Parameters come from the types of fields at a parameter.
+            // Parameters come from the types of fields at a parameter, or
+            // of a recursive field.
             for (a, arg_ty) in args.iter().zip(&c.args) {
-                if let data::ArgTy::Param(j) = arg_ty
-                    && !env.contains_key(&format!("A{j}"))
-                {
-                    let (ty, _) = self.infer(d, g, phi, a)?;
-                    env.insert(format!("A{j}"), ty);
+                if (0..data.params).all(|j| env.contains_key(&format!("A{j}"))) {
+                    break;
+                }
+                match arg_ty {
+                    data::ArgTy::Param(j) if !env.contains_key(&format!("A{j}")) => {
+                        let (ty, _) = self.infer(d, g, phi, a)?;
+                        env.insert(format!("A{j}"), ty);
+                    }
+                    data::ArgTy::Rec => {
+                        let Ok((ty, _)) = self.infer(d, g, phi, a) else {
+                            continue;
+                        };
+                        let Ok(ty) = self.declared_type(d, g, phi, &data, &ty) else {
+                            continue;
+                        };
+                        for (j, p) in shape(&ty)?.1.iter().enumerate() {
+                            env.insert(format!("A{j}"), p.clone());
+                        }
+                    }
+                    _ => {}
                 }
             }
             if (0..data.params).any(|j| !env.contains_key(&format!("A{j}"))) {
@@ -159,6 +175,33 @@ impl RestrictedProducer {
         Ok(Some((inst(&plan.ty, &env)?, rule, refs)))
     }
 
+    /// A declared type as its own head applied to its parameters: `ty`, or
+    /// its weak-head normal form.
+    fn declared_type(
+        &mut self,
+        d: usize,
+        g: &Sexp,
+        phi: &Face,
+        data: &Data,
+        ty: &Sexp,
+    ) -> Result<Sexp> {
+        if data.params == 0 || shape(ty)?.0 == data.ty {
+            return Ok(if data.params == 0 {
+                atom(&data.ty)
+            } else {
+                ty.clone()
+            });
+        }
+        let (universe, _) = self.infer(d, g, phi, ty)?;
+        let target = self
+            .whnf(d, g, phi, ty, &universe, super::super::FUEL_TYPES)?
+            .0;
+        if shape(&target)?.0 != data.ty {
+            return Err(format!("{ty} is not {}", data.name));
+        }
+        Ok(target)
+    }
+
     /// Check a constructor of a parameterized type against an expected type,
     /// whose weak-head normal form supplies the parameters.
     pub(super) fn check_declared(
@@ -176,33 +219,31 @@ impl RestrictedProducer {
         if data.params == 0 {
             return Ok(None);
         }
-        let target = if shape(expected)?.0 == data.ty {
-            expected.clone()
-        } else {
-            let (universe, _) = self.infer(d, g, phi, expected)?;
-            self.whnf(d, g, phi, expected, &universe, super::super::FUEL_TYPES)?
-                .0
-        };
-        let (th, params) = shape(&target)?;
-        if th != data.ty {
-            return Err(format!(
-                "constructor {} checked against {expected}",
-                data.ctors[i].name
-            ));
-        }
+        let target = self
+            .declared_type(d, g, phi, &data, expected)
+            .map_err(|_| {
+                format!(
+                    "constructor {} checked against {expected}",
+                    data.ctors[i].name
+                )
+            })?;
+        let params = shape(&target)?.1;
         let c = &data.ctors[i];
-        if args.len() != c.args.len() {
+        if args.len() != c.arity() {
             return Err(format!(
-                "constructor {} expects {} fields",
+                "constructor {} expects {} arguments",
                 c.name,
-                c.args.len()
+                c.arity()
             ));
         }
         let mut env = HashMap::new();
+        if c.boundary.is_some() {
+            env.insert("i".into(), args[c.args.len()].clone());
+        }
         for (j, a) in params.iter().enumerate() {
             env.insert(format!("A{j}"), a.clone());
         }
-        for (k, a) in args.iter().enumerate() {
+        for (k, a) in args.iter().take(c.args.len()).enumerate() {
             env.insert(format!("a{k}"), a.clone());
         }
         let plan = data.ctor_plan(i);
@@ -226,10 +267,12 @@ impl RestrictedProducer {
             && let Some((left, right)) = &data.ctors[i].boundary
         {
             // A path constructor at an endpoint of its interval.
-            let r = &args[data.ctors[i].args.len()];
-            let dty = atom(&data.ty);
+            let n = data.ctors[i].args.len();
+            let r = &args[n];
+            let dty = self.declared_type(d, g, phi, &data, ty)?;
             for (one, value) in [(false, left), (true, right)] {
                 if let Ok(local) = self.f.endpoint(d, phi, r, one) {
+                    let value = &value.at(&data, &args[..n]);
                     let pi = self.check(d, g, phi, t, &dty)?;
                     let vi = self.check(d, g, phi, value, &dty)?;
                     let rule = format!("req.{}-{}", data.ctors[i].symbol, u8::from(one));
@@ -261,6 +304,11 @@ impl RestrictedProducer {
                 for a in &xargs[..c.args.len()] {
                     out = call("app", [out, a.clone()]);
                 }
+                for j in c.recursive() {
+                    let mut rec = fixed.to_vec();
+                    rec.push(xargs[j].clone());
+                    out = call("app", [out, call(head, rec)]);
+                }
                 let out = call("papp", [out, r.clone()]);
                 let oi = self.check(d, g, phi, &out, ty)?;
                 let rule = format!("req.{}.{}", data.elim, c.symbol);
@@ -288,12 +336,12 @@ impl RestrictedProducer {
         }
         if data.is_higher()
             && let ("comp", [family, psi, tube, u]) = (xh, xargs)
-            && *family == atom(&data.ty)
+            && shape(family)?.0 == data.ty
             && self.f.entails(d, phi, &Face::parse(psi)?).is_err()
+            && let Some(out) =
+                self.eliminate_composition(d, g, phi, t, ty, ti, &data, family, psi, tube, u)?
         {
-            return self
-                .eliminate_composition(d, g, phi, t, ty, ti, &data, psi, tube, u)
-                .map(Some);
+            return Ok(Some(out));
         }
         let dty = data::apply(&data.ty, args[..np].to_vec());
         let (x2, xty, ex) = self.reduce(d, g, phi, x)?;
@@ -311,7 +359,9 @@ impl RestrictedProducer {
     }
 
     /// The eliminator of a higher inductive type on a formal composition:
-    /// composition in the motive along the filler (`req.E.hcomp`).
+    /// composition in the motive along the filler (`req.E.hcomp`). Only a
+    /// homogeneous one: a family that varies is a transport, which reduces
+    /// in the scrutinee instead.
     #[allow(clippy::too_many_arguments)]
     fn eliminate_composition(
         &mut self,
@@ -322,26 +372,38 @@ impl RestrictedProducer {
         ty: &Sexp,
         ti: usize,
         data: &Data,
+        family: &Sexp,
         psi: &Sexp,
         tube: &Sexp,
         u: &Sexp,
-    ) -> Result<(Sexp, Sexp, usize)> {
+    ) -> Result<Option<(Sexp, Sexp, usize)>> {
         let (_, args) = shape(t)?;
-        let k = data.ctors.len();
-        let (p, methods) = (&args[0], &args[1..1 + k]);
-        let dty = atom(&data.ty);
-        let (fill, fi) = self.filling(&dty, &Face::parse(psi)?, tube, u)?;
+        let (np, k) = (data.params, data.ctors.len());
+        let (params, p, methods) = (&args[..np], &args[np], &args[np + 1..np + 1 + k]);
+        // The family must be the parameters weakened by its dimension.
+        let mut refs = vec![ti];
+        let mut weak = Vec::new();
+        for a in params {
+            let (b, bi) = self.f.path.transform(a, &Op::DShift(0))?;
+            refs.push(bi);
+            weak.push(b);
+        }
+        if *family != data::apply(&data.ty, weak.clone()) {
+            return Ok(None);
+        }
+        let (fill, fi) = self.filling(family, &Face::parse(psi)?, tube, u)?;
         let (p1, pi) = self.f.path.transform(p, &Op::DShift(0))?;
         let (pf, si) = self.f.path.transform(&p1, &Op::Subst(0, fill))?;
-        let mut refs = vec![ti, fi, pi, si];
-        let mut inner = vec![p1];
+        refs.extend([fi, pi, si]);
+        let mut inner = weak;
+        inner.push(p1);
         for m in methods {
             let (m1, mi) = self.f.path.transform(m, &Op::DShift(0))?;
             refs.push(mi);
             inner.push(m1);
         }
         inner.push(tube.clone());
-        let mut outer = args[..1 + k].to_vec();
+        let mut outer = args[..np + 1 + k].to_vec();
         outer.push(u.clone());
         let out = call(
             "comp",
@@ -355,7 +417,7 @@ impl RestrictedProducer {
         refs.push(self.check(d, g, phi, &out, ty)?);
         let rule = format!("req.{}.hcomp", data.elim);
         let eq = self.eq(d, g, phi, t, &out, ty, &rule, refs);
-        Ok((out, ty.clone(), eq))
+        Ok(Some((out, ty.clone(), eq)))
     }
 
     /// Composition in a declared type: a closed type returns its base; a
@@ -375,7 +437,7 @@ impl RestrictedProducer {
         let Some(data) = data::by_type(fh) else {
             return Ok(None);
         };
-        if data.is_higher() {
+        if data.is_higher() && data.params == 0 {
             return Ok(None);
         }
         if data.params == 0 {
@@ -403,6 +465,8 @@ impl RestrictedProducer {
             let line = data.field_type(arg_ty, params);
             parts.push(call("comp", [line, atom("ff"), atom("zero"), a.clone()]));
         }
+        // A path constructor stays at its interval.
+        parts.extend(bargs[c.args.len()..].iter().cloned());
         let out = data::apply(&c.symbol, parts);
         refs.push(self.check(d, g, psi, &out, ty)?);
         let rule = format!("req.comp-{}.{}", data.ty, c.symbol);
@@ -449,10 +513,11 @@ impl RestrictedProducer {
         {
             let c = &data.ctors[i];
             let n = c.args.len();
-            let dty = atom(&data.ty);
+            let dty = self.declared_type(d, g, phi, &data, ty)?;
+            let params = shape(&dty)?.1.to_vec();
             let mut refs = Vec::new();
             for (x, (y, arg_ty)) in ax[..n].iter().zip(bx[..n].iter().zip(&c.args)) {
-                let field_ty = data.field_type(arg_ty, &[]);
+                let field_ty = data.field_type(arg_ty, &params);
                 refs.push(self.equality(d, g, phi, x, y, &field_ty)?);
             }
             refs.push(self.check(d, g, phi, a, &dty)?);

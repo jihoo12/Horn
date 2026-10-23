@@ -270,14 +270,19 @@ Two changes make that run in a minute instead of not finishing:
 ## Declared higher inductive types
 
 A constructor whose last item is `(path LEFT RIGHT)` is a path constructor
-([hit.hcs](../examples/cubical/script/hit.hcs), about 0.8 s). Its endpoints are
-closed point terms of the type; it may have fields (bool, nat, earlier
-closed data types), and its terms take an interval after them:
+([hit.hcs](../examples/cubical/script/hit.hcs), about 0.8 s). It may have
+fields (bool, nat, earlier closed data types, the type itself), and its
+terms take an interval after them. A field may be named, `(x TYPE)`. Each
+endpoint is one of the constructor's fields of the type itself, or a point
+constructor applied to endpoints, where a position of a closed type takes a
+field of that type or a closed term:
 
 ```text
 (data circle (pt) (lp (path pt pt)))
 (data susp (north) (south) (merid bool (path north south)))
 (eval merid-true (app wind (plam i (app to-circle (merid btrue i)))))   ; (pos 1) : int
+(data trunc (inc nat) (squash (x trunc) (y trunc) (path x y)))
+(data glued (left nat) (right nat) (seg (n nat) (path (left n) (right n))))
 ```
 
 For a path constructor the declaration also generates:
@@ -286,10 +291,12 @@ For a path constructor the declaration also generates:
   map the interval by dimension operations only;
 - its boundary, `(c a… r) ≡ LEFT` when `r = 0` holds under the face, and
   `≡ RIGHT` when `r = 1`, and congruence in the fields and the interval;
-- an eliminator method of type `Π a…. PathP (i. P (c a… i)) e₀ e₁`, where
+- an eliminator method of type `Π a…. Π h…. PathP (i. P (c a… i)) e₀ e₁`,
+  with an induction hypothesis `h : P a` for every recursive field `a`, where
   `e₀`, `e₁` are the eliminator's values on the endpoints spelled out with
-  the methods (stating them with the eliminator would make its typing rule
-  circular), and the computation `elim … (c a… r) ≡ (m a…) @ r`;
+  the methods and hypotheses (stating them with the eliminator would make
+  its typing rule circular), and the computation
+  `elim … (c a… r) ≡ (m a… (elim … a)…) @ r`;
 - instead of a composition rule, the eliminator on a formal composition
   (CHM 2018), `req.E.hcomp`:
 
@@ -299,12 +306,34 @@ elim P m… (hcomp^j_T [φ ↦ u] u0)
 ```
 
 with the filler given by `filldef`, so the motive may depend on the point.
+For a type with parameters the composition must be homogeneous: its family
+is the type at the parameters weakened by the composition's dimension.
 A type with a path constructor is not discrete, so it gets no rule that
 returns a composition's base. With the declared circle, `wind (lp · lp)`
 also computes to `(pos 2)` (about 60 s), through this dependent rule
-rather than the built-in `s1rec` one. Path constructors need a type without
-parameters, fields that are closed discrete types, and point endpoints;
-higher-dimensional constructors (a torus's square) are not supported.
+rather than the built-in `s1rec` one.
+
+A higher inductive type may have parameters
+([hit-params.hcs](../examples/cubical/script/hit-params.hcs), about 0.5 s),
+and its fields may be at a parameter:
+
+```text
+(data (susp A) (north) (south) (merid A (path north south)))
+(data (ptrunc A) (inc A) (squash (x (ptrunc A)) (y (ptrunc A)) (path x y)))
+(equal flip-merid
+  (plam i (transport j (susp (papp flip j)) (merid btrue i)))   ; flip = ua not
+  (plam i (merid bfalse i))
+  (path (susp bool) north south))
+```
+
+Transport along the empty face moves a path constructor's fields and keeps
+its interval, `transp (T A) (c a… r) = c (transp A a)… r`. Endpoints are
+built from constructors and fields, and transport commutes with those
+strictly, so this agrees with the boundary at `r = 0` and `r = 1`; no
+correcting composition is needed (CHM 2018 need one for general endpoints).
+Transport of a formal composition has no rule yet and stays unevaluated.
+Endpoints are point terms; higher-dimensional constructors (a torus's
+square) are not supported.
 
 ## Universe levels
 

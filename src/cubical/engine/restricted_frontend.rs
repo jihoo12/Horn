@@ -1024,7 +1024,11 @@ impl RestrictedProducer {
             return Ok(id);
         }
         if let Some(id) = self.check_declared(d, g, phi, t, expected)? {
-            self.remember(d, g, phi, t, expected, id);
+            // A constructor whose fields leave a parameter open, such as a
+            // nil, has many types: none of them is its inferred one.
+            if super::data::determined(t) {
+                self.remember(d, g, phi, t, expected, id);
+            }
             return Ok(id);
         }
         // An introduction form checked against a type that is not yet in

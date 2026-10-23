@@ -436,6 +436,10 @@ fn declared_higher_inductive_types_compute() {
         "req.elim/circle.ctor/circle/lp",
         "req.ctor/susp/merid-1",
         "req.elim/susp.hcomp",
+        "req.elim/trunc.ctor/trunc/squash",
+        "req.ctor/trunc/squash-1",
+        "req.ctor/glued/seg-0",
+        "req.elim/glued.ctor/glued/seg",
     ] {
         assert!(used.iter().any(|r| r == rule), "{rule}");
     }
@@ -449,12 +453,64 @@ fn declared_higher_inductive_types_compute() {
 }
 
 #[test]
-fn path_constructors_are_restricted_to_closed_types_and_point_endpoints() {
+fn parameterized_higher_inductive_types_transport_and_eliminate() {
+    let script =
+        cubical::script::run(include_str!("../examples/cubical/script/hit-params.hcs")).unwrap();
+    let used = &script.certified.rules_used;
+    for rule in [
+        "req.comp-ty/susp.ctor/susp/merid",
+        "req.comp-ty/ptrunc.ctor/ptrunc/squash",
+        "req.elim/ptrunc.hcomp",
+        "req.elim/ptrunc.ctor/ptrunc/squash",
+        "req.ctor/ptrunc/squash-0",
+    ] {
+        assert!(used.iter().any(|r| r == rule), "{rule}");
+    }
+}
+
+/// A constructor whose fields leave a parameter open has no single type, so
+/// checking it at one does not make that type its inferred one.
+#[test]
+fn constructors_with_open_parameters_keep_every_type() {
+    let source = "(data (box A) (z) (s (box A)))
+      (data (susp A) (north) (south) (merid A (path north south)))
+      (def f (pi x (box nat) (box bool))
+        (lam x (box nat) (elim box (nat) k (box bool) ((s z) (lam y (box nat) (lam h (box bool) (s h)))) x)))
+      (equal e (app f (s z)) (s (s z)) (box bool))
+      (equal m (elim susp (nat) k (susp bool) (north south (lam a nat (plam i (merid btrue i)))) (merid 3 i0))
+        north (susp bool))";
+    cubical::script::run(source).unwrap();
+    // A parameter field whose own type is open does not fix the parameter.
+    let nested = "(data (box A) (z)) (data (wrap A) (w A))
+      (check c (w z) (wrap (box nat)))
+      (eval e (w z))";
+    assert!(cubical::script::run(nested).is_err());
+}
+
+/// The eliminator on a transport along a varying family reduces the
+/// transport constructorwise; only a homogeneous composition is formal.
+#[test]
+fn eliminating_a_transport_in_a_parameterized_higher_type_reduces_it() {
+    let source = "(data (susp A) (north) (south) (merid A (path north south)))
+      (def P (path (u 0) nat nat) (plam i nat))
+      (equal r (elim susp (nat) k bool (btrue btrue (lam a nat (plam i btrue)))
+          (transport j (susp (papp P j)) north))
+        btrue bool)";
+    cubical::script::run(source).unwrap();
+}
+
+#[test]
+fn path_constructors_are_restricted_to_point_endpoints() {
     for bad in [
-        "(data (t A) (a) (p (path a a)))",
-        "(data t (a) (p t (path a a)))",
+        "(data (t A) (a A) (p (x A) (path (a x) a)))",
+        "(data (t A) (a A) (p (x A) (path (a btrue) (a x))))",
         "(data t (a) (p (path a q)))",
         "(data t (a) (p (path a a)) (q (path p a)))",
+        // An endpoint field must have the type of its position.
+        "(data t (a nat) (p (n nat) (path n (a 0))))",
+        "(data t (a nat) (b bool) (p (n bool) (path (a n) (b n))))",
+        "(data t (a nat) (p (x t) (path (a x) x)))",
+        "(data t (a) (p (x t) (x t) (path x x)))",
     ] {
         assert!(cubical::script::run(bad).is_err(), "{bad}");
     }
