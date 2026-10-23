@@ -436,6 +436,10 @@ fn declared_higher_inductive_types_compute() {
         "req.elim/circle.ctor/circle/lp",
         "req.ctor/susp/merid-1",
         "req.elim/susp.hcomp",
+        "req.elim/trunc.ctor/trunc/squash",
+        "req.ctor/trunc/squash-1",
+        "req.ctor/glued/seg-0",
+        "req.elim/glued.ctor/glued/seg",
     ] {
         assert!(used.iter().any(|r| r == rule), "{rule}");
     }
@@ -452,9 +456,13 @@ fn declared_higher_inductive_types_compute() {
 fn path_constructors_are_restricted_to_closed_types_and_point_endpoints() {
     for bad in [
         "(data (t A) (a) (p (path a a)))",
-        "(data t (a) (p t (path a a)))",
         "(data t (a) (p (path a q)))",
         "(data t (a) (p (path a a)) (q (path p a)))",
+        // An endpoint field must have the type of its position.
+        "(data t (a nat) (p (n nat) (path n (a 0))))",
+        "(data t (a nat) (b bool) (p (n bool) (path (a n) (b n))))",
+        "(data t (a nat) (p (x t) (path (a x) x)))",
+        "(data t (a) (p (x t) (x t) (path x x)))",
     ] {
         assert!(cubical::script::run(bad).is_err(), "{bad}");
     }

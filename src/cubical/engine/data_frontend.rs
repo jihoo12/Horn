@@ -226,10 +226,12 @@ impl RestrictedProducer {
             && let Some((left, right)) = &data.ctors[i].boundary
         {
             // A path constructor at an endpoint of its interval.
-            let r = &args[data.ctors[i].args.len()];
+            let n = data.ctors[i].args.len();
+            let r = &args[n];
             let dty = atom(&data.ty);
             for (one, value) in [(false, left), (true, right)] {
                 if let Ok(local) = self.f.endpoint(d, phi, r, one) {
+                    let value = &value.at(&data, &args[..n]);
                     let pi = self.check(d, g, phi, t, &dty)?;
                     let vi = self.check(d, g, phi, value, &dty)?;
                     let rule = format!("req.{}-{}", data.ctors[i].symbol, u8::from(one));
@@ -260,6 +262,11 @@ impl RestrictedProducer {
                 let mut out = methods[i].clone();
                 for a in &xargs[..c.args.len()] {
                     out = call("app", [out, a.clone()]);
+                }
+                for j in c.recursive() {
+                    let mut rec = fixed.to_vec();
+                    rec.push(xargs[j].clone());
+                    out = call("app", [out, call(head, rec)]);
                 }
                 let out = call("papp", [out, r.clone()]);
                 let oi = self.check(d, g, phi, &out, ty)?;

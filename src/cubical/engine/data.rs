@@ -24,8 +24,12 @@
 //!   not discrete: a composition in it is a formal point, and the
 //!   eliminator commutes with it along the filler (CHM 2018).
 //!
-//! A path constructor has closed discrete fields and closed point endpoints;
-//! its terms take an interval after the fields.
+//! A path constructor has closed discrete fields and recursive fields; its
+//! endpoints are point constructors applied to its fields and closed terms,
+//! or a recursive field itself (as in a propositional truncation). Its terms
+//! take an interval after the fields, and its eliminator method takes an
+//! induction hypothesis for every recursive field, like a point
+//! constructor's.
 //!
 //! Constructor terms do not carry the parameters: they are read off the
 //! fields or the expected type, as for unannotated lambdas.
@@ -45,13 +49,62 @@ pub enum ArgTy {
     Rec,
 }
 
+/// A path constructor's endpoint, over the constructor's fields.
+#[derive(Clone)]
+pub enum End {
+    /// The field with this index.
+    Field(usize),
+    /// A point constructor of the type, by index, applied to endpoints.
+    Ctor(usize, Vec<End>),
+    /// A closed term, at a field of a closed type.
+    Closed(Sexp),
+}
+
+impl End {
+    /// The endpoint as a template, with `field` for each field.
+    pub fn tpl(&self, data: &Data, field: &dyn Fn(usize) -> Tpl) -> Tpl {
+        match self {
+            End::Field(k) => field(*k),
+            End::Ctor(i, args) => Tpl::app(
+                &data.ctors[*i].symbol,
+                args.iter().map(|a| a.tpl(data, field)).collect(),
+            ),
+            End::Closed(s) => Tpl::Ground(s.clone()),
+        }
+    }
+    /// The endpoint at actual fields.
+    pub fn at(&self, data: &Data, fields: &[Sexp]) -> Sexp {
+        let t = self.tpl(data, &|k| Tpl::Ground(fields[k].clone()));
+        ground(&t)
+    }
+    /// The point constructors it uses, by index.
+    fn ctors(&self, out: &mut Vec<usize>) {
+        if let End::Ctor(i, args) = self {
+            if !out.contains(i) {
+                out.push(*i);
+            }
+            for a in args {
+                a.ctors(out);
+            }
+        }
+    }
+}
+
+fn ground(t: &Tpl) -> Sexp {
+    match t {
+        Tpl::Var(v) => panic!("template variable {v} in a ground term"),
+        Tpl::Ground(s) => s.clone(),
+        Tpl::App(h, xs) => call(h, xs.iter().map(ground).collect::<Vec<_>>()),
+    }
+}
+
 pub struct Ctor {
     pub name: String,
     pub symbol: String,
     pub args: Vec<ArgTy>,
-    /// A path constructor's endpoints, closed point terms of the type. Its
-    /// terms take one interval argument after the fields.
-    pub boundary: Option<(Sexp, Sexp)>,
+    /// A path constructor's endpoints, point terms of the type over its
+    /// fields. Its terms take one interval argument after the fields.
+    pub boundary: Option<(End, End)>,
 }
 
 impl Ctor {
@@ -273,26 +326,32 @@ fn var(name: String) -> Tpl {
 }
 
 impl Data {
-    /// The eliminator's value on a closed point term, by its computation
-    /// rules: `c a… ↦ m a… (elim … r)…` for the recursive fields `r`.
-    pub fn unfold(&self, t: &Sexp, methods: &[Tpl]) -> Tpl {
-        let (head, args): (&str, &[Sexp]) = match t {
-            Sexp::Atom(a) => (a, &[]),
-            Sexp::List(xs) => (xs[0].atom().unwrap_or(""), &xs[1..]),
-        };
-        let i = self
-            .ctors
-            .iter()
-            .position(|c| c.symbol == head)
-            .expect("endpoints are point constructors of the type");
-        let mut out = methods[i].clone();
-        for a in args {
-            out = Tpl::App("app".into(), vec![out, Tpl::Ground(a.clone())]);
+    /// The eliminator's value on an endpoint, by its computation rules:
+    /// `c a… ↦ m a… (elim … r)…` for the recursive fields `r`, and a
+    /// recursive field of the path constructor is its induction hypothesis.
+    /// `field` and `ih` name the path constructor's fields and hypotheses.
+    fn unfold(
+        &self,
+        e: &End,
+        methods: &[Tpl],
+        field: &dyn Fn(usize) -> Tpl,
+        ih: &dyn Fn(usize) -> Tpl,
+    ) -> Tpl {
+        match e {
+            End::Field(k) => ih(*k),
+            End::Ctor(i, args) => {
+                let mut out = methods[*i].clone();
+                for a in args {
+                    out = Tpl::App("app".into(), vec![out, a.tpl(self, field)]);
+                }
+                for j in self.ctors[*i].recursive() {
+                    let h = self.unfold(&args[j], methods, field, ih);
+                    out = Tpl::App("app".into(), vec![out, h]);
+                }
+                out
+            }
+            End::Closed(_) => panic!("a closed endpoint is not of the declared type"),
         }
-        for j in self.ctors[i].recursive() {
-            out = Tpl::App("app".into(), vec![out, self.unfold(&args[j], methods)]);
-        }
-        out
     }
     /// Whether the type has a path constructor.
     pub fn is_higher(&self) -> bool {
@@ -387,39 +446,6 @@ impl Data {
                 let here = shifted(&mut p, k);
                 domains.push(self.field_ty(a, &here));
             }
-            if let Some((left, right)) = &c.boundary {
-                // Π fields. PathP (i. P (c fields i)) (elim … left) (elim … right):
-                // the motive under the fields, then under one dimension.
-                let base = p.chain("p", 1, n);
-                let lifted = p.var();
-                p.prems.push(Prem::DShift {
-                    from: base,
-                    to: lifted.clone(),
-                });
-                let mut point: Vec<Tpl> = (0..n).map(|k| Tpl::Ground(v(n - 1 - k))).collect();
-                point.push(Tpl::Ground(call("dim", [atom("z")])));
-                let fam = p.var();
-                p.prems.push(Prem::Subst {
-                    from: lifted,
-                    by: Tpl::app(&c.symbol, point),
-                    to: fam.clone(),
-                });
-                // The endpoints are what the eliminator computes on them,
-                // spelled out with the methods: stating them with the
-                // eliminator itself would make its typing rule circular.
-                let mut ends = Vec::new();
-                for end in [left, right] {
-                    let e = self.unfold(end, &methods);
-                    ends.push(if n == 0 { e } else { var(p.chain_tpl(e, 0, n)) });
-                }
-                let [l, r] = <[Tpl; 2]>::try_from(ends).ok().unwrap();
-                let mut ty = Tpl::App("path".into(), vec![var(fam), l, r]);
-                for dom in domains.into_iter().rev() {
-                    ty = Tpl::App("pi".into(), vec![dom, ty]);
-                }
-                p.has(var(format!("m{i}")), ty);
-                continue;
-            }
             let mut ihs = Vec::new();
             for (q, &j) in rec.iter().enumerate() {
                 let base = p.chain("p", 1, n + q);
@@ -431,16 +457,56 @@ impl Data {
                 });
                 ihs.push(var(to));
             }
-            let base = p.chain("p", 1, n + r);
-            let fields = (0..n).map(|k| Tpl::Ground(v(n - 1 - k + r)));
-            let applied = Tpl::app(&c.symbol, fields.collect());
-            let cod = p.var();
-            p.prems.push(Prem::Subst {
-                from: base,
-                by: applied,
-                to: cod.clone(),
-            });
-            let mut ty = var(cod);
+            // Under the fields and hypotheses: field k, and the hypothesis
+            // of recursive field k.
+            let field = |k: usize| Tpl::Ground(v(n - 1 - k + r));
+            let ih = |k: usize| {
+                let q = rec.iter().position(|&j| j == k).expect("a recursive field");
+                Tpl::Ground(v(r - 1 - q))
+            };
+            let fields: Vec<Tpl> = (0..n).map(field).collect();
+            let mut ty = if let Some((left, right)) = &c.boundary {
+                // PathP (i. P (c fields i)) (elim … left) (elim … right): the
+                // motive under the fields and hypotheses, then under one
+                // dimension.
+                let base = p.chain("p", 1, n + r);
+                let lifted = p.var();
+                p.prems.push(Prem::DShift {
+                    from: base,
+                    to: lifted.clone(),
+                });
+                let mut point = fields;
+                point.push(Tpl::Ground(call("dim", [atom("z")])));
+                let fam = p.var();
+                p.prems.push(Prem::Subst {
+                    from: lifted,
+                    by: Tpl::app(&c.symbol, point),
+                    to: fam.clone(),
+                });
+                // The endpoints are what the eliminator computes on them,
+                // spelled out with the methods: stating them with the
+                // eliminator itself would make its typing rule circular.
+                let mut used = Vec::new();
+                left.ctors(&mut used);
+                right.ctors(&mut used);
+                let mut here = methods.clone();
+                for j in used {
+                    here[j] = var(p.chain(&format!("m{j}"), 0, n + r));
+                }
+                let e0 = self.unfold(left, &here, &field, &ih);
+                let e1 = self.unfold(right, &here, &field, &ih);
+                Tpl::App("path".into(), vec![var(fam), e0, e1])
+            } else {
+                let base = p.chain("p", 1, n + r);
+                let applied = Tpl::app(&c.symbol, fields);
+                let cod = p.var();
+                p.prems.push(Prem::Subst {
+                    from: base,
+                    by: applied,
+                    to: cod.clone(),
+                });
+                var(cod)
+            };
             for ih in ihs.into_iter().rev() {
                 ty = Tpl::App("pi".into(), vec![ih, ty]);
             }
@@ -624,6 +690,7 @@ impl Data {
             };
             let point = at(&a, "?i");
             for (end, value) in [("0", left), ("1", right)] {
+                let value = value.tpl(self, &|k| var(format!("a{k}"))).text();
                 let _ = writeln!(
                     w,
                     "(rule req.{}-{end} ((rhas ?d ?g ?phi {point} {ty_text}) (local ?d ?phi ?i i{end}) (rhas ?d ?g ?phi {value} {ty_text})) (req ?d ?g ?phi {point} {value} {ty_text}))",
@@ -654,6 +721,9 @@ impl Data {
             let mut rhs = format!("?m{i}");
             for x in &a {
                 rhs = format!("(app {rhs} {x})");
+            }
+            for j in c.recursive() {
+                rhs = format!("(app {rhs} {})", head_args(&format!("?a{j}")));
             }
             let rhs = format!("(papp {rhs} ?i)");
             let lhs = head_args(&point);
