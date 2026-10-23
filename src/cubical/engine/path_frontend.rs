@@ -28,13 +28,13 @@ pub fn cons(a: Sexp, g: Sexp) -> Sexp {
     call("cons", [a, g])
 }
 
-fn shape(t: &Sexp) -> Result<(&str, &[Sexp])> {
+pub fn shape(t: &Sexp) -> Result<(&str, &[Sexp])> {
     match t {
         Sexp::Atom(s) => Ok((s, &[])),
         Sexp::List(xs) => Ok((xs.first().ok_or("empty expression")?.atom()?, &xs[1..])),
     }
 }
-fn natural(t: &Sexp) -> Result<usize> {
+pub fn natural(t: &Sexp) -> Result<usize> {
     match shape(t)? {
         ("z", []) => Ok(0),
         ("s", [n]) => Ok(natural(n)? + 1),

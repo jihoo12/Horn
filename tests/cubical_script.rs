@@ -794,3 +794,28 @@ fn wrong_proofs_say_what_is_wrong_by_name() {
         "{former}"
     );
 }
+
+#[test]
+fn implicit_arguments_are_inferred_from_explicit_ones() {
+    cubical::script::run(include_str!("../examples/cubical/script/implicit.hcs")).unwrap();
+    let sym = "(def sym (pi {A} (u 0) (pi {x} A (pi {y} A (pi p (path A x y) (path A y x)))))
+      (lam p (path A x y) (plam i (papp p (neg i)))))";
+    for (bad, says) in [
+        // A bare reference leaves them open.
+        ("(check a sym (path nat 0 0))", "implicit arguments"),
+        // An unannotated lambda has no type to read them from.
+        (
+            "(check b (app sym (lam x nat x)) (path nat 0 0))",
+            "cannot infer",
+        ),
+        // Only a def's type starts with implicit binders.
+        ("(check c (pi {A} (u 0) A) (u 1))", "implicit binder"),
+        // A wrong guess is still checked.
+        ("(check d (app sym (plam i 1)) (path nat 0 0))", "must have"),
+    ] {
+        let err = cubical::script::run(&format!("{sym}\n{bad}"))
+            .err()
+            .unwrap();
+        assert!(err.contains(says), "{bad}: {err}");
+    }
+}
