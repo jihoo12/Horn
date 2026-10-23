@@ -47,8 +47,8 @@ fn evaluation_is_certified_and_reported() {
     oracle::check(&c.theory, &c.goals, c.oracle.as_deref().unwrap()).unwrap();
     // The goal states the computed value; another value is rejected.
     let forged = c.goals.replace(
-        "(app (ann (lam (bif bool bfalse btrue (v z))) (pi bool bool)) btrue) bfalse bool)",
-        "(app (ann (lam (bif bool bfalse btrue (v z))) (pi bool bool)) btrue) btrue bool)",
+        "(app def/not btrue) bfalse bool)",
+        "(app def/not btrue) btrue bool)",
     );
     assert_ne!(forged, c.goals);
     assert!(oracle::check(&c.theory, &forged, c.oracle.as_deref().unwrap()).is_err());
@@ -858,4 +858,31 @@ fn types_that_compute_to_a_former_support_eta_and_beta() {
 #[test]
 fn categories_and_their_opposites_check() {
     cubical::script::run(include_str!("../examples/cubical/script/category.hcs")).unwrap();
+}
+
+/// A definition is a constant whose typing and unfolding rules both need
+/// the definition's own closed typing: a definitional extension. Later forms
+/// mention it by its constant, not a copy of its body.
+#[test]
+fn definitions_are_constants_with_premised_rules() {
+    let script = cubical::script::run(
+        "(def two nat 2)
+         (def double (pi n nat nat) (lam n nat (natrec k nat 0 (lam k nat (lam r nat (suc (suc r)))) n)))
+         (eval four (app double two))",
+    )
+    .unwrap();
+    assert_eq!(script.evaluations[0].value, "4");
+    let theory = &script.certified.theory;
+    let body = "(rhas z nil ft (suc (suc zero)) nat)";
+    for rule in [
+        format!("(rule rhas.def/two ((rctx ?d ?g ?phi) {body}) (rhas ?d ?g ?phi def/two nat))"),
+        format!(
+            "(rule req.delta.def/two ((rctx ?d ?g ?phi) {body}) (req ?d ?g ?phi def/two (suc (suc zero)) nat))"
+        ),
+    ] {
+        assert!(theory.contains(&rule), "{rule}");
+    }
+    assert!(script.certified.goals.contains("(app def/double def/two)"));
+    let used = &script.certified.rules_used;
+    assert!(used.iter().any(|r| r == "req.delta.def/double"));
 }

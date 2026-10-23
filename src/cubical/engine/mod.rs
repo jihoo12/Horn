@@ -11,6 +11,7 @@ pub mod canonical_map_frontend;
 pub mod canonical_ua_frontend;
 pub mod canonicity_frontend;
 pub mod compute_frontend;
+pub mod constant;
 pub mod constant_equiv_frontend;
 pub mod constant_transport_frontend;
 pub mod contr_prop_frontend;

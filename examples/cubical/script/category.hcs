@@ -46,3 +46,10 @@
       (lam w (app Ob C) (lam x (app Ob C) (lam y (app Ob C) (lam z (app Ob C)
         (lam f (app Hom C x w) (lam g (app Hom C y x) (lam h (app Hom C z y)
           (plam i (papp (app (snd (snd (snd (snd (snd (snd C)))))) z y x w h g f) (neg i))))))))))))))))))
+
+; Through the opposite category: its morphisms are the original's reversed,
+; and twice reversed, its objects are the original's.
+(check hom-op (lam C Cat (lam x (app Ob C) (lam y (app Ob C) (plam i (app Hom C y x)))))
+  (pi C Cat (pi x (app Ob C) (pi y (app Ob C) (path (u 0) (app Hom (app op C) x y) (app Hom C y x))))))
+(check ob-op-op (lam C Cat (plam i (app Ob C)))
+  (pi C Cat (path (u 1) (app Ob (app op (app op C))) (app Ob C))))
