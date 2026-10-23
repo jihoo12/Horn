@@ -335,6 +335,32 @@ Transport of a formal composition has no rule yet and stays unevaluated.
 Endpoints are point terms; higher-dimensional constructors (a torus's
 square) are not supported.
 
+## Implicit arguments
+
+A def's type may start with implicit binders, `(pi {A} TYPE ...)`
+([implicit.hcs](../examples/cubical/script/implicit.hcs), about 0.1 s). Their
+names are in scope in the body, which the elaborator puts under one lambda
+for each. An application `(app f a ...)` fills them in. `(@ f)` is `f`
+taking them explicitly:
+
+```text
+(def sym (pi {A} (u 0) (pi {x} A (pi {y} A (pi p (path A x y) (path A y x)))))
+  (lam p (path A x y) (plam i (papp p (neg i)))))
+(check back (app sym (app refl 3)) (path nat 3 3))
+(check given (app (@ sym) nat 1 1 (app refl 1)) (path nat 1 1))
+```
+
+To fill them in, the elaborator infers each explicit argument's type with the
+engine, in the context of the binders around it. It then matches that type
+against the parameter's domain, computing the type to weak-head normal form
+if the shapes differ. This step is not trusted. The application is written
+out with the arguments it found and then checked like any other term, so a
+wrong guess is reported as a type mismatch. An argument whose type cannot
+be inferred, such as an unannotated lambda, contributes nothing. If no
+argument determines an implicit argument, elaboration stops and asks for
+`(@ f)`. Implicit binders appear only at the start of a def's type, and a
+bare reference to such a def is an error.
+
 ## Universe levels
 
 `ua` and `iso-equiv` are the prelude at level 0; `(ua-at L)` and
@@ -407,6 +433,7 @@ It is not meant to become Lean 4. Its distinguishing commitments are:
   the motive `P` over `k : NAME`, with one method per constructor taking its
   arguments and then one induction hypothesis per recursive argument.
 - `(def NAME TYPE TERM)`: a closed, transparent definition. Its typing is a goal.
+  `TYPE` may start with implicit binders `(pi {A} ...)` (above).
 - `(check NAME TERM TYPE)`: a typing goal.
 - `(eval NAME TERM [TYPE])`: weak-head evaluation, continued under `suc` for
   natural numbers so a closed number reaches a numeral. The goal is
@@ -442,5 +469,6 @@ cubical type theory is still a separate obligation; see [CUBICAL.md](CUBICAL.md)
 Evaluation is weak-head, continued under constructors and pairs, and bounded
 by 100,000 steps. Each polymorphic definition has one level variable, and
 declared data types live in `U0`. Data types are bool, nat and declared types with parameters but no indices;
-there are no implicit arguments and no modules. This format and the `.hcu` core files
+implicit arguments are inferred only from explicit arguments, not from the
+expected type, and there are no modules. This format and the `.hcu` core files
 and `.hn` programs are still separate frontends.

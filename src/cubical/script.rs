@@ -29,10 +29,10 @@ use super::engine::data::{self, ArgTy, Ctor, Data, End};
 use super::engine::deep_univalence_frontend;
 use super::engine::face_frontend::Face;
 use super::engine::iso_equiv_frontend::{iso_equiv_term, iso_equiv_type};
-use super::engine::path_frontend::{dim, papp, path, v};
+use super::engine::path_frontend::{Op, dim, natural, papp, path, shape, v};
 use super::engine::restricted_frontend::RestrictedProducer;
 use super::engine::restricted_frontend::{Mismatch, Wrong};
-use super::engine::term::{Result, Sexp, atom, call, parse};
+use super::engine::term::{Result, Sexp, atom, call, numeral, parse};
 use super::engine::ua_frontend::{ua_term, ua_type};
 use super::generate::{Certificate, Regenerated, certify};
 use std::collections::HashMap;
@@ -70,16 +70,32 @@ pub struct Polymorphic {
 #[derive(Clone, Default)]
 struct Names {
     ordinary: Vec<String>,
+    /// The type of each ordinary variable, when the source says it: for
+    /// inferring implicit arguments only, never trusted.
+    types: Vec<Binding>,
     dimensions: Vec<String>,
     /// Level variables and the unary level terms they stand for.
     levels: Vec<(String, Sexp)>,
 }
 
+/// What the source says about an ordinary variable's type.
+#[derive(Clone)]
+enum Binding {
+    /// A core type, under this many dimensions.
+    Core(Sexp, usize),
+    /// A type not yet elaborated (a lambda's domain), with its scope.
+    Source(Sexp, Box<Names>),
+}
+
 impl Names {
-    fn with_ordinary(&self, name: &str) -> Self {
+    fn with_typed(&self, name: &str, ty: Binding) -> Self {
         let mut out = self.clone();
         out.ordinary.push(name.to_owned());
+        out.types.push(ty);
         out
+    }
+    fn with_core(&self, name: &str, ty: Sexp) -> Self {
+        self.with_typed(name, Binding::Core(ty, self.dimensions.len()))
     }
     fn with_dimension(&self, name: &str) -> Self {
         let mut out = self.clone();
@@ -95,6 +111,112 @@ fn shift_face(f: &Face) -> Face {
         Face::End(n, b) => Face::End(n + 1, *b),
         Face::And(a, b) => shift_face(a).and(shift_face(b)),
         Face::Or(a, b) => shift_face(a).or(shift_face(b)),
+    }
+}
+
+/// An implicit binder `{NAME}`: the name.
+fn implicit_binder(s: &Sexp) -> Option<&str> {
+    let a = s.atom().ok()?;
+    a.strip_prefix('{')?.strip_suffix('}')
+}
+
+/// Whether a core term has a subterm with one of these heads.
+fn mentions(t: &Sexp, heads: &[&str]) -> bool {
+    match t {
+        Sexp::Atom(_) => false,
+        Sexp::List(xs) => {
+            xs.first()
+                .is_some_and(|h| heads.iter().any(|x| *h == atom(x)))
+                || xs.iter().any(|x| mentions(x, heads))
+        }
+    }
+}
+
+/// A core term found under `by` binders, ordinary and dimension, moved out
+/// of them: a variable at or above `cut + by` drops by `by`, of each kind;
+/// `None` if it uses one of the binders. `cut` counts the binders entered
+/// inside the term itself.
+fn lower(t: &Sexp, by: (usize, usize), cut: (usize, usize)) -> Option<Sexp> {
+    let index = |n: &Sexp, by: usize, cut: usize| -> Option<Option<usize>> {
+        let n = natural(n).ok()?;
+        Some(match n {
+            n if n < cut => Some(n),
+            n if n < cut + by => None,
+            n => Some(n - by),
+        })
+    };
+    match shape(t) {
+        Ok(("v", [n])) => return index(n, by.0, cut.0)?.map(v),
+        Ok((h @ ("dim" | "at0" | "at1"), [n])) => {
+            return index(n, by.1, cut.1)?.map(|n| call(h, [numeral(n)]));
+        }
+        _ => {}
+    }
+    match t {
+        Sexp::Atom(_) => Some(t.clone()),
+        Sexp::List(xs) => {
+            let head = xs[0].atom().unwrap_or("");
+            let mut out = Vec::new();
+            for (i, x) in xs[1..].iter().enumerate() {
+                let (o, d) = binds(head, i);
+                out.push(lower(x, by, (cut.0 + o, cut.1 + d))?);
+            }
+            Some(call(head, out))
+        }
+    }
+}
+
+/// The ordinary and dimension binders a core term's argument is under.
+fn binds(head: &str, k: usize) -> (usize, usize) {
+    match (head, k) {
+        ("pi" | "sigma", 1) | ("lam", 0) | ("bif" | "natrec", 0) => (1, 0),
+        ("plam" | "path" | "comp", 0) | ("comp", 2) => (0, 1),
+        _ => match data::motive_index(head) {
+            Some(m) if m == k => (1, 0),
+            _ => (0, 0),
+        },
+    }
+}
+
+/// Match the domain of explicit parameter `j` (under the `k` implicit and
+/// `j` earlier explicit binders) against an argument's type, collecting
+/// implicit solutions `(m, term)`. `under` counts the ordinary and dimension
+/// binders entered; a solution found under them is moved out, and dropped if
+/// it uses them. Whether the shapes agreed everywhere.
+fn matches_domain(
+    pat: &Sexp,
+    target: &Sexp,
+    j: usize,
+    k: usize,
+    under: (usize, usize),
+    out: &mut Vec<(usize, Sexp)>,
+) -> bool {
+    let (depth, dims) = under;
+    if let ("v", [n]) = shape(pat).unwrap_or(("", &[])) {
+        let Ok(n) = natural(n) else { return false };
+        if n < depth + j {
+            // Bound inside the domain, or an earlier explicit argument.
+            return true;
+        }
+        let m = n - depth - j;
+        if m < k {
+            if let Some(t) = lower(target, (depth, dims), (0, 0)) {
+                out.push((k - 1 - m, t));
+            }
+            return true;
+        }
+        return pat == target;
+    }
+    match (pat, target) {
+        (Sexp::Atom(a), Sexp::Atom(b)) => a == b,
+        (Sexp::List(xs), Sexp::List(ys)) if xs.len() == ys.len() && xs[0] == ys[0] => {
+            let head = xs[0].atom().unwrap_or("");
+            xs[1..].iter().zip(&ys[1..]).enumerate().all(|(i, (x, y))| {
+                let (o, dd) = binds(head, i);
+                matches_domain(x, y, j, k, (depth + o, dims + dd), out)
+            })
+        }
+        _ => false,
     }
 }
 
@@ -170,6 +292,7 @@ const RESERVED: &[&str] = &[
     "comp",
     "and",
     "or",
+    "@",
 ];
 
 struct Elaborator {
@@ -186,6 +309,10 @@ struct Elaborator {
     /// written, to show a mismatch by name.
     scopes: HashMap<Sexp, Names>,
     defs: HashMap<String, Sexp>,
+    /// Definitions whose type starts with implicit binders: how many.
+    implicit: HashMap<String, usize>,
+    /// Their implicit binders' names, for messages.
+    def_types: HashMap<String, Vec<String>>,
     /// Level-polymorphic definitions: level parameter, type, term (source).
     poly: HashMap<String, (String, Sexp, Sexp)>,
     prelude: HashMap<&'static str, Sexp>,
@@ -281,9 +408,141 @@ impl Elaborator {
             level_marker: None,
             scopes: HashMap::new(),
             defs: HashMap::new(),
+            implicit: HashMap::new(),
+            def_types: HashMap::new(),
             poly: HashMap::new(),
             prelude,
         })
+    }
+
+    /// `name`'s `k` implicit arguments, inferred from the types of the
+    /// explicit ones `args`: each explicit parameter's domain is matched
+    /// against its argument's type. The guess is only elaboration; the
+    /// engine checks the result like any other term.
+    fn insert_implicit(
+        &mut self,
+        name: &str,
+        k: usize,
+        args: &[Sexp],
+        names: &Names,
+    ) -> Result<Sexp> {
+        let f = self.defs[name].clone();
+        let ("ann", [_, ty]) = shape(&f)? else {
+            unreachable!("definitions are annotated")
+        };
+        // Past the implicit binders, to the explicit domains.
+        let mut cod = ty.clone();
+        let mut implicit_names = Vec::new();
+        for _ in 0..k {
+            let ("pi", [_, b]) = shape(&cod)? else {
+                unreachable!("implicit binders are pis")
+            };
+            cod = b.clone();
+        }
+        if let Some(src) = self.def_types.get(name) {
+            implicit_names = src.clone();
+        }
+        let mut solved: Vec<Option<Sexp>> = vec![None; k];
+        let context = self.context(names);
+        let d = names.dimensions.len();
+        for (j, a) in args.iter().enumerate() {
+            let ("pi", [dom, rest]) = shape(&cod)? else {
+                break;
+            };
+            let (dom, rest) = (dom.clone(), rest.clone());
+            cod = rest;
+            if solved.iter().all(Option::is_some) {
+                break;
+            }
+            let Some(g) = &context else { break };
+            let Ok(a) = self.term_unrecorded(a, names) else {
+                continue;
+            };
+            if mentions(&a, &["hole"]) {
+                continue;
+            }
+            let Some(found) = self.quiet_infer(d, g, &a) else {
+                continue;
+            };
+            let mut progress = Vec::new();
+            if !matches_domain(&dom, &found, j, k, (0, 0), &mut progress) {
+                // The argument's type may compute to the domain's shape.
+                progress.clear();
+                if let Some(normal) = self.quiet_whnf(d, g, &found) {
+                    matches_domain(&dom, &normal, j, k, (0, 0), &mut progress);
+                }
+            }
+            for (m, t) in progress {
+                solved[m].get_or_insert(t);
+            }
+        }
+        self.finish_implicit(name, f, solved, &implicit_names)
+    }
+
+    fn finish_implicit(
+        &mut self,
+        name: &str,
+        f: Sexp,
+        solved: Vec<Option<Sexp>>,
+        implicit_names: &[String],
+    ) -> Result<Sexp> {
+        let mut out = f;
+        for (m, t) in solved.into_iter().enumerate() {
+            let Some(t) = t else {
+                let shown = implicit_names.get(m).map_or("?", String::as_str);
+                return Err(format!(
+                    "cannot infer the implicit argument {{{shown}}} of {name} from its explicit arguments; write (app (@ {name}) ...) to give it"
+                ));
+            };
+            out = call("app", [out, t]);
+        }
+        Ok(out)
+    }
+
+    /// The local context as a core context, when the source gives every
+    /// variable's type.
+    fn context(&mut self, names: &Names) -> Option<Sexp> {
+        let d = names.dimensions.len();
+        let mut g = atom("nil");
+        for ty in names.types.clone() {
+            let (t, at) = match ty {
+                Binding::Core(t, at) => (t, at),
+                Binding::Source(src, scope) => {
+                    let t = self.term_unrecorded(&src, &scope).ok()?;
+                    if mentions(&t, &["hole"]) {
+                        return None;
+                    }
+                    (t, scope.dimensions.len())
+                }
+            };
+            let mut t = t;
+            for _ in at..d {
+                t = self.p.f.path.transform(&t, &Op::DShift(0)).ok()?.0;
+            }
+            g = call("cons", [t, g]);
+        }
+        Some(g)
+    }
+
+    /// Inference that leaves no trace in reported mismatches.
+    fn quiet_infer(&mut self, d: usize, g: &Sexp, t: &Sexp) -> Option<Sexp> {
+        let mark = self.p.mismatches.len();
+        let out = self.p.infer(d, g, &Face::True, t).ok().map(|(ty, _)| ty);
+        self.p.mismatches.truncate(mark);
+        out
+    }
+
+    fn quiet_whnf(&mut self, d: usize, g: &Sexp, ty: &Sexp) -> Option<Sexp> {
+        let mark = self.p.mismatches.len();
+        let out = (|| {
+            let universe = self.p.infer(d, g, &Face::True, ty).ok()?.0;
+            self.p
+                .whnf(d, g, &Face::True, ty, &universe, FUEL)
+                .ok()
+                .map(|(t, _)| t)
+        })();
+        self.p.mismatches.truncate(mark);
+        out
     }
 
     /// A level: a numeral, a level variable, or `(s LEVEL)`.
@@ -815,6 +1074,11 @@ impl Elaborator {
                     } else {
                         Err(format!("constructor {a} needs {} arguments", c.args.len()))
                     }
+                } else if let Some(k) = self.implicit.get(&**a) {
+                    Err(format!(
+                        "{a} takes {k} implicit argument{}: apply it, or write (@ {a}) to give them",
+                        if *k == 1 { "" } else { "s" }
+                    ))
                 } else if let Some(t) = self.defs.get(&**a) {
                     Ok(t.clone())
                 } else if let Some(t) = self.prelude.get(&**a) {
@@ -842,17 +1106,37 @@ impl Elaborator {
                 call("ann", [t, ty])
             }
             (former @ ("pi" | "sigma"), [x, a, b]) => {
+                if implicit_binder(x).is_some() {
+                    return Err(format!(
+                        "implicit binder {x}: only a def's type may start with implicit binders"
+                    ));
+                }
                 let a = self.term(a, names)?;
-                let b = self.term(b, &names.with_ordinary(binder(x)?))?;
+                let b = self.term(b, &names.with_core(binder(x)?, a.clone()))?;
                 call(former, [a, b])
             }
-            ("lam", [x, _domain, body]) => {
+            ("lam", [x, domain, body]) => {
                 // The domain is checked where the lambda meets its expected
                 // type; the core lambda carries no annotation.
-                call("lam", [self.term(body, &names.with_ordinary(binder(x)?))?])
+                let ty = Binding::Source(domain.clone(), Box::new(names.clone()));
+                call("lam", [self.term(body, &names.with_typed(binder(x)?, ty))?])
+            }
+            ("@", [f]) => {
+                let f = f.atom()?;
+                self.defs
+                    .get(f)
+                    .cloned()
+                    .ok_or_else(|| format!("@ {f}: not a definition"))?
             }
             ("app", [f, rest @ ..]) if !rest.is_empty() => {
-                let mut out = self.term(f, names)?;
+                let mut out = if let Sexp::Atom(name) = f
+                    && let Some(&k) = self.implicit.get(&**name)
+                    && index(&names.ordinary, name).is_none()
+                {
+                    self.insert_implicit(name, k, rest, names)?
+                } else {
+                    self.term(f, names)?
+                };
                 for a in rest {
                     out = call("app", [out, self.term(a, names)?]);
                 }
@@ -889,7 +1173,13 @@ impl Elaborator {
             (head @ ("bif" | "natrec"), [c, motive, t, f, b]) => call(
                 head,
                 [
-                    self.term(motive, &names.with_ordinary(binder(c)?))?,
+                    self.term(
+                        motive,
+                        &names.with_core(
+                            binder(c)?,
+                            atom(if head == "bif" { "bool" } else { "nat" }),
+                        ),
+                    )?,
                     self.term(t, names)?,
                     self.term(f, names)?,
                     self.term(b, names)?,
@@ -938,7 +1228,8 @@ impl Elaborator {
                 for a in params {
                     items.push(self.term(a, names)?);
                 }
-                items.push(self.term(motive, &names.with_ordinary(binder(k)?))?);
+                let own = data::apply(&d.ty, items.clone());
+                items.push(self.term(motive, &names.with_core(binder(k)?, own))?);
                 for m in methods {
                     items.push(self.term(m, names)?);
                 }
@@ -1335,8 +1626,31 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
                 }
                 ("def", [ty, t]) => {
                     e.fresh(&name)?;
-                    let ty = e.term(ty, &empty)?;
-                    let t = e.term(t, &empty)?;
+                    // Leading implicit binders `(pi {A} TYPE ...)` bind their
+                    // names in the body too, which is under as many lambdas.
+                    let (mut ty_src, mut inner, mut domains) = (ty, empty.clone(), Vec::new());
+                    let mut implicit_names = Vec::new();
+                    while let Sexp::List(ys) = ty_src
+                        && let [h, x, a, b] = &ys[..]
+                        && *h == atom("pi")
+                        && let Some(x) = implicit_binder(x)
+                    {
+                        let a = e.term(a, &inner)?;
+                        inner = inner.with_core(binder(&atom(x))?, a.clone());
+                        implicit_names.push(x.to_owned());
+                        domains.push(a);
+                        ty_src = b;
+                    }
+                    let mut ty = e.term(ty_src, &inner)?;
+                    let mut t = e.term(t, &inner)?;
+                    for a in domains.iter().rev() {
+                        ty = call("pi", [a.clone(), ty]);
+                        t = call("lam", [t]);
+                    }
+                    if !domains.is_empty() {
+                        e.implicit.insert(name.clone(), domains.len());
+                        e.def_types.insert(name.clone(), implicit_names);
+                    }
                     let id =
                         e.p.check(0, &nil, &top, &t, &ty)
                             .map_err(|err| e.explain(&format!("def {name}"), err))?;
