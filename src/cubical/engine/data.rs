@@ -168,9 +168,14 @@ pub fn by_ctor_name(name: &str) -> Option<(Rc<Data>, usize)> {
     let i = data.ctors.iter().position(|c| c.name == name)?;
     Some((data, i))
 }
-/// Any declared head: a type, constructor or eliminator symbol.
+/// Any declared head: a type, constructor or eliminator symbol, or a
+/// definition's constant. Each has generated structural rules named after
+/// it, and a constant is a closed atom.
 pub fn is_declared(symbol: &str) -> bool {
-    by_type(symbol).is_some() || by_elim(symbol).is_some() || by_ctor(symbol).is_some()
+    by_type(symbol).is_some()
+        || by_elim(symbol).is_some()
+        || by_ctor(symbol).is_some()
+        || super::constant::get(symbol).is_some()
 }
 /// Whether a constructor term's type follows from its fields: every
 /// parameter is the type of a field whose own type follows, or a recursive

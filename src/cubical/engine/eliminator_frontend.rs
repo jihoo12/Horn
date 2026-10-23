@@ -16,6 +16,7 @@ impl RestrictedProducer {
             (h, _) if crate::cubical::engine::data::by_elim(h).is_some() => true,
             (h, _) if crate::cubical::engine::data::interval_index(h).is_some() => true,
             ("s1rec" | "loop", _) => true,
+            (h, []) if crate::cubical::engine::constant::get(h).is_some() => true,
             ("app", [f, _]) => shape(f)?.0 == "lam" || Self::eliminator_redex(f)?,
             ("fst" | "snd", [t]) => shape(t)?.0 == "pair" || Self::eliminator_redex(t)?,
             _ => false,

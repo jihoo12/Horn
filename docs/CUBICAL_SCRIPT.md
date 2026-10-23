@@ -363,7 +363,7 @@ bare reference to such a def is an error.
 
 ## Categories
 
-[category.hcs](../examples/cubical/script/category.hcs) (about 0.4 s) defines
+[category.hcs](../examples/cubical/script/category.hcs) (about 0.5 s) defines
 wild precategories as a nested Σ: objects in `U1`, morphisms in `U0`, and
 the unit and associativity laws as paths. It then defines projections, the
 category of types and functions, whose laws hold by `refl`, and the
@@ -381,11 +381,13 @@ Two kinds of engine support make this work:
   checked at, moved under those binders; the candidate is used only if
   shifting it back gives the term exactly, and it is checked again.
 
-Definitions are inlined as annotated terms, so a term grows with every
-definition it mentions. Projections through `op C` work only with small
-annotations: `Hom (op C) x y ≡ Hom C y x` is not found within the search
-budget, because each step carries the whole `Cat` type. The planned fix is
-definitions as constants with δ-rules.
+Definitions are constants, so terms stay the size they are written at, and
+β through a definition's annotated body derives the typing of an
+introduction-form reduct by subject reduction instead of checking the body
+again. `Hom (op C) x y ≡ Hom C y x` and `Ob (op (op C)) ≡ Ob C` check
+(about 0.5 s together). `Hom (op (op C)) x y ≡ Hom C x y` does not yet
+finish: proving it under the laws' binders weakens typings one binder at a
+time (`rhas.shift`), and those steps multiply.
 
 ## Universe levels
 
@@ -459,6 +461,9 @@ It is not meant to become Lean 4. Its distinguishing commitments are:
   the motive `P` over `k : NAME`, with one method per constructor taking its
   arguments and then one induction hypothesis per recursive argument.
 - `(def NAME TYPE TERM)`: a closed, transparent definition. Its typing is a goal.
+  Later forms mention it as the constant `def/NAME`, which the engine
+  unfolds (δ) only where computation needs the body; see [TRUST.md](TRUST.md)
+  for its generated rules.
   `TYPE` may start with implicit binders `(pi {A} ...)` (above).
 - `(check NAME TERM TYPE)`: a typing goal.
 - `(eval NAME TERM [TYPE])`: weak-head evaluation, continued under `suc` for
@@ -485,7 +490,8 @@ axiom, and neither adds a rule.
 The elaborator, the engine's search and the oracle encoder are untrusted.
 Scripts are checked against the core theory (403 rules: the bundled theory
 without its unrestricted judgment layer and one subsumed rule; see
-[TRUST.md](TRUST.md)) plus the rules of their data declarations. Acceptance
+[TRUST.md](TRUST.md)) plus the rules of their data declarations and
+definitions. Acceptance
 means the fixed goals are derivable from those rules,
 including [bool.horn](../theories/cubical/bool.horn). The rules' adequacy for
 cubical type theory is still a separate obligation; see [CUBICAL.md](CUBICAL.md).

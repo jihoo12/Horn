@@ -25,6 +25,7 @@
 //! (`Π X Y f g s t. isEquiv f`) are closed library terms, checked like any
 //! definition; neither is an axiom. Definitions are closed and transparent.
 use super::display::{Printer, Scope};
+use super::engine::constant;
 use super::engine::data::{self, ArgTy, Ctor, Data, End};
 use super::engine::deep_univalence_frontend;
 use super::engine::face_frontend::Face;
@@ -311,6 +312,8 @@ struct Elaborator {
     defs: HashMap<String, Sexp>,
     /// Definitions whose type starts with implicit binders: how many.
     implicit: HashMap<String, usize>,
+    /// The type of each `def`, whose constant stands for it in terms.
+    def_ty: HashMap<String, Sexp>,
     /// Their implicit binders' names, for messages.
     def_types: HashMap<String, Vec<String>>,
     /// Level-polymorphic definitions: level parameter, type, term (source).
@@ -409,6 +412,7 @@ impl Elaborator {
             scopes: HashMap::new(),
             defs: HashMap::new(),
             implicit: HashMap::new(),
+            def_ty: HashMap::new(),
             def_types: HashMap::new(),
             poly: HashMap::new(),
             prelude,
@@ -427,9 +431,7 @@ impl Elaborator {
         names: &Names,
     ) -> Result<Sexp> {
         let f = self.defs[name].clone();
-        let ("ann", [_, ty]) = shape(&f)? else {
-            unreachable!("definitions are annotated")
-        };
+        let ty = self.def_ty[name].clone();
         // Past the implicit binders, to the explicit domains.
         let mut cod = ty.clone();
         let mut implicit_names = Vec::new();
@@ -1548,6 +1550,7 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
     let (certified, evaluations) = certify(super::core_theory(), certificate, move || {
         let forms = parse(&source)?;
         data::clear();
+        constant::clear();
         let mut appended = String::new();
         let mut e = Elaborator::new()?;
         let nil = atom("nil");
@@ -1655,7 +1658,11 @@ pub fn run_with(source: &str, certificate: Certificate) -> Result<Script> {
                         e.p.check(0, &nil, &top, &t, &ty)
                             .map_err(|err| e.explain(&format!("def {name}"), err))?;
                     e.p.f.path.p.result(&name, id);
-                    e.defs.insert(name, call("ann", [t, ty]));
+                    // Later forms mention the definition by its constant.
+                    let (c, rules) = constant::define(&name, t, ty.clone(), id);
+                    appended.push_str(&rules);
+                    e.defs.insert(name.clone(), c);
+                    e.def_ty.insert(name, ty);
                 }
                 ("check", [t, ty]) => {
                     let ty = e.term(ty, &empty)?;

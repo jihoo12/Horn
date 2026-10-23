@@ -883,6 +883,15 @@ impl RestrictedProducer {
                 )
             }
             _ => {
+                if let Sexp::Atom(name) = t
+                    && let Some(c) = super::constant::get(name)
+                {
+                    let ctx = self.ctx(d, g, phi)?;
+                    let rule = format!("rhas.{name}");
+                    let id = self.has(d, g, phi, t, &c.ty, &rule, vec![ctx, c.proof]);
+                    self.remember(d, g, phi, t, &c.ty, id);
+                    return Ok((c.ty, id));
+                }
                 if let Some((ty, rule, refs)) = self.infer_circle(d, g, phi, t)? {
                     let id = self.has(d, g, phi, t, &ty, &rule, refs);
                     self.remember(d, g, phi, t, &ty, id);
@@ -1225,6 +1234,48 @@ impl RestrictedProducer {
     /// Weak-head normal form of `t : ty` with the equation `t ≡ nf : ty`, by
     /// repeated single steps; at most `fuel` steps. The search is untrusted:
     /// the equation is an ordinary derivation for the kernel to check.
+    /// δ: a definition's constant is its body, at its type. A body that
+    /// needs an annotation (an introduction form) stays annotated, so that
+    /// terms built around it can still be inferred.
+    fn unfold_constant(
+        &mut self,
+        d: usize,
+        g: &Sexp,
+        phi: &Face,
+        t: &Sexp,
+        c: &super::constant::Constant,
+        ty: &Sexp,
+    ) -> Result<(Sexp, Sexp, usize)> {
+        let Sexp::Atom(name) = t else {
+            unreachable!("constants are atoms")
+        };
+        let ctx = self.ctx(d, g, phi)?;
+        let rule = format!("req.delta.{name}");
+        let eq = self.eq(d, g, phi, t, &c.term, &c.ty, &rule, vec![ctx, c.proof]);
+        let (out, eq) = if matches!(shape(&c.term)?.0, "lam" | "pair" | "plam" | "system") {
+            let annotated = call("ann", [c.term.clone(), c.ty.clone()]);
+            let ai = self.check(d, g, phi, &annotated, &c.ty)?;
+            let bi = self.check(d, g, phi, &c.term, &c.ty)?;
+            let ann = self.eq(
+                d,
+                g,
+                phi,
+                &annotated,
+                &c.term,
+                &c.ty,
+                "req.ann",
+                vec![ai, bi],
+            );
+            let back = self.eq(d, g, phi, &c.term, &annotated, &c.ty, "req.sym", vec![ann]);
+            let eq = self.eq(d, g, phi, t, &annotated, &c.ty, "req.trans", vec![eq, back]);
+            (annotated, eq)
+        } else {
+            (c.term.clone(), eq)
+        };
+        let eq = self.retype_eq(d, g, phi, t, &out, &c.ty, ty, eq)?;
+        Ok((out, ty.clone(), eq))
+    }
+
     /// A type with this head, or its weak-head normal form if that has it.
     pub(super) fn computed_former(
         &mut self,
@@ -1379,9 +1430,7 @@ impl RestrictedProducer {
                 vec![annotated_i, lam_i],
             );
             let head = self.retype_eq(d, g, phi, f, lam, written, pi_ty, head)?;
-            let lam_i = self.check(d, g, phi, lam, pi_ty)?;
-            let (ua, ai) = self.infer(d, g, phi, a)?;
-            level(&ua)?;
+            let lam_i = self.retype_has(d, g, phi, lam, written, pi_ty, lam_i)?;
             let ri = self.check(d, g, phi, r, a)?;
             let arg = self.eq(d, g, phi, r, r, a, "req.refl", vec![ri]);
             let (bt, si) = self.f.path.transform(b, &Op::Subst(0, r.clone()))?;
@@ -1400,12 +1449,24 @@ impl RestrictedProducer {
                 "req.app-cong",
                 vec![head, arg, si, ti, bare_i],
             );
-            let g2 = cons(a.clone(), g.clone());
-            let bi = self.check(d, &g2, phi, body, b)?;
-            let (ubb, bti) = self.infer(d, &g2, phi, b)?;
-            level(&ubb)?;
+            // An introduction form's typing follows from the redex's by
+            // subject reduction, so a definition's body (a structure, say)
+            // is not checked again at each argument. Any other reduct is
+            // checked, which records the types of the bare introduction
+            // forms inside it (a recursor's methods) for later inference.
             let (out, oi_s) = self.f.path.transform(body, &Op::Subst(0, r.clone()))?;
-            let oi = self.check(d, g, phi, &out, &bt)?;
+            let oi = if matches!(shape(&out)?.0, "lam" | "pair" | "plam") {
+                let oi = self.has(d, g, phi, &out, &bt, "rhas.beta", vec![bare_i, oi_s]);
+                self.remember(d, g, phi, &out, &bt, oi);
+                let checked = call(
+                    "rhas",
+                    [num(d), g.clone(), phi.quote(), out.clone(), bt.clone()],
+                );
+                self.checked.insert(checked, oi);
+                oi
+            } else {
+                self.check(d, g, phi, &out, &bt)?
+            };
             let beta = self.eq(
                 d,
                 g,
@@ -1413,8 +1474,8 @@ impl RestrictedProducer {
                 &bare,
                 &out,
                 &bt,
-                "req.beta-r",
-                vec![ai, bi, bti, ri, oi_s, si, oi],
+                "req.beta-typed",
+                vec![bare_i, oi_s, oi],
             );
             let eq = self.eq(d, g, phi, t, &out, &bt, "req.trans", vec![cong, beta]);
             let (out, eq) = self.keep_type(d, g, phi, t, out, &bt, eq)?;
@@ -1441,7 +1502,7 @@ impl RestrictedProducer {
                 vec![annotated_i, pair_i],
             );
             let inner_eq = self.retype_eq(d, g, phi, inner, pair, written, sigma_ty, inner_eq)?;
-            let pair_i = self.check(d, g, phi, pair, sigma_ty)?;
+            let pair_i = self.retype_has(d, g, phi, pair, written, sigma_ty, pair_i)?;
             let bare = call(head, [pair.clone()]);
             let (ua, ui) = self.infer(d, g, phi, a)?;
             level(&ua)?;
@@ -1540,7 +1601,14 @@ impl RestrictedProducer {
         }
         let (u_to, ui) = self.infer(d, g, phi, to)?;
         let conv = self.equality(d, g, phi, from, to, &u_to)?;
-        Ok(self.has(d, g, phi, t, to, "rhas.conv", vec![id, conv, ui]))
+        let id = self.has(d, g, phi, t, to, "rhas.conv", vec![id, conv, ui]);
+        // Later checks at `to` find it.
+        let key = call(
+            "rhas",
+            [num(d), g.clone(), phi.quote(), t.clone(), to.clone()],
+        );
+        self.checked.entry(key).or_insert(id);
+        Ok(id)
     }
 
     fn reduce_typed(
@@ -1558,9 +1626,21 @@ impl RestrictedProducer {
             return Ok(out);
         }
         if let ("ann", [value, a]) = shape(t)? {
+            // req.ann needs the typing at the annotation itself, which the
+            // caller's `ty` need not be.
+            let ai = if ty == *a {
+                ti
+            } else {
+                self.check(d, g, phi, t, a)?
+            };
             let vi = self.check(d, g, phi, value, a)?;
-            let eq = self.eq(d, g, phi, t, value, a, "req.ann", vec![ti, vi]);
+            let eq = self.eq(d, g, phi, t, value, a, "req.ann", vec![ai, vi]);
             return Ok((value.clone(), a.clone(), eq));
+        }
+        if let Sexp::Atom(name) = t
+            && let Some(c) = super::constant::get(name)
+        {
+            return self.unfold_constant(d, g, phi, t, &c, &ty);
         }
         if let ("app", [f, r]) = shape(t)?
             && let ("lam", [body]) = shape(f)?
@@ -1577,7 +1657,7 @@ impl RestrictedProducer {
                 let eq = self.eq(d, g, phi, t, &out, &ty, "req.beta-typed", vec![ti, si, oi]);
                 return Ok((out, ty, eq));
             }
-            let (ft, _) = self.infer(d, g, phi, f)?;
+            let (ft, _) = self.infer_as(d, g, phi, f, "pi")?;
             let ("pi", [a, b]) = shape(&ft)? else {
                 return Err("beta expects Pi".into());
             };
@@ -1680,7 +1760,7 @@ impl RestrictedProducer {
         if let (head @ ("fst" | "snd"), [pair]) = shape(t)?
             && let ("pair", [a, b]) = shape(pair)?
         {
-            let (pty, pi) = self.infer(d, g, phi, pair)?;
+            let (pty, pi) = self.infer_as(d, g, phi, pair, "sigma")?;
             let ("sigma", [dom, cod]) = shape(&pty)? else {
                 return Err("projection expects Sigma".into());
             };
@@ -1716,7 +1796,7 @@ impl RestrictedProducer {
             return Ok((out.clone(), ty, eq));
         }
         if let ("papp", [p, r]) = shape(t)? {
-            let (pty, pi) = self.infer(d, g, phi, p)?;
+            let (pty, pi) = self.infer_as(d, g, phi, p, "path")?;
             let ("path", [a, b, c]) = shape(&pty)? else {
                 return Err("expected path".into());
             };
