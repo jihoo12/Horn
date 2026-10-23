@@ -922,4 +922,13 @@ fn implicit_arguments_are_read_from_written_lambdas() {
          (check suc-ap (app ap (lam n nat (suc n)) (plam i 2)) (path nat 3 3))",
     )
     .unwrap();
+    // A nested written lambda is typed from its own domain, not from a typing
+    // recorded for the same core term elsewhere (here at nat).
+    let script = cubical::script::run(
+        "(check pre (lam z nat (lam y nat y)) (pi z nat (pi y nat nat)))
+         (def k (pi {A} (u 0) (pi f (pi n nat (pi a A A)) (u 0))) (lam f (pi n nat (pi a A A)) A))
+         (eval r (app k (lam x nat (lam y bool y))))",
+    )
+    .unwrap();
+    assert_eq!(script.evaluations[0].value, "bool");
 }

@@ -355,8 +355,11 @@ engine, in the context of the binders around it. It then matches that type
 against the parameter's domain, computing the type to weak-head normal form
 if the shapes differ. This step is not trusted. The application is written
 out with the arguments it found and then checked like any other term, so a
-wrong guess is reported as a type mismatch. An argument whose type cannot
-be inferred, such as an unannotated lambda, contributes nothing. If no
+wrong guess is reported as a type mismatch. A lambda argument is typed from its
+own text: its written domain, and its body's type (a body that is itself a
+lambda is typed the same way), never from a type recorded for the same
+core term at another use, which could be a different, equally valid one.
+Any other argument whose type cannot be inferred contributes nothing. If no
 argument determines an implicit argument, elaboration stops and asks for
 `(@ f)`. Implicit binders appear only at the start of a def's type, and a
 bare reference to such a def is an error.
@@ -408,10 +411,9 @@ The functor laws of a composite with the identity are not the original laws
 judgmentally: `trans p refl` is not `p` without regularity. So equality of
 whole functors is not by `refl`; it is equal on the object and morphism maps.
 
-An argument written as a lambda, `(app ap (lam k T body) p)`, has no
-inferable core type, since the core lambda carries no domain. The written
-domain `T` and the body's inferred type then give its type for inferring
-implicit arguments.
+An argument written as a lambda, such as `(app ap (lam k T body) p)`,
+supplies implicit arguments through its written domain (see Implicit
+arguments).
 
 ## Universe levels
 

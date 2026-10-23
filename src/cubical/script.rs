@@ -464,13 +464,16 @@ impl Elaborator {
             if mentions(&a, &["hole"]) {
                 continue;
             }
-            let found = match self.quiet_infer(d, g, &a) {
-                Some(found) => found,
-                None => match self.written_lambda_type(src, &a, names, g) {
-                    Some(found) => found,
-                    None => continue,
-                },
+            // A lambda has no type of its own in the core: the engine would
+            // recall one from another use of the same term, which may be
+            // type-correct and still not the one written here. A written
+            // lambda is typed from its own text instead.
+            let found = if shape(&a)?.0 == "lam" {
+                self.written_lambda_type(src, &a, names, g)
+            } else {
+                self.quiet_infer(d, g, &a)
             };
+            let Some(found) = found else { continue };
             let mut progress = Vec::new();
             if !matches_domain(&dom, &found, j, k, (0, 0), &mut progress) {
                 // The argument's type may compute to the domain's shape.
@@ -486,9 +489,10 @@ impl Elaborator {
         self.finish_implicit(name, f, solved, &implicit_names)
     }
 
-    /// A lambda's type from its written domain and its body's inferred
-    /// type, for an argument the engine cannot infer as a whole: the core
-    /// lambda carries no domain.
+    /// A lambda's type from its written domain and its body's type, for an
+    /// argument the engine cannot infer as a whole: the core lambda carries
+    /// no domain. A body that is itself a written lambda is typed the same
+    /// way.
     fn written_lambda_type(
         &mut self,
         src: &Sexp,
@@ -497,7 +501,7 @@ impl Elaborator {
         g: &Sexp,
     ) -> Option<Sexp> {
         let Sexp::List(xs) = src else { return None };
-        let [head, x, domain, _] = &xs[..] else {
+        let [head, x, domain, body_src] = &xs[..] else {
             return None;
         };
         let ("lam", [body]) = shape(core).ok()? else {
@@ -510,9 +514,13 @@ impl Elaborator {
         if mentions(&domain, &["hole"]) {
             return None;
         }
-        binder(x).ok()?;
         let inner = call("cons", [domain.clone(), g.clone()]);
-        let codomain = self.quiet_infer(names.dimensions.len(), &inner, body)?;
+        let codomain = if shape(body).ok()?.0 == "lam" {
+            let names = names.with_core(binder(x).ok()?, domain.clone());
+            self.written_lambda_type(body_src, body, &names, &inner)?
+        } else {
+            self.quiet_infer(names.dimensions.len(), &inner, body)?
+        };
         Some(call("pi", [domain, codomain]))
     }
 
