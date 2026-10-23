@@ -1,52 +1,10 @@
-; Wild precategories, as a nested Σ: objects in U1, morphisms in U0, with
-; identities, composition and the unit and associativity laws as paths.
-; The category of types and functions satisfies them by refl; the opposite
-; category reverses morphisms and takes its laws from the original's.
-(def Cat (u 2)
-  (sigma Ob (u 1)
-  (sigma Hom (pi x Ob (pi y Ob (u 0)))
-  (sigma id (pi x Ob (app Hom x x))
-  (sigma cmp (pi x Ob (pi y Ob (pi z Ob (pi f (app Hom x y) (pi g (app Hom y z) (app Hom x z))))))
-  (sigma idl (pi x Ob (pi y Ob (pi f (app Hom x y) (path (app Hom x y) (app cmp x x y (app id x) f) f))))
-  (sigma idr (pi x Ob (pi y Ob (pi f (app Hom x y) (path (app Hom x y) (app cmp x y y f (app id y)) f))))
-    (pi w Ob (pi x Ob (pi y Ob (pi z Ob
-      (pi f (app Hom w x) (pi g (app Hom x y) (pi h (app Hom y z)
-        (path (app Hom w z) (app cmp w x z f (app cmp x y z g h)) (app cmp w y z (app cmp w x y f g) h))))))))))))))))
-(def Ob (pi C Cat (u 1)) (lam C Cat (fst C)))
-(def Hom (pi C Cat (pi x (app Ob C) (pi y (app Ob C) (u 0)))) (lam C Cat (fst (snd C))))
-(def id (pi C Cat (pi x (app Ob C) (app Hom C x x))) (lam C Cat (fst (snd (snd C)))))
-(def cmp (pi C Cat (pi x (app Ob C) (pi y (app Ob C) (pi z (app Ob C)
-          (pi f (app Hom C x y) (pi g (app Hom C y z) (app Hom C x z)))))))
-  (lam C Cat (fst (snd (snd (snd C))))))
+; Wild precategories (lib/category.hcs): the category of types satisfies
+; its laws by refl, and the opposite category reverses morphisms and is an
+; involution judgmentally.
+(import ../lib/category.hcs)
 (check cmp-id (lam C Cat (lam x (app Ob C) (app cmp C x x x (app id C x) (app id C x))))
   (pi C Cat (pi x (app Ob C) (app Hom C x x))))
-
-; The category of types and functions: every law holds by refl, through
-; function eta at the morphism type, which is a redex until it computes.
-(def Types Cat
-  (pair (u 0)
-  (pair (lam A (u 0) (lam B (u 0) (pi a A B)))
-  (pair (lam A (u 0) (lam a A a))
-  (pair (lam A (u 0) (lam B (u 0) (lam C (u 0) (lam f (pi a A B) (lam g (pi b B C) (lam a A (app g (app f a))))))))
-  (pair (lam A (u 0) (lam B (u 0) (lam f (pi a A B) (plam i f))))
-  (pair (lam A (u 0) (lam B (u 0) (lam f (pi a A B) (plam i f))))
-    (lam W (u 0) (lam X (u 0) (lam Y (u 0) (lam Z (u 0)
-      (lam f (pi a W X) (lam g (pi a X Y) (lam h (pi a Y Z) (plam i (lam a W (app h (app g (app f a)))))))))))))))))))
 (check types-hom (app Hom Types nat bool) (u 0))
-; The opposite category.
-(def op (pi C Cat Cat)
-  (lam C Cat
-    (pair (app Ob C)
-    (pair (lam x (app Ob C) (lam y (app Ob C) (app Hom C y x)))
-    (pair (lam x (app Ob C) (app id C x))
-    (pair (lam x (app Ob C) (lam y (app Ob C) (lam z (app Ob C)
-            (lam f (app Hom C y x) (lam g (app Hom C z y) (app cmp C z y x g f))))))
-    (pair (lam x (app Ob C) (lam y (app Ob C) (lam f (app Hom C y x) (app (fst (snd (snd (snd (snd (snd C)))))) y x f))))
-    (pair (lam x (app Ob C) (lam y (app Ob C) (lam f (app Hom C y x) (app (fst (snd (snd (snd (snd C))))) y x f))))
-      (lam w (app Ob C) (lam x (app Ob C) (lam y (app Ob C) (lam z (app Ob C)
-        (lam f (app Hom C x w) (lam g (app Hom C y x) (lam h (app Hom C z y)
-          (plam i (papp (app (snd (snd (snd (snd (snd (snd C)))))) z y x w h g f) (neg i))))))))))))))))))
-
 ; Through the opposite category: its morphisms are the original's reversed,
 ; and twice reversed, its objects are the original's.
 (check hom-op (lam C Cat (lam x (app Ob C) (lam y (app Ob C) (plam i (app Hom C y x)))))

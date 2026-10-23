@@ -366,7 +366,8 @@ bare reference to such a def is an error.
 
 ## Categories
 
-[category.hcs](../examples/cubical/script/category.hcs) (about 6 s) defines
+[category.hcs](../examples/cubical/script/category.hcs) (about 5 s) imports
+[lib/category.hcs](../examples/cubical/lib/category.hcs), which defines
 wild precategories as a nested Σ: objects in `U1`, morphisms in `U0`, and
 the unit and associativity laws as paths. It then defines projections, the
 category of types and functions, whose laws hold by `refl`, and the
@@ -395,8 +396,9 @@ y x` checks, and the opposite category is an involution judgmentally:
 
 ## Functors and natural transformations
 
-[functor.hcs](../examples/cubical/script/functor.hcs) (about 1.4 s) builds on
-the same definitions. It defines functors as a Σ of an object map, a
+[functor.hcs](../examples/cubical/script/functor.hcs) (about 1.4 s) imports
+[lib/functor.hcs](../examples/cubical/lib/functor.hcs), which builds on the
+category library. It defines functors as a Σ of an object map, a
 morphism map and the two functor laws, together with:
 
 - the identity functor and composite functors, whose laws are paths built
@@ -414,6 +416,33 @@ whole functors is not by `refl`; it is equal on the object and morphism maps.
 An argument written as a lambda, such as `(app ap (lam k T body) p)`,
 supplies implicit arguments through its written domain (see Implicit
 arguments).
+
+## Imports
+
+`(import FILE)` brings in another script's declarations, with `FILE`
+relative to the importing file: all its forms except its tests, and those of
+its own imports. A form that is not valid is an error there as it would be
+in the file itself. Each file is brought in once,
+in the order first imported, and an import cycle is an error. A file's
+`check`, `eval` and `equal` forms are its own tests and are not run when it
+is imported. Imported definitions are elaborated and checked in the
+importing script's certificate like its own, so an import adds no trust.
+They are checked again in every script that imports them; certificates are
+not reused across scripts.
+
+The library in [examples/cubical/lib](../examples/cubical/lib) has three
+files:
+
+- `paths.hcs`: `sym`, `trans` and `ap`, with implicit arguments;
+- `category.hcs`: wild precategories, their projections, the category of
+  types and the opposite category;
+- `functor.hcs`: functors and natural transformations; it imports the
+  other two.
+
+`category.hcs` and `functor.hcs` in `examples/cubical/script` import it.
+`horn cubical eval FILE` and `cubical::script::run_file` resolve imports
+next to the file; `cubical::script::run` resolves them against the working
+directory.
 
 ## Universe levels
 
@@ -486,6 +515,7 @@ It is not meant to become Lean 4. Its distinguishing commitments are:
   apply like functions; `(elim NAME k P (METHODS...) x)` eliminates `x` into
   the motive `P` over `k : NAME`, with one method per constructor taking its
   arguments and then one induction hypothesis per recursive argument.
+- `(import FILE)`: another script's declarations (see Imports).
 - `(def NAME TYPE TERM)`: a closed, transparent definition. Its typing is a goal.
   Later forms mention it as the constant `def/NAME`, which the engine
   unfolds (δ) only where computation needs the body; see [TRUST.md](TRUST.md)
@@ -528,5 +558,5 @@ Evaluation is weak-head, continued under constructors and pairs, and bounded
 by 100,000 steps. Each polymorphic definition has one level variable, and
 declared data types live in `U0`. Data types are bool, nat and declared types with parameters but no indices;
 implicit arguments are inferred only from explicit arguments, not from the
-expected type, and there are no modules. This format and the `.hcu` core files
+expected type, and imports are textual: there are no namespaces. This format and the `.hcu` core files
 and `.hn` programs are still separate frontends.

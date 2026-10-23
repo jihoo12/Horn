@@ -1,0 +1,11 @@
+; Paths: symmetry, transitivity (by composition) and congruence, with
+; implicit arguments.
+(def trans (pi {A} (u 0) (pi {x} A (pi {y} A (pi {z} A
+             (pi p (path A x y) (pi q (path A y z) (path A x z)))))))
+  (lam p (path A x y) (lam q (path A y z)
+    (plam i (hcomp j A (((= i 0) x) ((= i 1) (papp q j))) (papp p i))))))
+(def ap (pi {A} (u 0) (pi {B} (u 0) (pi {x} A (pi {y} A
+          (pi f (pi a A B) (pi p (path A x y) (path B (app f x) (app f y))))))))
+  (lam f (pi a A B) (lam p (path A x y) (plam i (app f (papp p i))))))
+(def sym (pi {A} (u 0) (pi {x} A (pi {y} A (pi p (path A x y) (path A y x)))))
+  (lam p (path A x y) (plam i (papp p (neg i)))))
