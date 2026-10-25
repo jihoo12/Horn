@@ -1,3 +1,4 @@
 # Keep the language bar about the implementation: the Agda files are proofs
 # about it (see README "What you trust"), not part of the program.
 *.agda linguist-documentation
+scripts/adequacy/** linguist-documentation
