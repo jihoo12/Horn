@@ -1,0 +1,27 @@
+== bool comp: 965 judgments; 892 emitted; {} 892 pass, 0 fail 
+== bool transp: 965 judgments; 892 emitted; {} 892 pass, 0 fail 
+== binary comp: 1243 judgments; 1180 emitted; {} 1180 pass, 0 fail 
+== binary transp: 1243 judgments; 1180 emitted; {} 1180 pass, 0 fail 
+== circle comp: 1441 judgments; 1373 emitted; {} 1322 pass, 51 fail 
+== circle transp: 1441 judgments; 1373 emitted; {} 1325 pass, 48 fail 
+== data comp: 1110 judgments; 1042 emitted; {} 1042 pass, 0 fail 
+== data transp: 1110 judgments; 1042 emitted; {} 1042 pass, 0 fail 
+== function comp: 1075 judgments; 1006 emitted; {} 1006 pass, 0 fail 
+== function transp: 1075 judgments; 1006 emitted; {} 1006 pass, 0 fail 
+== hit comp: 1328 judgments; 1261 emitted; {} 1261 pass, 0 fail 
+== hit transp: 1328 judgments; 1261 emitted; {} 1261 pass, 0 fail 
+== hit-params comp: 1265 judgments; 1198 emitted; {} 1172 pass, 26 fail 
+== hit-params transp: 1265 judgments; 1198 emitted; {} 1191 pass, 7 fail 
+== implicit comp: 450 judgments; 409 emitted; {} 409 pass, 0 fail 
+== implicit transp: 450 judgments; 409 emitted; {} 409 pass, 0 fail 
+== levels comp: 875 judgments; 799 emitted; {} 799 pass, 0 fail 
+== levels transp: 875 judgments; 799 emitted; {} 799 pass, 0 fail 
+== list comp: 1022 judgments; 950 emitted; {} 950 pass, 0 fail 
+== list transp: 1022 judgments; 950 emitted; {} 950 pass, 0 fail 
+== nat comp: 360 judgments; 352 emitted; {} 352 pass, 0 fail 
+== nat transp: 360 judgments; 352 emitted; {} 352 pass, 0 fail 
+== poly comp: 1136 judgments; 1071 emitted; {} 1049 pass, 22 fail 
+== poly transp: 1136 judgments; 1071 emitted; {} 1053 pass, 18 fail 
+== functor comp: 908 judgments; 867 emitted; {} 867 pass, 0 fail 
+== functor transp: 908 judgments; 867 emitted; {} 867 pass, 0 fail 
+Terminated                 tools/all.sh 20
