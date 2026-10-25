@@ -15,7 +15,7 @@ mkdir -p "$W/c"
 [ -f "$c/proof.oracle" ] || "$R/target/release/horn" cubical eval "$R/examples/cubical/script/$n.hcs" --emit "$c" > /dev/null
 [ -f "$c/proof.compact" ] || "$R/target/release/horn-oracle" decode "$c/theory.horn" "$c/goals" "$c/proof.oracle" "$c/proof.compact" > /dev/null
 [ -f "$c/steps.pkl" ] || python3 -I "$T/expand.py" "$c/theory.horn" "$c/proof.compact" "$c/steps.pkl" > /dev/null
-[ -f "$c/steps.pkl.syntax" ] || python3 -I "$T/check_syntax.py" "$c/steps.pkl" | head -2
+[ -f "$c/steps.pkl.syntax" ] || python3 -I "$T/check_syntax.py" "$c/steps.pkl" "$c/theory.horn" | head -2
 o=$W/runs/$n-$k${HORN_COMP_FF:+-$HORN_COMP_FF}; rm -rf "$o"; mkdir -p "$o"
 python3 -I "$T/emit.py" "$c/theory.horn" "$c/steps.pkl" "$o" rules "$k"
 cp "$T/HornPrelude.agda" "$o/"
